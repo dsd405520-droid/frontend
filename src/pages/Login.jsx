@@ -23,14 +23,24 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
+      const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'ອີເມວ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ');
+        throw new Error(result.msg || 'ອີເມວ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ');
       }
 
-      localStorage.setItem('token', data.access_token);
-      localStorage.setItem('user', JSON.stringify(data.user));
+      const token = result.data.accessToken;
+      localStorage.setItem('token', token);
+
+      // Backend doesn't return a separate user object — decode the JWT
+      // payload (just base64, not encrypted) to get email/role/permissions
+      // for the sidebar/navbar to use.
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      localStorage.setItem('user', JSON.stringify({
+        email: payload.email,
+        role: payload.role,
+        permissions: payload.permissions,
+      }));
 
       navigate('/');
     } catch (err) {
@@ -42,13 +52,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-emerald-950 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* ຕົກແຕ່ງແສງສະຫວ່າງສີເຫຼືອງ-ທອງດ້ານຫຼັງໃຫ້ມີມິຕິ */}
       <div className="absolute -top-20 -left-20 w-72 h-72 bg-yellow-500/10 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute -bottom-20 -right-20 w-72 h-72 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
 
       <div className="bg-emerald-900/50 border border-yellow-500/30 backdrop-blur-xl rounded-2xl w-full max-w-md p-8 shadow-2xl space-y-6 relative z-10">
-        
-        {/* Header - ໂລໂກ້ ແລະ ຊື່ທະນາຄານ */}
+
         <div className="text-center space-y-3">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-yellow-500 via-amber-400 to-yellow-600 text-emerald-950 font-black flex items-center justify-center text-xl mx-auto shadow-lg shadow-yellow-500/20 border-2 border-yellow-300">
             APB
@@ -59,7 +67,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-xl text-sm flex items-center gap-2">
             <AlertCircle size={18} className="shrink-0" />
@@ -67,7 +74,6 @@ export default function Login() {
           </div>
         )}
 
-        {/* Form */}
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-yellow-200/90 mb-1">ອີເມວ (Email)</label>
