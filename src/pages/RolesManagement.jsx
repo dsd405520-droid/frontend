@@ -11,6 +11,7 @@ const AVAILABLE_MODULES = [
   { key: 'departments', label: 'ຈັດການພະແນກ (Departments)' },
   { key: 'assets', label: 'ຈັດການຊັບສິນ (Assets)' },
   { key: 'tickets', label: 'ລະບົບແຈ້ງປັນຫາ (Tickets)' },
+  { key: 'rooms', label: 'ຈອງຫ້ອງປະຊຸມ (Meeting Rooms)' },
 ];
 
 const AVAILABLE_ACTIONS = [
@@ -18,6 +19,7 @@ const AVAILABLE_ACTIONS = [
   { key: 'read', label: 'ອ່ານ/ເບິ່ງ (Read)' },
   { key: 'update', label: 'ແກ້ໄຂ (Update)' },
   { key: 'delete', label: 'ລົບ (Delete)' },
+  { key: 'approve', label: 'ອະນຸມັດ (Approve)' },
 ];
 
 export default function RolesManagement() {

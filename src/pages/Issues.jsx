@@ -92,7 +92,10 @@ export default function Issues() {
 
   const getAgentDisplayName = (agent) => {
     if (!agent) return 'ຍັງບໍ່ມີຜູ້ຮັບຜິດຊອບ';
-    if (typeof agent === 'object') return agent.name || agent.username || agent.email || 'ບໍ່ລະບຸຊື່';
+    if (typeof agent === 'object') {
+      const fullName = [agent.firstName, agent.lastName].filter(Boolean).join(' ');
+      return fullName || agent.email || 'ບໍ່ລະບຸຊື່';
+    }
     return agent;
   };
 
@@ -141,7 +144,7 @@ export default function Issues() {
 
       if (canAssign) {
         const [meRes, usersRes] = await Promise.all([
-          fetch('http://localhost:3000/api/sessions/me', { headers }),
+          fetch('http://localhost:3000/api/auth/me', { headers }),
           fetch('http://localhost:3000/api/users', { headers }),
         ]);
         if (meRes.ok) {
@@ -233,7 +236,10 @@ export default function Issues() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
-        const updated = await res.json();
+        const body = await res.json();
+        // Every backend response is wrapped as { response, msg, data, time } —
+        // the actual ticket lives at body.data.
+        const updated = body?.data ?? body;
         setSelectedTicket(updated);
         setIssues(prev => prev.map(t => (t._id === ticketId ? updated : t)));
       }
@@ -311,8 +317,11 @@ export default function Issues() {
     submitStatusChange(status);
   };
 
+  const getUserDisplayName = (u) =>
+    [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || '';
+
   const filteredUsersForAssign = users.filter(u =>
-    (u.name || u.email || '').toLowerCase().includes(assignSearchQuery.toLowerCase())
+    getUserDisplayName(u).toLowerCase().includes(assignSearchQuery.toLowerCase())
   );
 
   const filteredIssues = Array.isArray(issues) ? issues.filter(item => 
@@ -698,7 +707,9 @@ export default function Issues() {
                       {assignMode === 'self' ? (
                         <div className="text-sm bg-gray-50 rounded-lg p-3">
                           <p className="text-gray-500 text-xs mb-1">ຢືນຢັນຕົວຕົນຜູ້ຮັບ:</p>
-                          <p className="font-semibold text-gray-800">{currentUser?.name || currentUser?.email || 'ກຳລັງໂຫຼດ...'}</p>
+                          <p className="font-semibold text-gray-800">
+                            {[currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ') || currentUser?.email || 'ກຳລັງໂຫຼດ...'}
+                          </p>
                           <p className="text-xs text-gray-500">{currentUser?.email}</p>
                           {currentUser?.departmentId?.name && (
                             <p className="text-xs text-gray-500">ພະແນກ: {currentUser.departmentId.name}</p>
@@ -722,7 +733,7 @@ export default function Issues() {
                                   (selectedAssignee?._id || selectedAssignee?.id) === (u._id || u.id) ? 'bg-amber-50 text-amber-800 font-medium' : 'text-gray-700'
                                 }`}
                               >
-                                {u.name || u.email}
+                                {getUserDisplayName(u)}
                               </div>
                             ))}
                             {filteredUsersForAssign.length === 0 && (

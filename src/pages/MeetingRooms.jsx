@@ -186,6 +186,7 @@ export default function MeetingRooms() {
   };
 
   // ລາຍການຄຳຮ້ອງຂໍຈອງທີ່ລໍຖ້າອະນຸມັດ — ສະເພາະຄົນທີ່ມີສິດ 'rooms:approve' ຈຶ່ງຈະ 200; ຄົນອື່ນຈະ 403
+  // ໝາຍເຫດ: backend ຍັງບໍ່ມີ endpoint ນີ້ແທ້ (404) — UI ນີ້ຄືນມາລໍຖ້າການຕັດສິນໃຈເລື່ອງລະບົບອະນຸມັດ
   const fetchPendingApprovals = () => {
     setLoadingPending(true);
     setPendingApprovalsError('');
@@ -234,7 +235,6 @@ export default function MeetingRooms() {
       .finally(() => setReviewingId(null));
   };
 
-  // ສະຫຼັບ ຫ້ອງ ລະຫວ່າງ AVAILABLE ↔ MAINTENANCE — ໃຊ້ endpoint PATCH /rooms/:id/status
   const toggleRoomStatus = (room) => {
     const roomId = room.roomId || room._id;
     const nextStatus = room.status === 'MAINTENANCE' ? 'AVAILABLE' : 'MAINTENANCE';
@@ -379,10 +379,10 @@ export default function MeetingRooms() {
       .catch(err => alert(err.message));
   };
 
-  const handleCancelSeries = (recurringGroupId) => {
+  const handleCancelSeries = (seriesId) => {
     if (!window.confirm('ການຈອງນີ້ແມ່ນສ່ວນໜຶ່ງຂອງການຈອງແບບຊ້ຳ — ຕ້ອງການຍົກເລີກທັງໝົດທຸກຄັ້ງໃນຊຸດນີ້ແທ້ບໍ?')) return;
 
-    fetch(`http://localhost:3000/api/room-bookings/series/${recurringGroupId}`, {
+    fetch(`http://localhost:3000/api/room-bookings/series/${seriesId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -780,9 +780,9 @@ export default function MeetingRooms() {
                             <Trash2 size={14} />
                             <span>ຍົກເລີກ</span>
                           </button>
-                          {b.recurringGroupId && (
+                          {b.seriesId && (
                             <button 
-                              onClick={() => handleCancelSeries(b.recurringGroupId)}
+                              onClick={() => handleCancelSeries(b.seriesId)}
                               className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-medium transition"
                               title="ຍົກເລີກທຸກຄັ້ງໃນຊຸດການຈອງແບບຊ້ຳນີ້"
                             >
@@ -825,14 +825,14 @@ export default function MeetingRooms() {
                 <div className="divide-y divide-gray-100">
                   {pendingApprovals.map((b) => {
                     const roomName = b.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ';
-                    const requesterName = b.bookedBy?.name || b.bookedBy?.email || 'ບໍ່ລະບຸຜູ້ຈອງ';
+                    const requesterName = [b.bookedBy?.firstName, b.bookedBy?.lastName].filter(Boolean).join(' ') || b.bookedBy?.email || 'ບໍ່ລະບຸຜູ້ຈອງ';
                     return (
                       <div key={b._id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-gray-800">ຫ້ອງ: {roomName}</span>
                             {b.title && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">{b.title}</span>}
-                            {b.recurringGroupId && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium">ຈອງແບບຊ້ຳ</span>}
+                            {b.seriesId && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium">ຈອງແບບຊ້ຳ</span>}
                           </div>
                           <p className="text-xs text-gray-500">ຜູ້ຂໍຈອງ: {requesterName}</p>
                           <p className="text-xs text-gray-500 flex items-center gap-1.5">
