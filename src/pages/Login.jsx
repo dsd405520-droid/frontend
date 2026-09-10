@@ -9,6 +9,14 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  // MFA challenge step (shown after login returns mfaRequired)
+  const [mfaStep, setMfaStep] = useState(false);
+  const [mfaToken, setMfaToken] = useState('');
+  const [mfaMethod, setMfaMethod] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaSubmitting, setMfaSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
@@ -29,26 +37,85 @@ export default function Login() {
         throw new Error(result.msg || 'ອີເມວ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ');
       }
 
-      const token = result.data.accessToken;
-      localStorage.setItem('token', token);
+      if (result.data.mfaSetupRequired) {
+        // First-time forced MFA enrollment (TOTP QR / backup codes) is a
+        // separate flow this UI doesn't implement yet.
+        throw new Error('ບັນຊີນີ້ຕ້ອງການຕັ້ງຄ່າ MFA ກ່ອນ — ຟີເຈີນີ້ຍັງບໍ່ຮອງຮັບຢູ່ໜ້ານີ້');
+      }
 
-      // Backend doesn't return a separate user object — decode the JWT
-      // payload (just base64, not encrypted) to get email/role/permissions
-      // for the sidebar/navbar to use.
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      localStorage.setItem('user', JSON.stringify({
-        email: payload.email,
-        role: payload.role,
-        permissions: payload.permissions,
-      }));
+      if (result.data.mfaRequired) {
+        setMfaToken(result.data.mfaToken);
+        setMfaMethod(result.data.mfaMethod);
+        setMfaStep(true);
+        setLoading(false);
+        return;
+      }
 
-      // ໄປທີ່ໜ້າຫຼັກ ຫຼື Reload ຫນ້າເພື່ອໃຫ້ Router ເຮັດວຽກສົມບູນ
-      navigate('/');
-      window.location.reload();
+      completeLoginWithToken(result.data.accessToken);
     } catch (err) {
       setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Shared by normal login and MFA-verified login — both end up with an accessToken.
+  const completeLoginWithToken = (token) => {
+    localStorage.setItem('token', token);
+
+    // Backend doesn't return a separate user object — decode the JWT
+    // payload (just base64, not encrypted) to get email/role/permissions
+    // for the sidebar/navbar to use.
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    localStorage.setItem('user', JSON.stringify({
+      email: payload.email,
+      role: payload.role,
+      permissions: payload.permissions,
+    }));
+
+    navigate('/');
+    window.location.reload();
+  };
+
+  const handleMfaVerify = async (e) => {
+    e.preventDefault();
+    setError('');
+    setMfaSubmitting(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/mfa/verify-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaToken, code: mfaCode }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.msg || 'ລະຫັດບໍ່ຖືກຕ້ອງ');
+      }
+      completeLoginWithToken(result.data.accessToken);
+    } catch (err) {
+      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setMfaSubmitting(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    setResending(true);
+    setError('');
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/mfa/login/resend-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mfaToken }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.msg || 'ສົ່ງລະຫັດຄືນບໍ່ສຳເລັດ');
+      }
+    } catch (err) {
+      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -76,45 +143,82 @@ export default function Login() {
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-yellow-200/90 mb-1">ອີເມວ (Email)</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-3 text-yellow-400" size={18} />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="jano@example.com"
-                className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 pl-10 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
-              />
+        {!mfaStep ? (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-yellow-200/90 mb-1">ອີເມວ (Email)</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 text-yellow-400" size={18} />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="jano@example.com"
+                  className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 pl-10 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                />
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-xs font-medium text-yellow-200/90 mb-1">ລະຫັດຜ່ານ (Password)</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-3 text-yellow-400" size={18} />
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 pl-10 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
-              />
+            <div>
+              <label className="block text-xs font-medium text-yellow-200/90 mb-1">ລະຫັດຜ່ານ (Password)</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 text-yellow-400" size={18} />
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 pl-10 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                />
+              </div>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50 mt-2"
-          >
-            {loading ? <Loader2 className="animate-spin" size={18} /> : <span>ເຂົ້າສູ່ລະບົບ</span>}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50 mt-2"
+            >
+              {loading ? <Loader2 className="animate-spin" size={18} /> : <span>ເຂົ້າສູ່ລະບົບ</span>}
+            </button>
+          </form>
+
+        ) : (
+          <form onSubmit={handleMfaVerify} className="space-y-4">
+            <p className="text-sm text-yellow-200/90">
+              {mfaMethod === 'email'
+                ? 'ພວກເຮົາໄດ້ສົ່ງລະຫັດໄປທາງອີເມວຂອງທ່ານແລ້ວ'
+                : 'ປ້ອນລະຫັດຈາກແອັບ Authenticator ຂອງທ່ານ'}
+            </p>
+            <input
+              type="text"
+              required
+              maxLength={6}
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ''))}
+              placeholder="123456"
+              className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+            />
+            <button
+              type="submit"
+              disabled={mfaSubmitting || mfaCode.length !== 6}
+              className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50"
+            >
+              {mfaSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>ຢືນຢັນ</span>}
+            </button>
+            {mfaMethod === 'email' && (
+              <button
+                type="button"
+                onClick={handleResendCode}
+                disabled={resending}
+                className="w-full text-yellow-300 text-xs underline disabled:opacity-50"
+              >
+                {resending ? 'ກຳລັງສົ່ງ...' : 'ສົ່ງລະຫັດອີກຄັ້ງ'}
+              </button>
+            )}
+          </form>
+        )}
 
       </div>
     </div>
