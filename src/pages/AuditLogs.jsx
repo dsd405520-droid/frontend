@@ -20,7 +20,7 @@ export default function AuditLogs() {
                 <th className="p-4 font-medium">ລະຫັດ (_id)</th>
                 <th className="p-4 font-medium">ຜູ້ກະທຳ</th>
                 <th className="p-4 font-medium">ການກະທຳ (Action)</th>
-                <th className="p-4 font-medium">รายละเอียด</th>
+                <th className="p-4 font-medium">ລາຍລະອຽດ</th>
                 <th className="p-4 font-medium">ເວລາ</th>
               </tr>
             </thead>

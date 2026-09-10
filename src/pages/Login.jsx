@@ -42,7 +42,9 @@ export default function Login() {
         permissions: payload.permissions,
       }));
 
+      // ໄປທີ່ໜ້າຫຼັກ ຫຼື Reload ຫນ້າເພື່ອໃຫ້ Router ເຮັດວຽກສົມບູນ
       navigate('/');
+      window.location.reload();
     } catch (err) {
       setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
     } finally {
