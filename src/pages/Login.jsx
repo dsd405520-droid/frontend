@@ -29,10 +29,21 @@ export default function Login() {
         throw new Error(data.message || 'ອີເມວ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ');
       }
 
-      localStorage.setItem('token', data.access_token);
-      localStorage.setItem('user', JSON.stringify(data.user));
+      // ປ້ອງກັນກໍລະນີ Response ບໍ່ເປັນໄປຕາມໂຄງສ້າງທີ່ຄາດຫວັງ
+      const accessToken = data.data?.accessToken || data.accessToken;
+      if (!accessToken) {
+        throw new Error('ບໍ່ພົບ Access Token ໃນການຕອບກັບຂອງ Server');
+      }
 
+      localStorage.setItem('token', accessToken);
+      
+      if (data.data?.user || data.user) {
+        localStorage.setItem('user', JSON.stringify(data.data?.user || data.user));
+      }
+
+      // ໄປທີ່ໜ້າຫຼັກ ຫຼື Reload ຫນ້າເພື່ອໃຫ້ Router ເຮັດວຽກສົມບູນ
       navigate('/');
+      window.location.reload(); 
     } catch (err) {
       setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
     } finally {
