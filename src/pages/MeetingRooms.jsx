@@ -53,6 +53,13 @@ export default function MeetingRooms() {
   const [pendingApprovalsError, setPendingApprovalsError] = useState('');
   const [reviewingId, setReviewingId] = useState(null);
 
+  // States ສຳລັບ popup ໃສ່ເຫດຜົນຕອນປະຕິເສດຄຳຮ້ອງຂໍຈອງ
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [bookingToReject, setBookingToReject] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectSubmitting, setRejectSubmitting] = useState(false);
+  const [rejectError, setRejectError] = useState('');
+
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
 
   useEffect(() => {
@@ -186,7 +193,6 @@ export default function MeetingRooms() {
   };
 
   // ລາຍການຄຳຮ້ອງຂໍຈອງທີ່ລໍຖ້າອະນຸມັດ — ສະເພາະຄົນທີ່ມີສິດ 'rooms:approve' ຈຶ່ງຈະ 200; ຄົນອື່ນຈະ 403
-  // ໝາຍເຫດ: backend ຍັງບໍ່ມີ endpoint ນີ້ແທ້ (404) — UI ນີ້ຄືນມາລໍຖ້າການຕັດສິນໃຈເລື່ອງລະບົບອະນຸມັດ
   const fetchPendingApprovals = () => {
     setLoadingPending(true);
     setPendingApprovalsError('');
@@ -214,11 +220,15 @@ export default function MeetingRooms() {
       });
   };
 
-  const reviewBooking = (id, action) => {
+  const reviewBooking = (id, action, body) => {
     setReviewingId(id);
-    fetch(`http://localhost:3000/api/room-bookings/${id}/${action}`, {
+    return fetch(`http://localhost:3000/api/room-bookings/${id}/${action}`, {
       method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
     })
       .then(async res => {
         if (!res.ok) {
@@ -230,9 +240,41 @@ export default function MeetingRooms() {
         if (selectedCalendarRoom) {
           fetchCalendarBookings(selectedCalendarRoom.roomId || selectedCalendarRoom._id);
         }
+        return true;
       })
-      .catch(err => alert(err.message))
       .finally(() => setReviewingId(null));
+  };
+
+  const openRejectModal = (booking) => {
+    setBookingToReject(booking);
+    setRejectReason('');
+    setRejectError('');
+    setRejectModalOpen(true);
+  };
+
+  const closeRejectModal = () => {
+    setRejectModalOpen(false);
+    setBookingToReject(null);
+    setRejectReason('');
+    setRejectError('');
+  };
+
+  const submitReject = async () => {
+    if (!bookingToReject) return;
+    if (rejectReason.trim().length < 3) {
+      setRejectError('ກະລຸນາລະບຸເຫດຜົນການປະຕິເສດຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ');
+      return;
+    }
+    setRejectSubmitting(true);
+    setRejectError('');
+    try {
+      await reviewBooking(bookingToReject._id, 'reject', { reason: rejectReason.trim() });
+      closeRejectModal();
+    } catch (err) {
+      setRejectError(err.message);
+    } finally {
+      setRejectSubmitting(false);
+    }
   };
 
   const toggleRoomStatus = (room) => {
@@ -757,6 +799,11 @@ export default function MeetingRooms() {
                           <Clock size={14} />
                           <span>ເລີ່ມ: {new Date(b.startAt).toLocaleString()} — ສິ້ນສຸດ: {new Date(b.endAt).toLocaleString()}</span>
                         </p>
+                        {b.status === 'REJECTED' && b.rejectionReason && (
+                          <p className="text-xs text-red-600 bg-red-50 rounded-lg px-2 py-1 mt-1">
+                            ເຫດຜົນທີ່ປະຕິເສດ: {b.rejectionReason}
+                          </p>
+                        )}
                       </div>
 
                       {(b.status === 'PENDING' || b.status === 'CONFIRMED' || !b.status) && (
@@ -842,14 +889,14 @@ export default function MeetingRooms() {
                         </div>
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => reviewBooking(b._id, 'approve')}
+                            onClick={() => reviewBooking(b._id, 'approve').catch(err => alert(err.message))}
                             disabled={reviewingId === b._id}
                             className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium transition disabled:opacity-50"
                           >
                             {reviewingId === b._id ? 'ກຳລັງດຳເນີນການ...' : '✓ ອະນຸມັດ'}
                           </button>
                           <button
-                            onClick={() => reviewBooking(b._id, 'reject')}
+                            onClick={() => openRejectModal(b)}
                             disabled={reviewingId === b._id}
                             className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-medium transition disabled:opacity-50"
                           >
@@ -1134,6 +1181,48 @@ export default function MeetingRooms() {
                   <button type="submit" className="px-4 py-2 bg-amber-500 text-white rounded-xl text-sm">ບັນທຶກການເລື່ອນເວລາ</button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {rejectModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+              <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                <h2 className="text-lg font-bold text-gray-800">ປະຕິເສດຄຳຮ້ອງຂໍຈອງ</h2>
+                <button onClick={closeRejectModal} className="text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+
+              {bookingToReject && (
+                <p className="text-sm text-gray-500">
+                  ຫ້ອງ: <span className="font-medium text-gray-700">{bookingToReject.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ'}</span>
+                </p>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ເຫດຜົນການປະຕິເສດ <span className="text-red-500">*</span></label>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  rows={3}
+                  placeholder="ຕົວຢ່າງ: ຫ້ອງຖືກຈອງໄວ້ແລ້ວສຳລັບກອງປະຊຸມອື່ນ..."
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                  autoFocus
+                />
+                {rejectError && <p className="text-xs text-red-500 mt-1">{rejectError}</p>}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={closeRejectModal} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm">ຍົກເລີກ</button>
+                <button
+                  type="button"
+                  onClick={submitReject}
+                  disabled={rejectSubmitting || rejectReason.trim().length < 3}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm disabled:opacity-50"
+                >
+                  {rejectSubmitting ? 'ກຳລັງປະຕິເສດ...' : 'ຢືນຢັນປະຕິເສດ'}
+                </button>
+              </div>
             </div>
           </div>
         )}
