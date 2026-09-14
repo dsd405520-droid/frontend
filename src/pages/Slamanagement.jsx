@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, Plus, Loader2, X, ChevronDown, Pencil, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Clock, Plus, Loader2, X, ChevronDown, Pencil, Trash2, Search, Filter } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 
 const PRIORITY_KEYWORDS = {
@@ -18,10 +19,53 @@ const emptyForm = {
   isActive: true,
 };
 
+const PRIORITY_LEVELS = [
+  { key: 'low', label: 'ຕ່ຳ' },
+  { key: 'medium', label: 'ປານກາງ' },
+  { key: 'high', label: 'ສູງ' },
+  { key: 'urgent', label: 'ດ່ວນ' },
+];
+const STATUS_OPTIONS = [
+  { key: 'active', label: 'ເປີດໃຊ້ງານ' },
+  { key: 'inactive', label: 'ປິດໃຊ້ງານ' },
+];
+const RESPONSE_TIME_SLIDER_MAX = 240;    // ນາທີ — ປັບໄດ້ຕາມຄວາມເໝາະສົມ
+const RESOLUTION_TIME_SLIDER_MAX = 1440; // ນາທີ (24 ຊົ່ວໂມງ)
+
 export default function Slamanagement() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const ticketTypeFilterId = searchParams.get('ticketTypeId') || '';
+
   const [slas, setSlas] = useState([]);
   const [ticketTypes, setTicketTypes] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [priorityFilter, setPriorityFilter] = useState([]);
+  const [statusFilterSla, setStatusFilterSla] = useState([]);
+  const [responseTimeMax, setResponseTimeMax] = useState(RESPONSE_TIME_SLIDER_MAX);
+  const [resolutionTimeMax, setResolutionTimeMax] = useState(RESOLUTION_TIME_SLIDER_MAX);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef(null);
+
+  const togglePriorityFilter = (key) => {
+    setPriorityFilter(prev => prev.includes(key) ? prev.filter(p => p !== key) : [...prev, key]);
+  };
+  const toggleStatusFilterSla = (key) => {
+    setStatusFilterSla(prev => prev.includes(key) ? prev.filter(s => s !== key) : [...prev, key]);
+  };
+  const clearAllFilters = () => {
+    setPriorityFilter([]);
+    setStatusFilterSla([]);
+    setResponseTimeMax(RESPONSE_TIME_SLIDER_MAX);
+    setResolutionTimeMax(RESOLUTION_TIME_SLIDER_MAX);
+  };
+  const activeFilterCount =
+    priorityFilter.length +
+    statusFilterSla.length +
+    (responseTimeMax < RESPONSE_TIME_SLIDER_MAX ? 1 : 0) +
+    (resolutionTimeMax < RESOLUTION_TIME_SLIDER_MAX ? 1 : 0);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState(null); // null = ກຳລັງສ້າງໃໝ່, ບໍ່ null = ກຳລັງແກ້ໄຂ
@@ -78,6 +122,16 @@ export default function Slamanagement() {
   useEffect(() => {
     fetchSlas();
     fetchTicketTypes();
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setIsFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const filteredTicketTypes = ticketTypes.filter(type =>
@@ -202,6 +256,28 @@ export default function Slamanagement() {
     return match?.name || id;
   };
 
+  const filteredSlas = slas.filter(item => {
+    const matchesTicketType = !ticketTypeFilterId || item.ticketTypeId === ticketTypeFilterId;
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !q ||
+      item.name?.toLowerCase().includes(q) ||
+      item.priority?.toLowerCase().includes(q) ||
+      ticketTypeNameById(item.ticketTypeId)?.toLowerCase().includes(q);
+
+    const matchesPriority = priorityFilter.length === 0 || priorityFilter.includes(item.priority);
+
+    const matchesStatus = statusFilterSla.length === 0 ||
+      (statusFilterSla.includes('active') && item.isActive) ||
+      (statusFilterSla.includes('inactive') && !item.isActive);
+
+    const matchesResponseTime = (item.responseTimeMinutes ?? 0) <= responseTimeMax;
+    const matchesResolutionTime = (item.resolutionTimeMinutes ?? 0) <= resolutionTimeMax;
+
+    return matchesTicketType && matchesSearch && matchesPriority && matchesStatus && matchesResponseTime && matchesResolutionTime;
+  });
+
+  const clearTicketTypeFilter = () => setSearchParams({});
+
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -210,13 +286,117 @@ export default function Slamanagement() {
             <h1 className="text-2xl font-bold text-gray-800">ການຈັດການ SLA</h1>
             <p className="text-sm text-gray-500 mt-1">ກຳນົດນະໂຍບາຍເວລາຕອບກັບ ແລະ ແກ້ໄຂບັນຫາ (NestJS + MongoDB)</p>
           </div>
-          <button 
+          <button
             onClick={openCreateModal}
             className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
           >
             <Plus size={18} />
             <span>ເພີ່ມນະໂຍບາຍ SLA</span>
           </button>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="relative w-full sm:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="ຄົ້ນຫາຊື່ນະໂຍບາຍ, ປະເພດບັນຫາ, ຄວາມສຳຄັນ..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+            />
+          </div>
+
+          <div className="relative" ref={filterRef}>
+            <button
+              onClick={() => setIsFilterOpen(!isFilterOpen)}
+              className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition"
+            >
+              <Filter size={16} />
+              <span>FILTER</span>
+              {activeFilterCount > 0 && (
+                <span key={activeFilterCount}>{` (${activeFilterCount})`}</span>
+              )}
+            </button>
+
+            {isFilterOpen && (
+              <div className="absolute left-0 mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase mb-1 px-1">ລະດັບຄວາມສຳຄັນ</p>
+                  {PRIORITY_LEVELS.map(level => (
+                    <label key={level.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                      <input type="checkbox" checked={priorityFilter.includes(level.key)} onChange={() => togglePriorityFilter(level.key)} className="rounded" />
+                      {level.label}
+                    </label>
+                  ))}
+                </div>
+
+                <div className="border-t border-gray-100 pt-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase mb-1 px-1">ສະຖານະ</p>
+                  {STATUS_OPTIONS.map(opt => (
+                    <label key={opt.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                      <input type="checkbox" checked={statusFilterSla.includes(opt.key)} onChange={() => toggleStatusFilterSla(opt.key)} className="rounded" />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+
+                <div className="border-t border-gray-100 pt-2">
+                  <div className="flex items-center justify-between px-1 mb-1">
+                    <p className="text-xs font-semibold text-gray-400 uppercase">ເວລາຕອບກັບ ≤</p>
+                    <span className="text-xs font-medium text-gray-600">
+                      {responseTimeMax >= RESPONSE_TIME_SLIDER_MAX ? 'ບໍ່ຈຳກັດ' : `${responseTimeMax} ນາທີ`}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={RESPONSE_TIME_SLIDER_MAX}
+                    step="5"
+                    value={responseTimeMax}
+                    onChange={(e) => setResponseTimeMax(Number(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                </div>
+
+                <div className="border-t border-gray-100 pt-2">
+                  <div className="flex items-center justify-between px-1 mb-1">
+                    <p className="text-xs font-semibold text-gray-400 uppercase">ເວລາແກ້ໄຂ ≤</p>
+                    <span className="text-xs font-medium text-gray-600">
+                      {resolutionTimeMax >= RESOLUTION_TIME_SLIDER_MAX ? 'ບໍ່ຈຳກັດ' : `${resolutionTimeMax} ນາທີ`}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max={RESOLUTION_TIME_SLIDER_MAX}
+                    step="30"
+                    value={resolutionTimeMax}
+                    onChange={(e) => setResolutionTimeMax(Number(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                </div>
+
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={clearAllFilters}
+                    className="w-full text-center text-xs text-amber-600 hover:text-amber-700 pt-1.5 border-t border-gray-100"
+                  >
+                    ລ້າງການກອງ
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {ticketTypeFilterId && (
+            <span className="flex items-center gap-2 bg-amber-50 text-amber-700 text-xs font-medium px-3 py-2 rounded-lg">
+              ກຳລັງກອງ: {ticketTypeNameById(ticketTypeFilterId)}
+              <button onClick={clearTicketTypeFilter} className="hover:text-amber-900">
+                <X size={14} />
+              </button>
+            </span>
+          )}
         </div>
 
         {/* Table Section */}
@@ -241,8 +421,8 @@ export default function Slamanagement() {
                     ກຳລັງໂຫຼດຂໍ້ມູນ...
                   </td>
                 </tr>
-              ) : slas.length > 0 ? (
-                slas.map((item) => (
+              ) : filteredSlas.length > 0 ? (
+                filteredSlas.map((item) => (
                   <tr key={item._id} className="hover:bg-gray-50">
                     <td className="p-4">
                       <div className="font-semibold text-gray-900">{item.name}</div>
@@ -250,11 +430,10 @@ export default function Slamanagement() {
                     </td>
                     <td className="p-4 text-xs text-gray-600">{ticketTypeNameById(item.ticketTypeId)}</td>
                     <td className="p-4 uppercase">
-                      <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                        item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                      <span className={`px-2 py-1 rounded-md text-xs font-medium ${item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
                         item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
-                        item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                      }`}>
+                          item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+                        }`}>
                         {item.priority}
                       </span>
                     </td>
@@ -288,7 +467,7 @@ export default function Slamanagement() {
               ) : (
                 <tr>
                   <td colSpan="7" className="py-12 text-center text-sm text-gray-400">
-                    ຍັງບໍ່ມີຂໍ້ມູນ SLA
+                    {slas.length === 0 ? 'ຍັງບໍ່ມີຂໍ້ມູນ SLA' : 'ບໍ່ພົບຂໍ້ມູນທີ່ຄົ້ນຫາ'}
                   </td>
                 </tr>
               )}
@@ -309,16 +488,16 @@ export default function Slamanagement() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ຊື່ນະໂຍບາຍ</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   value={formData.name}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  placeholder="ເຊັ່ນ: IT High Priority SLA" 
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="ເຊັ່ນ: IT High Priority SLA"
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
               </div>
@@ -371,9 +550,9 @@ export default function Slamanagement() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ລະດັບຄວາມສຳຄັນ (Priority)</label>
-                <select 
+                <select
                   value={formData.priority}
-                  onChange={(e) => setFormData({...formData, priority: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 >
                   <option value="low">Low</option>
@@ -392,49 +571,49 @@ export default function Slamanagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ເວລາຕອບກັບ (ນາທີ)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     min="1"
                     required
                     value={formData.responseTimeMinutes}
-                    onChange={(e) => setFormData({...formData, responseTimeMinutes: Number(e.target.value)})}
+                    onChange={(e) => setFormData({ ...formData, responseTimeMinutes: Number(e.target.value) })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ເວລາແກ້ໄຂ (ນາທີ)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     min="1"
                     required
                     value={formData.resolutionTimeMinutes}
-                    onChange={(e) => setFormData({...formData, resolutionTimeMinutes: Number(e.target.value)})}
+                    onChange={(e) => setFormData({ ...formData, resolutionTimeMinutes: Number(e.target.value) })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                   />
                 </div>
               </div>
 
               <div className="flex items-center gap-2 pt-2">
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   id="isActive"
                   checked={formData.isActive}
-                  onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
+                  onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
                   className="rounded border-gray-300 text-amber-500 focus:ring-amber-500"
                 />
                 <label htmlFor="isActive" className="text-sm text-gray-700 font-medium">ເປີດໃຊ້ງານທັນທີ</label>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => { setIsModalOpen(false); resetForm(); }}
                   className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
                 >
                   ຍົກເລີກ
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={submitting}
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm disabled:opacity-50"
                 >

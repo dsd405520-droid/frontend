@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, Check, MessageSquare } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
@@ -34,12 +34,12 @@ function TicketProgressBar({ status }) {
             <div className="flex flex-col items-center text-center w-20">
               <div
                 className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isDone
-                    ? 'bg-emerald-500 text-white'
-                    : isCurrent
-                      ? isWaiting
-                        ? 'bg-amber-100 text-amber-600 ring-4 ring-amber-100 animate-pulse'
-                        : 'bg-blue-500 text-white ring-4 ring-blue-100'
-                      : 'bg-gray-100 text-gray-300'
+                  ? 'bg-emerald-500 text-white'
+                  : isCurrent
+                    ? isWaiting
+                      ? 'bg-amber-100 text-amber-600 ring-4 ring-amber-100 animate-pulse'
+                      : 'bg-blue-500 text-white ring-4 ring-blue-100'
+                    : 'bg-gray-100 text-gray-300'
                   }`}
               >
                 {isDone ? <Check size={18} /> : <span className="text-xs font-bold">{idx + 1}</span>}
@@ -68,7 +68,41 @@ export default function Issues() {
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState([]);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef(null);
+
+  const toggleStatusFilter = (status) => {
+    setStatusFilter(prev =>
+      prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+    );
+  };
+
+  const PRIORITY_LEVELS = [
+    { key: 'low', label: 'ຕ່ຳ' },
+    { key: 'medium', label: 'ປານກາງ' },
+    { key: 'high', label: 'ສູງ' },
+    { key: 'urgent', label: 'ດ່ວນ' },
+  ];
+  const [priorityFilter, setPriorityFilter] = useState([]);
+
+  const togglePriorityFilter = (priority) => {
+    setPriorityFilter((prev) =>
+      prev.includes(priority) ? prev.filter((p) => p !== priority) : [...prev, priority]
+    );
+  };
+
+  const PRIORITY_ORDER = { low: 0, medium: 1, high: 2, urgent: 3 };
+  const SORT_OPTIONS = [
+    { key: 'date', label: 'ວັນທີ' },
+    { key: 'priority_asc', label: 'ຄວາມສຳຄັນ: ຕ່ຳ → ດ່ວນ' },
+    { key: 'priority_desc', label: 'ຄວາມສຳຄັນ: ດ່ວນ → ຕ່ຳ' },
+  ];
+  const [sortBy, setSortBy] = useState('date');
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortRef = useRef(null);
 
   // Modal & Form States (ຕັດ files ອອກແລ້ວ)
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -90,6 +124,8 @@ export default function Issues() {
   // Live KB suggestions while typing the ticket title
   const [suggestedArticles, setSuggestedArticles] = useState([]);
   const [suggestLoading, setSuggestLoading] = useState(false);
+
+  const [availablePriorities, setAvailablePriorities] = useState(null); // null = not checked yet
 
   // State ສຳລັບ Modal ລາຍລະອຽດ Ticket
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -219,6 +255,19 @@ export default function Issues() {
   }, []);
 
   useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setIsFilterOpen(false);
+      }
+      if (sortRef.current && !sortRef.current.contains(e.target)) {
+        setIsSortOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
     if (!isModalOpen || formData.title.trim().length < 3) {
       setSuggestedArticles([]);
       return;
@@ -242,6 +291,18 @@ export default function Issues() {
     return () => clearTimeout(delay);
   }, [formData.title, isModalOpen]);
 
+  useEffect(() => {
+    if (!formData.ticketTypeId) {
+      setAvailablePriorities(null);
+      return;
+    }
+    fetch(`http://localhost:3000/api/sla-policies/ticket-type/${formData.ticketTypeId}/available-priorities`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => data && setAvailablePriorities(data.data || []))
+      .catch(err => console.error('Error fetching available priorities:', err));
+  }, [formData.ticketTypeId]);
   const handleSelectTicketType = (type) => {
     setSelectedTypeName(type.name);
     setFormData(prev => ({
@@ -403,11 +464,26 @@ export default function Issues() {
     getUserDisplayName(u).toLowerCase().includes(assignSearchQuery.toLowerCase())
   );
 
-  const filteredIssues = Array.isArray(issues) ? issues.filter(item =>
-    item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item._id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.ticketNumber?.toLowerCase().includes(searchQuery.toLowerCase())
-  ) : [];
+  const filteredIssues = Array.isArray(issues) ? issues.filter(item => {
+    const matchesSearch =
+      item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item._id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.ticketNumber?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(item.status);
+    const matchesPriority = priorityFilter.length === 0 || priorityFilter.includes(item.priority);
+    return matchesSearch && matchesStatus && matchesPriority;
+  }) : [];
+
+  const sortedIssues = [...filteredIssues].sort((a, b) => {
+    if (sortBy === 'priority_asc') {
+      return (PRIORITY_ORDER[a.priority] ?? 0) - (PRIORITY_ORDER[b.priority] ?? 0);
+    }
+    if (sortBy === 'priority_desc') {
+      return (PRIORITY_ORDER[b.priority] ?? 0) - (PRIORITY_ORDER[a.priority] ?? 0);
+    }
+    // date: newest first
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+  });
 
   const getSlaIndicator = (item) => {
     const sla = item.sla;
@@ -462,12 +538,87 @@ export default function Issues() {
             />
           </div>
           <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-            <button className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition">
-              <Filter size={16} />
-              <span>ກອງສະຖານະ</span>
-            </button>
+
+            <div className="relative" ref={filterRef}>
+              <button
+                onClick={() => setIsFilterOpen(!isFilterOpen)}
+                className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition"
+              >
+                <Filter size={16} />
+                <span>FILTER</span>
+                {(statusFilter.length + priorityFilter.length) > 0 && (
+                  <span key={statusFilter.length + priorityFilter.length}>{` (${statusFilter.length + priorityFilter.length})`}</span>
+                )}
+              </button>
+
+              {isFilterOpen && (
+                <div className="absolute right-0 mt-2 w-[26rem] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-400 uppercase mb-1 px-1">ສະຖານະ</p>
+                      {TICKET_STEPS.concat({ key: 'WAITING_ON_USER', label: 'ລໍຖ້າຜູ້ໃຊ້' }).map(step => (
+                        <label key={step.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                          <input type="checkbox" checked={statusFilter.includes(step.key)} onChange={() => toggleStatusFilter(step.key)} className="rounded" />
+                          {step.label}
+                        </label>
+                      ))}
+                    </div>
+
+                    <div className="border-l border-gray-100 pl-3">
+                      <p className="text-xs font-semibold text-gray-400 uppercase mb-1 px-1">ຄວາມສຳຄັນ</p>
+                      {PRIORITY_LEVELS.map(level => (
+                        <label key={level.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                          <input type="checkbox" checked={priorityFilter.includes(level.key)} onChange={() => togglePriorityFilter(level.key)} className="rounded" />
+                          {level.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {(statusFilter.length + priorityFilter.length) > 0 && (
+                    <button
+                      onClick={() => { setStatusFilter([]); setPriorityFilter([]); }}
+                      className="w-full text-center text-xs text-amber-600 hover:text-amber-700 mt-3 pt-2 border-t border-gray-100"
+                    >
+                      ລ້າງການກອງ
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="relative" ref={sortRef}>
+              <button
+                onClick={() => setIsSortOpen(!isSortOpen)}
+                className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition"
+              >
+                <span>ຈັດຮຽງຕາມ</span>
+              </button>
+
+              {isSortOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-2">
+                  {SORT_OPTIONS.map(opt => (
+                    <label
+                      key={opt.key}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700"
+                    >
+                      <input
+                        type="radio"
+                        name="sortBy"
+                        checked={sortBy === opt.key}
+                        onChange={() => { setSortBy(opt.key); setIsSortOpen(false); }}
+                        className="rounded-full"
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
+
+
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
@@ -493,8 +644,8 @@ export default function Issues() {
                       </div>
                     </td>
                   </tr>
-                ) : filteredIssues.length > 0 ? (
-                  filteredIssues.map((item) => {
+                ) : sortedIssues.length > 0 ? (
+                  sortedIssues.map((item) => {
                     const slaIndicator = getSlaIndicator(item);
                     return (
                       <tr
@@ -663,10 +814,11 @@ export default function Issues() {
                     onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
                   >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
+                    {['low', 'medium', 'high', 'urgent'].map(p => (
+                      <option key={p} value={p} disabled={availablePriorities !== null && !availablePriorities.includes(p)}>
+                        {p.charAt(0).toUpperCase() + p.slice(1)}{availablePriorities !== null && !availablePriorities.includes(p) ? ' (ບໍ່ມີ SLA)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>

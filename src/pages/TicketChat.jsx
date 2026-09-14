@@ -16,6 +16,9 @@ export default function TicketChat() {
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
 
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [fileUploading, setFileUploading] = useState(false);
+
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
   const headers = { 'Authorization': `Bearer ${token}` };
   const scrollRef = useRef(null);
@@ -55,7 +58,7 @@ export default function TicketChat() {
     fetch(`http://localhost:3000/api/tickets/${id}`, { headers })
       .then(res => res.json())
       .then(b => setTicket(b?.data ?? b))
-      .catch(() => {});
+      .catch(() => { });
 
     fetchMessages(false);
     const interval = setInterval(() => fetchMessages(true), POLL_INTERVAL_MS);
@@ -67,14 +70,62 @@ export default function TicketChat() {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const allowedExt = ['.pdf', '.docx', '.png', '.jpg', '.jpeg', '.gif', '.webp'];
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    if (!allowedExt.includes(ext)) {
+      alert('ຮອງຮັບສະເພາະ PDF, DOCX ແລະ ຮູບພາບ (PNG/JPG/GIF/WEBP)');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert('ໄຟລ໌ໃຫຍ່ເກີນໄປ (ຈຳກັດ 10MB)');
+      return;
+    }
+
+    setFileUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('http://localhost:3000/api/uploads', {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingFiles(prev => [...prev, data.data.url]);
+      } else {
+        alert('ອັບໂຫລດບໍ່ສຳເລັດ');
+      }
+    } catch (err) {
+      console.error('Error uploading file:', err);
+    } finally {
+      setFileUploading(false);
+    }
+  };
+
+  const removePendingFile = (url) => {
+    setPendingFiles(prev => prev.filter(u => u !== url));
+  };
+
+  const isImage = (url) => /\.(png|jpe?g|gif|webp)$/i.test(url);
+
   const handleSend = (e) => {
     e.preventDefault();
-    if (!body.trim()) return;
+    if (!body.trim() && pendingFiles.length === 0) return;
     setSending(true);
     fetch('http://localhost:3000/api/ticket-messages', {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticketId: id, body: body.trim() }),
+      body: JSON.stringify({
+        ticketId: id,
+        body: body.trim() || '(ໄຟລ໌ແນບ)',
+        attachments: pendingFiles
+      }),
     })
       .then(async res => {
         if (!res.ok) {
@@ -82,6 +133,7 @@ export default function TicketChat() {
           throw new Error(result.message || 'ສົ່ງຂໍ້ຄວາມບໍ່ສຳເລັດ');
         }
         setBody('');
+        setPendingFiles([]);
         fetchMessages(true);
       })
       .catch(err => alert(err.message))
@@ -100,6 +152,28 @@ export default function TicketChat() {
     const raw = typeof senderId === 'object' && senderId !== null ? senderId._id : senderId;
     return raw != null ? String(raw) : null;
   };
+
+  const renderAttachment = (url, isMine) => (
+    isImage(url) ? (
+      <a key={url} href={`http://localhost:3000${url}`} target="_blank" rel="noreferrer">
+        <img
+          src={`http://localhost:3000${url}`}
+          alt=""
+          className="max-w-[200px] max-h-[200px] rounded-lg border border-white/20"
+        />
+      </a>
+    ) : (
+      <a
+        key={url}
+        href={`http://localhost:3000${url}`}
+        target="_blank"
+        rel="noreferrer"
+        className={`text-xs underline px-2 py-1 rounded-lg ${isMine ? 'bg-amber-600/50' : 'bg-white'}`}
+      >
+        📎 {url.split('/').pop()}
+      </a>
+    )
+  );
 
   return (
     <MainLayout>
@@ -141,6 +215,11 @@ export default function TicketChat() {
                         <p className="text-xs font-semibold mb-0.5 opacity-70">{senderName(m.senderId)}</p>
                       )}
                       <p className="whitespace-pre-wrap">{m.body}</p>
+                      {m.attachments?.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {m.attachments.map(url => renderAttachment(url, isMine))}
+                        </div>
+                      )}
                       <p className={`text-[10px] mt-1 ${isMine ? 'text-amber-100' : 'text-gray-400'}`}>
                         {m.createdAt ? new Date(m.createdAt).toLocaleString() : ''}
                       </p>
@@ -157,7 +236,44 @@ export default function TicketChat() {
           )}
         </div>
 
+        {pendingFiles.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {pendingFiles.map(url => (
+              <div key={url} className="relative">
+                {isImage(url) ? (
+                  <img
+                    src={`http://localhost:3000${url}`}
+                    alt=""
+                    className="w-14 h-14 object-cover rounded-lg border border-gray-200"
+                  />
+                ) : (
+                  <div className="w-14 h-14 flex items-center justify-center bg-gray-100 rounded-lg border border-gray-200 text-[10px] text-gray-500 text-center px-1">
+                    {url.split('.').pop().toUpperCase()}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePendingFile(url)}
+                  className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <form onSubmit={handleSend} className="mt-3 flex items-center gap-2">
+          <label className="cursor-pointer text-gray-400 hover:text-gray-600 shrink-0 p-2">
+            {fileUploading ? <Loader2 size={20} className="animate-spin" /> : <span className="text-lg">📎</span>}
+            <input
+              type="file"
+              accept=".pdf,.docx,.png,.jpg,.jpeg,.gif,.webp"
+              onChange={handleFileSelect}
+              disabled={fileUploading}
+              className="hidden"
+            />
+          </label>
           <input
             type="text"
             value={body}
@@ -167,7 +283,7 @@ export default function TicketChat() {
           />
           <button
             type="submit"
-            disabled={sending || !body.trim()}
+            disabled={sending || (!body.trim() && pendingFiles.length === 0)}
             className="bg-amber-500 hover:bg-amber-600 text-white p-2.5 rounded-xl transition disabled:opacity-50"
           >
             {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
