@@ -70,7 +70,7 @@ export default function Issues() {
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Modal & Form States (ຕັດ files ອອກແລ້ວ)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -215,6 +215,30 @@ export default function Issues() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (!isModalOpen || formData.title.trim().length < 3) {
+      setSuggestedArticles([]);
+      return;
+    }
+    const delay = setTimeout(async () => {
+      setSuggestLoading(true);
+      try {
+        const res = await fetch(`http://localhost:3000/api/kb-articles/suggest?q=${encodeURIComponent(formData.title)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSuggestedArticles(data.data || []);
+        }
+      } catch (error) {
+        console.error('Error fetching suggestions:', error);
+      } finally {
+        setSuggestLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(delay);
+  }, [formData.title, isModalOpen]);
+
   const handleSelectTicketType = (type) => {
     setSelectedTypeName(type.name);
     setFormData(prev => ({
@@ -257,6 +281,7 @@ export default function Issues() {
           departmentId: '',
         });
         setSelectedTypeName('');
+        setSuggestedArticles([]);
         fetchData();
       } else {
         const errData = await response.json();
@@ -375,7 +400,7 @@ export default function Issues() {
     getUserDisplayName(u).toLowerCase().includes(assignSearchQuery.toLowerCase())
   );
 
-  const filteredIssues = Array.isArray(issues) ? issues.filter(item => 
+  const filteredIssues = Array.isArray(issues) ? issues.filter(item =>
     item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item._id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.ticketNumber?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -413,7 +438,7 @@ export default function Issues() {
             <h1 className="text-2xl font-bold text-gray-800">ແກ້ໄຂບັນຫາ</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການ ແລະ ຕິດຕາມສະຖານະການແຈ້ງບັນຫາຕ່າງໆໃນລະບົບ</p>
           </div>
-          <button 
+          <button
             onClick={() => setIsModalOpen(true)}
             className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
           >
@@ -425,11 +450,11 @@ export default function Issues() {
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ຄົ້ນຫາລະຫັດ, ຫົວຂໍ້..." 
+              placeholder="ຄົ້ນຫາລະຫັດ, ຫົວຂໍ້..."
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
             />
           </div>
@@ -483,11 +508,10 @@ export default function Issues() {
                         <td className="p-4 font-semibold text-gray-900">{item.ticketNumber || item._id}</td>
                         <td className="p-4">{item.title}</td>
                         <td className="p-4 uppercase">
-                          <span className={`px-2 py-1 rounded-md text-xs font-medium ${
-                            item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                          <span className={`px-2 py-1 rounded-md text-xs font-medium ${item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
                             item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
-                            item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                          }`}>
+                              item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+                            }`}>
                             {item.priority}
                           </span>
                         </td>
@@ -528,7 +552,7 @@ export default function Issues() {
                 <X size={20} />
               </button>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="relative">
                 <div className="flex items-center justify-between mb-1">
@@ -546,7 +570,7 @@ export default function Issues() {
                     </a>
                   )}
                 </div>
-                <div 
+                <div
                   onClick={() => setIsTypeDropdownOpen(!isTypeDropdownOpen)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white flex items-center justify-between cursor-pointer"
                 >
@@ -559,7 +583,7 @@ export default function Issues() {
                 {isTypeDropdownOpen && (
                   <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
                     <div className="p-2 border-b border-gray-100 bg-gray-50">
-                      <input 
+                      <input
                         type="text"
                         autoFocus
                         value={typeSearchQuery}
@@ -571,7 +595,7 @@ export default function Issues() {
                     <ul className="max-h-48 overflow-y-auto divide-y divide-gray-50">
                       {filteredTicketTypes.length > 0 ? (
                         filteredTicketTypes.map(type => (
-                          <li 
+                          <li
                             key={type._id || type.id}
                             onClick={() => handleSelectTicketType(type)}
                             className="px-3 py-2 text-sm text-gray-700 hover:bg-amber-50 hover:text-amber-800 cursor-pointer transition"
@@ -591,23 +615,39 @@ export default function Issues() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ຫົວຂໍ້ບັນຫາ</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   required
                   value={formData.title}
-                  onChange={(e) => setFormData({...formData, title: e.target.value})}
-                  placeholder="ລະບຸຫົວຂໍ້ບັນຫາ..." 
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  placeholder="ລະບຸຫົວຂໍ້ບັນຫາ..."
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
+
+                {suggestLoading && (
+                  <p className="text-xs text-gray-400 mt-1.5">ກຳລັງຄົ້ນຫາຄູ່ມືທີ່ກ່ຽວຂ້ອງ...</p>
+                )}
+
+                {!suggestLoading && suggestedArticles.length > 0 && (
+                  <div className="mt-2 bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-1.5">
+                    <p className="text-xs font-medium text-amber-800">ລອງເບິ່ງຄູ່ມືເຫຼົ່ານີ້ກ່ອນແຈ້ງບັນຫາ:</p>
+                    {suggestedArticles.map(article => (
+                      <div key={article._id} className="text-xs text-amber-700 flex items-center justify-between">
+                        <span>{article.title}</span>
+                        <span className="text-amber-500">{article.category}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ລາຍລະອຽດເພີ່ມຕື່ມ</label>
-                <textarea 
+                <textarea
                   rows="3"
                   value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
-                  placeholder="ອະທິບາຍອາການ ຫຼື ບັນຫາທີ່ພົບ..." 
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="ອະທິບາຍອາການ ຫຼື ບັນຫາທີ່ພົບ..."
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
               </div>
@@ -615,9 +655,9 @@ export default function Issues() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ລະດັບຄວາມສຳຄັນ</label>
-                  <select 
+                  <select
                     value={formData.priority}
-                    onChange={(e) => setFormData({...formData, priority: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
                   >
                     <option value="low">Low</option>
@@ -628,10 +668,10 @@ export default function Issues() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ສາຂາ (Branch)</label>
-                  <select 
+                  <select
                     required
                     value={formData.branchId}
-                    onChange={(e) => setFormData({...formData, branchId: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
                   >
                     <option value="">-- ເລືອກສາຂາ --</option>
@@ -644,10 +684,10 @@ export default function Issues() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ພະແນກ (Department)</label>
-                <select 
+                <select
                   required
                   value={formData.departmentId}
-                  onChange={(e) => setFormData({...formData, departmentId: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
                 >
                   <option value="">-- ເລືອກພະແນກ --</option>
@@ -658,15 +698,15 @@ export default function Issues() {
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
                 >
                   ຍົກເລີກ
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={submitting}
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm disabled:opacity-50"
                 >
@@ -701,11 +741,10 @@ export default function Issues() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-xs text-gray-400 mb-0.5">ຄວາມສຳຄັນ</div>
-                  <span className={`px-2 py-1 rounded-md text-xs font-medium uppercase ${
-                    selectedTicket.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                  <span className={`px-2 py-1 rounded-md text-xs font-medium uppercase ${selectedTicket.priority === 'urgent' ? 'bg-red-100 text-red-700' :
                     selectedTicket.priority === 'high' ? 'bg-orange-100 text-orange-700' :
-                    selectedTicket.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                  }`}>{selectedTicket.priority}</span>
+                      selectedTicket.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+                    }`}>{selectedTicket.priority}</span>
                 </div>
                 <div>
                   <div className="text-xs text-gray-400 mb-0.5">ສະຖານະ</div>
@@ -802,9 +841,8 @@ export default function Issues() {
                               <div
                                 key={u._id || u.id}
                                 onClick={() => setSelectedAssignee(u)}
-                                className={`px-3 py-2 text-sm cursor-pointer hover:bg-amber-50 ${
-                                  (selectedAssignee?._id || selectedAssignee?.id) === (u._id || u.id) ? 'bg-amber-50 text-amber-800 font-medium' : 'text-gray-700'
-                                }`}
+                                className={`px-3 py-2 text-sm cursor-pointer hover:bg-amber-50 ${(selectedAssignee?._id || selectedAssignee?.id) === (u._id || u.id) ? 'bg-amber-50 text-amber-800 font-medium' : 'text-gray-700'
+                                  }`}
                               >
                                 {getUserDisplayName(u)}
                               </div>
