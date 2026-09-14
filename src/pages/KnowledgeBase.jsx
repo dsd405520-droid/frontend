@@ -245,8 +245,17 @@ export default function KnowledgeBase() {
     }
   };
 
-  const removeAttachment = (url) => {
+  const removeAttachment = async (url) => {
+    const filename = url.split('/').pop();
     setFormData(prev => ({ ...prev, attachments: prev.attachments.filter(a => a !== url) }));
+    try {
+      await fetch(`http://localhost:3000/api/uploads/${filename}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+    } catch (error) {
+      console.error('Error deleting file:', error);
+    }
   };
 
   const deleteArticle = async () => {
@@ -259,6 +268,14 @@ export default function KnowledgeBase() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
+        await Promise.all(
+          (selectedArticle.attachments || []).map(url =>
+            fetch(`http://localhost:3000/api/uploads/${url.split('/').pop()}`, {
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${token}` }
+            }).catch(err => console.error('Error deleting attachment file:', err))
+          )
+        );
         setIsDetailOpen(false);
         setSelectedArticle(null);
         fetchArticles();
