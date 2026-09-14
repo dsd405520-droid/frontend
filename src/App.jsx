@@ -21,6 +21,8 @@ import UsersManagement from './pages/UsersManagement';
 import MeetingRooms from './pages/MeetingRooms';
 import InventorySupplies from './pages/InventorySupplies';
 import KnowledgeBase from './pages/KnowledgeBase';
+import TicketTypesManagement from './pages/TicketTypesManagement';
+import TicketChat from './pages/TicketChat';
 
 export default function App() {
   return (
@@ -45,6 +47,8 @@ export default function App() {
         <Route path="/meeting-rooms" element={<ProtectedRoute><MeetingRooms /></ProtectedRoute>} />
         <Route path="/supplies" element={<ProtectedRoute><InventorySupplies /></ProtectedRoute>} />
         <Route path="/knowledge-base" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
+        <Route path="/ticket-types" element={<ProtectedRoute><TicketTypesManagement /></ProtectedRoute>} />
+        <Route path="/issues/:id/chat" element={<ProtectedRoute><TicketChat /></ProtectedRoute>} />
 
         {/* ຖ້າພິມ URL ຜິດ ໃຫ້ສົ່ງກັບໄປໜ້າຫຼັກ (ເຊິ່ງຈະຖືກບັງຄັບໄປ Login ຖ້າຫາກຍັງບໍ່ທັນເຂົ້າສູ່ລະບົບ) */}
         <Route path="*" element={<Navigate to="/" replace />} />

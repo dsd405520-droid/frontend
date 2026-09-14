@@ -16,7 +16,8 @@ import {
   Bell, 
   BarChart3, 
   FileText, 
-  Settings 
+  Settings,
+  Tag 
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -83,6 +84,14 @@ export default function Sidebar() {
               }`}
             >
               <Clock size={18} /> <span>ການຈັດການ SLA</span>
+            </Link>
+            <Link 
+              to="/ticket-types" 
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
+                isActive('/ticket-types') ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
+              }`}
+            >
+              <Tag size={18} /> <span>ປະເພດບັນຫາ</span>
             </Link>
             <Link 
               to="/knowledge-base" 

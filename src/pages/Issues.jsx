@@ -1,8 +1,69 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, Check, MessageSquare } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 
+const TICKET_STEPS = [
+  { key: 'OPEN', label: 'ແຈ້ງເຂົ້າມາ' },
+  { key: 'ASSIGNED', label: 'ມອບໝາຍແລ້ວ' },
+  { key: 'IN_PROGRESS', label: 'ກຳລັງແກ້ໄຂ' },
+  { key: 'RESOLVED', label: 'ແກ້ໄຂແລ້ວ' },
+  { key: 'CLOSED', label: 'ປິດແລ້ວ' },
+];
+const STATUS_STEP_INDEX = {
+  OPEN: 0,
+  ASSIGNED: 1,
+  IN_PROGRESS: 2,
+  WAITING_ON_USER: 2,
+  RESOLVED: 3,
+  CLOSED: 4,
+};
+
+function TicketProgressBar({ status }) {
+  const currentIndex = STATUS_STEP_INDEX[status] ?? 0;
+  const isWaiting = status === 'WAITING_ON_USER';
+
+  return (
+    <div className="flex items-start">
+      {TICKET_STEPS.map((step, idx) => {
+        const isDone = idx < currentIndex;
+        const isCurrent = idx === currentIndex;
+        const isLast = idx === TICKET_STEPS.length - 1;
+        return (
+          <React.Fragment key={step.key}>
+            <div className="flex flex-col items-center text-center w-20">
+              <div
+                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                  isDone
+                    ? 'bg-emerald-500 text-white'
+                    : isCurrent
+                    ? isWaiting
+                      ? 'bg-amber-100 text-amber-600 ring-4 ring-amber-100 animate-pulse'
+                      : 'bg-blue-500 text-white ring-4 ring-blue-100'
+                    : 'bg-gray-100 text-gray-300'
+                }`}
+              >
+                {isDone ? <Check size={18} /> : <span className="text-xs font-bold">{idx + 1}</span>}
+              </div>
+              <span className={`text-[11px] mt-1.5 leading-tight ${isCurrent ? 'font-semibold text-gray-800' : 'text-gray-400'}`}>
+                {step.label}
+              </span>
+              {isCurrent && isWaiting && (
+                <span className="text-[10px] text-amber-600 font-medium mt-0.5">ລໍຖ້າຜູ້ໃຊ້</span>
+              )}
+            </div>
+            {!isLast && (
+              <div className={`flex-1 h-0.5 mt-4 ${idx < currentIndex ? 'bg-emerald-500' : 'bg-gray-100'}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function Issues() {
+  const navigate = useNavigate();
   const [issues, setIssues] = useState([]);
   const [ticketTypes, setTicketTypes] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -26,16 +87,6 @@ export default function Issues() {
   const [typeSearchQuery, setTypeSearchQuery] = useState('');
   const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
   const [selectedTypeName, setSelectedTypeName] = useState('');
-
-  // State ສຳລັບ Mini-modal "ເພີ່ມປະເພດບັນຫາໃໝ່" inline
-  const [isNewTypeModalOpen, setIsNewTypeModalOpen] = useState(false);
-  const [newTypeSubmitting, setNewTypeSubmitting] = useState(false);
-  const [newTypeForm, setNewTypeForm] = useState({
-    name: '',
-    defaultDepartmentId: '',
-    defaultPriority: 'medium',
-    description: '',
-  });
 
   // State ສຳລັບ Modal ລາຍລະອຽດ Ticket
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -483,15 +534,16 @@ export default function Issues() {
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-medium text-gray-700">ປະເພດບັນຫາ (Ticket Type)</label>
                   {canCreateTicketType && (
-                    <button
-                      type="button"
-                      onClick={() => { setIsTypeDropdownOpen(false); setIsNewTypeModalOpen(true); }}
+                    <a
+                      href="/ticket-types"
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 font-medium"
-                      title="ເພີ່ມປະເພດບັນຫາໃໝ່"
+                      title="ໄປໜ້າຈັດການປະເພດບັນຫາ"
                     >
                       <Plus size={14} />
                       <span>ເພີ່ມປະເພດໃໝ່</span>
-                    </button>
+                    </a>
                   )}
                 </div>
                 <div 
@@ -642,6 +694,9 @@ export default function Issues() {
             </div>
 
             <div className="p-6 space-y-5">
+              {/* ຄວາມຄືບໜ້າຂອງ Ticket */}
+              <TicketProgressBar status={selectedTicket.status} />
+
               {/* ຂໍ້ມູນພື້ນຖານ */}
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
@@ -676,17 +731,35 @@ export default function Issues() {
                 </p>
               </div>
 
+              {/* ປຸ່ມໄປໜ້າແຊັດ — ຕິດຕໍ່ປະສານງານກັບຜູ້ແຈ້ງບັນຫາ */}
+              <button
+                onClick={() => navigate(`/issues/${selectedTicket._id}/chat`)}
+                className="w-full flex items-center justify-center gap-2 bg-blue-50 hover:bg-blue-100 text-blue-700 py-2 rounded-xl text-sm font-medium transition"
+              >
+                <MessageSquare size={16} />
+                <span>ໄປໜ້າແຊັດກັບຜູ້ແຈ້ງບັນຫາ</span>
+              </button>
+
               {/* ປຸ່ມຮັບບັນຫາ / ມອບໝາຍ */}
               {canAssign && selectedTicket.status !== 'CLOSED' && (
                 <div className="border border-gray-100 rounded-xl p-4 space-y-3">
                   {!isAssignPanelOpen ? (
-                    <button
-                      onClick={() => setIsAssignPanelOpen(true)}
-                      className="w-full flex items-center justify-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 py-2 rounded-xl text-sm font-medium transition"
-                    >
-                      <UserCheck size={16} />
-                      <span>{selectedTicket.assignedAgent ? 'ມອບໝາຍໃໝ່' : 'ຮັບບັນຫານີ້ / ມອບໝາຍ'}</span>
-                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => { setAssignMode('self'); setIsAssignPanelOpen(true); }}
+                        className="flex items-center justify-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 py-2 rounded-xl text-sm font-medium transition"
+                      >
+                        <UserCheck size={16} />
+                        <span>ຮັບບັນຫານີ້</span>
+                      </button>
+                      <button
+                        onClick={() => { setAssignMode('other'); setIsAssignPanelOpen(true); }}
+                        className="flex items-center justify-center gap-2 bg-gray-50 hover:bg-gray-100 text-gray-700 py-2 rounded-xl text-sm font-medium transition"
+                      >
+                        <UserCheck size={16} />
+                        <span>ມອບໝາຍໃຫ້ຄົນອື່ນ</span>
+                      </button>
+                    </div>
                   ) : (
                     <div className="space-y-3">
                       <div className="flex gap-2 text-xs font-medium">
