@@ -33,15 +33,14 @@ function TicketProgressBar({ status }) {
           <React.Fragment key={step.key}>
             <div className="flex flex-col items-center text-center w-20">
               <div
-                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-                  isDone
+                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isDone
                     ? 'bg-emerald-500 text-white'
                     : isCurrent
-                    ? isWaiting
-                      ? 'bg-amber-100 text-amber-600 ring-4 ring-amber-100 animate-pulse'
-                      : 'bg-blue-500 text-white ring-4 ring-blue-100'
-                    : 'bg-gray-100 text-gray-300'
-                }`}
+                      ? isWaiting
+                        ? 'bg-amber-100 text-amber-600 ring-4 ring-amber-100 animate-pulse'
+                        : 'bg-blue-500 text-white ring-4 ring-blue-100'
+                      : 'bg-gray-100 text-gray-300'
+                  }`}
               >
                 {isDone ? <Check size={18} /> : <span className="text-xs font-bold">{idx + 1}</span>}
               </div>
@@ -87,6 +86,10 @@ export default function Issues() {
   const [typeSearchQuery, setTypeSearchQuery] = useState('');
   const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
   const [selectedTypeName, setSelectedTypeName] = useState('');
+
+  // Live KB suggestions while typing the ticket title
+  const [suggestedArticles, setSuggestedArticles] = useState([]);
+  const [suggestLoading, setSuggestLoading] = useState(false);
 
   // State ສຳລັບ Modal ລາຍລະອຽດ Ticket
   const [selectedTicket, setSelectedTicket] = useState(null);
