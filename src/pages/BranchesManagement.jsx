@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Building2, Layers, Plus, X, Loader2, AlertCircle } from 'lucide-react';
+import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
 export default function BranchesManagement() {
+  const canCreateBranch = hasPermission('branches', 'create');
+  const canCreateDept = hasPermission('departments', 'create');
+
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -183,20 +187,24 @@ export default function BranchesManagement() {
             <p className="text-sm text-gray-500 mt-1">ຈັດການຂໍ້ມູນສາຂາ, ພະແນກ ແລະ ເວລາເຮັດວຽກ</p>
           </div>
           <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setIsBranchModalOpen(true)}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ເພີ່ມສາຂາ</span>
-            </button>
-            <button 
-              onClick={() => setIsDeptModalOpen(true)}
-              className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ເພີ່ມພະແນກ</span>
-            </button>
+            {canCreateBranch && (
+              <button 
+                onClick={() => setIsBranchModalOpen(true)}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ເພີ່ມສາຂາ</span>
+              </button>
+            )}
+            {canCreateDept && (
+              <button 
+                onClick={() => setIsDeptModalOpen(true)}
+                className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ເພີ່ມພະແນກ</span>
+              </button>
+            )}
           </div>
         </div>
 
