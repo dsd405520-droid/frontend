@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import { hasPermission } from '../utils/permissions';
 
 export default function MeetingRooms() {
   const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
+  const canApproveBookings = hasPermission('rooms', 'update'); // gates room-admin actions (disable room, utilization, approvals)
 
   // States ສຳລັບ Rooms
   const [rooms, setRooms] = useState([]);
@@ -560,13 +562,6 @@ export default function MeetingRooms() {
             ການຈອງຂອງຂ້ອຍ (My Bookings)
           </button>
 
-          <button 
-            onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
-            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'admin' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-            ຈັດການຫ້ອງ (Admin)
-          </button>
-
           {canApproveBookings && (
             <button
               onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
@@ -611,7 +606,7 @@ export default function MeetingRooms() {
                             <p className="text-xs text-gray-400">ລະຫັດ: {roomId}</p>
                           </div>
                           <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${room.liveStatus === 'AVAILABLE' ? 'bg-green-100 text-green-700' :
-                              room.liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                            room.liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
                             }`}>
                             {roomStatusLabel(room.liveStatus || room.status)}
                           </span>
@@ -947,8 +942,8 @@ export default function MeetingRooms() {
                           onClick={() => toggleRoomStatus(room)}
                           disabled={statusUpdatingRoomId === roomId}
                           className={`px-4 py-2 rounded-lg text-xs font-medium transition ${isMaintenance
-                              ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                              : 'bg-red-50 text-red-600 hover:bg-red-100'
+                            ? 'bg-green-50 text-green-700 hover:bg-green-100'
+                            : 'bg-red-50 text-red-600 hover:bg-red-100'
                             } disabled:opacity-50`}
                         >
                           {statusUpdatingRoomId === roomId

@@ -1,12 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Megaphone, Plus, X, Loader2, Calendar, Pin, Trash2, CheckCircle2, Eye, Building2, Users } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import { hasPermission } from '../utils/permissions';
 
 export default function Announcements() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const canCreate = hasPermission('announcements', 'create');
+  const canUpdate = hasPermission('announcements', 'update');
+  const canDelete = hasPermission('announcements', 'delete');
 
   // State ສຳລັບເບິ່ງລາຍລະອຽດປະກາດ
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
@@ -174,7 +179,7 @@ export default function Announcements() {
             <p className="text-sm text-gray-500 mt-1">ແຈ້ງຂໍ້ມູນຂ່າວສານສຳຄັນພາຍໃນອົງກອນ</p>
           </div>
 
-          <button 
+          <button
             onClick={() => setIsModalOpen(true)}
             className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
           >
@@ -232,16 +237,16 @@ export default function Announcements() {
                       {new Date(ann.createdAt).toLocaleDateString()}
                     </span>
 
-                    <button 
-                      onClick={(e) => handleTogglePin(ann._id, ann.pinned, e)} 
-                      className="text-gray-400 hover:text-amber-600 transition p-1" 
+                    <button
+                      onClick={(e) => handleTogglePin(ann._id, ann.pinned, e)}
+                      className="text-gray-400 hover:text-amber-600 transition p-1"
                       title={ann.pinned ? "ຍົກເລີກປັກໝຸດ" : "ປັກໝຸດ"}
                     >
                       <Pin size={16} />
                     </button>
-                    <button 
-                      onClick={(e) => handleDelete(ann._id, e)} 
-                      className="text-gray-400 hover:text-rose-600 transition p-1" 
+                    <button
+                      onClick={(e) => handleDelete(ann._id, e)}
+                      className="text-gray-400 hover:text-rose-600 transition p-1"
                       title="ລຶບປະກາດ"
                     >
                       <Trash2 size={16} />
