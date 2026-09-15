@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2 } from 'lucide-react';
+import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
 export default function MeetingRooms() {
-  const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
+  const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
 
+  const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
+  
   // States ສຳລັບ Rooms
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -319,7 +322,7 @@ export default function MeetingRooms() {
 
   const handleBookingSubmit = (e) => {
     e.preventDefault();
-
+    
     if (new Date(startAt) >= new Date(endAt)) {
       setBookingMessage({ type: 'error', text: 'ເວລາເລີ່ມຕົ້ນຕ້ອງກ່ອນເວລາສິ້ນສຸດສະເໝີ' });
       return;
@@ -380,7 +383,7 @@ export default function MeetingRooms() {
         if (activeTab === 'my-bookings') {
           fetchMyBookings();
         }
-
+        
         setTimeout(() => {
           setIsModalOpen(false);
           setBookingMessage({ type: '', text: '' });
@@ -534,7 +537,7 @@ export default function MeetingRooms() {
             <h1 className="text-2xl font-bold text-gray-800">ລະບົບຈອງຫ້ອງປະຊຸມ</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການ, ກວດສອບສະຖານະ ແລະ ຈອງຫ້ອງປະຊຸມອອນໄລນ໌</p>
           </div>
-          <button
+          <button 
             onClick={() => {
               setSelectedRoom(rooms.length > 0 ? (rooms[0].roomId || rooms[0]._id) : '');
               setIsModalOpen(true);
@@ -547,35 +550,26 @@ export default function MeetingRooms() {
         </div>
 
         <div className="flex border-b border-gray-200 gap-6">
-          <button
+          <button 
             onClick={() => setActiveTab('rooms')}
             className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'rooms' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
             ລາຍຊື່ຫ້ອງ ແລະ ປະຕິທິນ (Rooms & Calendar)
           </button>
-          <button
+          <button 
             onClick={() => setActiveTab('my-bookings')}
             className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'my-bookings' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
             ການຈອງຂອງຂ້ອຍ (My Bookings)
           </button>
-
-          <button 
-            onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
-            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'admin' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-            ຈັດການຫ້ອງ (Admin)
-          </button>
-
           {canApproveBookings && (
-            <button
+            <button 
               onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
               className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'admin' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
             >
               ຈັດການຫ້ອງ (Admin)
             </button>
           )}
-
         </div>
 
         {error && (
@@ -598,11 +592,12 @@ export default function MeetingRooms() {
                   const isSelected = selectedCalendarRoom && ((selectedCalendarRoom.roomId || selectedCalendarRoom._id) === roomId);
 
                   return (
-                    <div
-                      key={roomId}
+                    <div 
+                      key={roomId} 
                       onClick={() => setSelectedCalendarRoom(room)}
-                      className={`bg-white p-5 rounded-2xl border transition shadow-sm space-y-4 flex flex-col justify-between cursor-pointer ${isSelected ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                      className={`bg-white p-5 rounded-2xl border transition shadow-sm space-y-4 flex flex-col justify-between cursor-pointer ${
+                        isSelected ? 'border-amber-500 ring-2 ring-amber-500/20' : 'border-gray-200 hover:border-gray-300'
+                      }`}
                     >
                       <div className="space-y-3">
                         <div className="flex justify-between items-start">
@@ -610,9 +605,10 @@ export default function MeetingRooms() {
                             <h3 className="font-bold text-gray-800 text-base">{room.name}</h3>
                             <p className="text-xs text-gray-400">ລະຫັດ: {roomId}</p>
                           </div>
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${room.liveStatus === 'AVAILABLE' ? 'bg-green-100 text-green-700' :
-                              room.liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                            }`}>
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                            room.liveStatus === 'AVAILABLE' ? 'bg-green-100 text-green-700' :
+                            room.liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                          }`}>
                             {roomStatusLabel(room.liveStatus || room.status)}
                           </span>
                         </div>
@@ -629,7 +625,7 @@ export default function MeetingRooms() {
                         </div>
                       </div>
 
-                      <button
+                      <button 
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedRoom(roomId);
@@ -730,8 +726,8 @@ export default function MeetingRooms() {
                                   {calendarBookings
                                     .filter(b => bookingMatchesSlot(b, selectedCalendarRoom, time, day.dayIndex))
                                     .map((booking, idx) => (
-                                      <div
-                                        key={booking._id || idx}
+                                      <div 
+                                        key={booking._id || idx} 
                                         className="bg-amber-50 border border-amber-200 text-amber-800 p-1.5 rounded-lg text-[11px] font-medium shadow-2xs truncate"
                                         title={booking.title || 'ບໍ່ມີຫົວຂໍ້'}
                                       >
@@ -762,8 +758,8 @@ export default function MeetingRooms() {
                               {calendarBookings
                                 .filter(b => bookingMatchesSlot(b, selectedCalendarRoom, time, calendarAnchorDate.getDay()))
                                 .map((booking, idx) => (
-                                  <div
-                                    key={booking._id || idx}
+                                  <div 
+                                    key={booking._id || idx} 
                                     className="bg-amber-50 border border-amber-200 text-amber-800 p-1.5 rounded-lg text-[11px] font-medium shadow-2xs truncate"
                                     title={booking.title || 'ບໍ່ມີຫົວຂໍ້'}
                                   >
@@ -817,7 +813,7 @@ export default function MeetingRooms() {
 
                       {(b.status === 'PENDING' || b.status === 'CONFIRMED' || !b.status) && (
                         <div className="flex items-center gap-2">
-                          <button
+                          <button 
                             onClick={() => {
                               setCurrentBookingToReschedule(b);
                               setNewStartAt(b.startAt ? b.startAt.slice(0, 16) : '');
@@ -829,7 +825,7 @@ export default function MeetingRooms() {
                             <Edit3 size={14} />
                             <span>ເລື່ອນເວລາ</span>
                           </button>
-                          <button
+                          <button 
                             onClick={() => handleCancelBooking(b._id)}
                             className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-medium transition flex items-center gap-1"
                           >
@@ -837,7 +833,7 @@ export default function MeetingRooms() {
                             <span>ຍົກເລີກ</span>
                           </button>
                           {b.seriesId && (
-                            <button
+                            <button 
                               onClick={() => handleCancelSeries(b.seriesId)}
                               className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-medium transition"
                               title="ຍົກເລີກທຸກຄັ້ງໃນຊຸດການຈອງແບບຊ້ຳນີ້"
@@ -860,7 +856,7 @@ export default function MeetingRooms() {
         )}
 
         {/* TAB 3: ADMIN — Pending approvals + Maintenance toggle + Org-wide utilization report */}
-        {activeTab === 'admin' && (
+        {activeTab === 'admin' && canApproveBookings && (
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-gray-100 flex items-center justify-between">
@@ -939,17 +935,19 @@ export default function MeetingRooms() {
                       </div>
                       <div className="flex items-center gap-3">
                         {/* ສະຖານະປັດຈຸບັນ — ຄົນລະສ່ວນຈາກປຸ່ມຄຳສັ່ງດ້ານລຸ່ມ ເພື່ອບໍ່ໃຫ້ສັບສົນ */}
-                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${isMaintenance ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                          }`}>
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                          isMaintenance ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                        }`}>
                           ສະຖານະປັດຈຸບັນ: {isMaintenance ? 'ປິດປັບປຸງ' : 'ເປີດໃຫ້ຈອງ'}
                         </span>
                         <button
                           onClick={() => toggleRoomStatus(room)}
                           disabled={statusUpdatingRoomId === roomId}
-                          className={`px-4 py-2 rounded-lg text-xs font-medium transition ${isMaintenance
+                          className={`px-4 py-2 rounded-lg text-xs font-medium transition ${
+                            isMaintenance
                               ? 'bg-green-50 text-green-700 hover:bg-green-100'
                               : 'bg-red-50 text-red-600 hover:bg-red-100'
-                            } disabled:opacity-50`}
+                          } disabled:opacity-50`}
                         >
                           {statusUpdatingRoomId === roomId
                             ? 'ກຳລັງອັບເດດ...'
@@ -1044,8 +1042,8 @@ export default function MeetingRooms() {
               <form onSubmit={handleBookingSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ເລືອກຫ້ອງປະຊຸມ</label>
-                  <select
-                    value={selectedRoom}
+                  <select 
+                    value={selectedRoom} 
                     onChange={(e) => setSelectedRoom(e.target.value)}
                     required
                     className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
@@ -1062,8 +1060,8 @@ export default function MeetingRooms() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ຫົວຂໍ້ການປະຊຸມ (Meeting Title)</label>
-                  <input
-                    type="text"
+                  <input 
+                    type="text" 
                     placeholder="ປ້ອນຫົວຂໍ້ ຫຼື ວາລະການປະຊຸມ..."
                     value={meetingTitle}
                     onChange={(e) => setMeetingTitle(e.target.value)}
@@ -1077,8 +1075,8 @@ export default function MeetingRooms() {
                     ເວລາເລີ່ມຕົ້ນ
                     <span className="text-gray-400 font-normal ml-1">(ຊ່ວງເວລາທຳການ 08:00 - 17:00, ກວດ AM/PM ໃຫ້ຖືກ)</span>
                   </label>
-                  <input
-                    type="datetime-local"
+                  <input 
+                    type="datetime-local" 
                     value={startAt}
                     onChange={(e) => setStartAt(e.target.value)}
                     required
@@ -1088,8 +1086,8 @@ export default function MeetingRooms() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ເວລາສິ້ນສຸດ</label>
-                  <input
-                    type="datetime-local"
+                  <input 
+                    type="datetime-local" 
                     value={endAt}
                     onChange={(e) => setEndAt(e.target.value)}
                     required
@@ -1106,8 +1104,8 @@ export default function MeetingRooms() {
                 {/* Recurring Option */}
                 <div className="pt-2 border-t border-gray-100 space-y-3">
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
+                    <input 
+                      type="checkbox" 
                       checked={isRecurring}
                       onChange={(e) => setIsRecurring(e.target.checked)}
                       className="rounded text-amber-500 focus:ring-amber-500 w-4 h-4"
@@ -1119,7 +1117,7 @@ export default function MeetingRooms() {
                     <div className="grid grid-cols-2 gap-3 pl-6">
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">ຄວາມຖີ່</label>
-                        <select
+                        <select 
                           value={frequency}
                           onChange={(e) => setFrequency(e.target.value)}
                           className="w-full border border-gray-300 rounded-xl px-3 py-1.5 text-xs"
@@ -1130,7 +1128,7 @@ export default function MeetingRooms() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">ຈົນເຖິງວັນທີ (Until)</label>
-                        <input
+                        <input 
                           type="date"
                           value={untilDate}
                           onChange={(e) => setUntilDate(e.target.value)}
@@ -1165,8 +1163,8 @@ export default function MeetingRooms() {
               <form onSubmit={handleRescheduleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ເວລາເລີ່ມຕົ້ນໃໝ່</label>
-                  <input
-                    type="datetime-local"
+                  <input 
+                    type="datetime-local" 
                     value={newStartAt}
                     onChange={(e) => setNewStartAt(e.target.value)}
                     required
@@ -1175,8 +1173,8 @@ export default function MeetingRooms() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ເວລາສິ້ນສຸດໃໝ່</label>
-                  <input
-                    type="datetime-local"
+                  <input 
+                    type="datetime-local" 
                     value={newEndAt}
                     onChange={(e) => setNewEndAt(e.target.value)}
                     required

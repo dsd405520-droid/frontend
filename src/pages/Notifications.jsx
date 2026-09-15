@@ -50,7 +50,6 @@ export default function Notifications() {
       });
       if (res.ok) {
         setNotifs(notifs.map(n => n._id === id ? { ...n, isRead: true } : n));
-        window.dispatchEvent(new Event('unread-counts-changed'));
       }
     } catch (error) {
       console.error('Error marking notification as read:', error);
@@ -68,7 +67,6 @@ export default function Notifications() {
       });
       if (res.ok) {
         setNotifs(notifs.map(n => ({ ...n, isRead: true })));
-        window.dispatchEvent(new Event('unread-counts-changed'));
       }
     } catch (error) {
       console.error('Error marking all as read:', error);
@@ -84,7 +82,7 @@ export default function Notifications() {
             <p className="text-sm text-gray-500 mt-1">ສູນລວມການແຈ້ງເຕືອນທັງໝົດໃນລະບົບ</p>
           </div>
           {notifs.some(n => !n.isRead) && (
-            <button
+            <button 
               onClick={handleMarkAllAsRead}
               className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm"
             >
@@ -102,11 +100,12 @@ export default function Notifications() {
             </div>
           ) : notifs.length > 0 ? (
             notifs.map((item) => (
-              <div
-                key={item._id}
+              <div 
+                key={item._id} 
                 onClick={() => !item.isRead && handleMarkAsRead(item._id)}
-                className={`p-4 flex items-center justify-between transition cursor-pointer ${!item.isRead ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-gray-50'
-                  }`}
+                className={`p-4 flex items-center justify-between transition cursor-pointer ${
+                  !item.isRead ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-gray-50'
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <div className={`p-2 rounded-xl ${!item.isRead ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-500'}`}>
@@ -129,7 +128,7 @@ export default function Notifications() {
                     {new Date(item.createdAt).toLocaleString()}
                   </span>
                   {!item.isRead && (
-                    <button
+                    <button 
                       onClick={(e) => { e.stopPropagation(); handleMarkAsRead(item._id); }}
                       className="text-gray-400 hover:text-amber-600 transition p-1"
                       title="ໝາຍວ່າອ່ານແລ້ວ"
