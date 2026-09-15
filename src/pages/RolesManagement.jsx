@@ -2,17 +2,30 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import MainLayout from '../layouts/MainLayout';
 import { Shield, Plus, X, Loader2, AlertCircle, Lock, Check } from 'lucide-react';
+import { hasPermission } from '../utils/permissions';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
 const AVAILABLE_MODULES = [
   { key: 'users', label: 'ຈັດການຜູ້ໃຊ້ (Users)' },
   { key: 'roles', label: 'ຈັດການສິດ (Roles)' },
-  { key: 'departments', label: 'ຈັດການພະແນກ (Departments)' },
+  { key: 'branches', label: 'ສາຂາ (Branches)' },
+  { key: 'departments', label: 'ພະແນກ (Departments)' },
+  { key: 'sessions', label: 'ຈັດການ Session ຜູ້ໃຊ້ (Sessions)' },
   { key: 'assets', label: 'ຈັດການຊັບສິນ (Assets)' },
   { key: 'tickets', label: 'ລະບົບແຈ້ງປັນຫາ (Tickets)' },
+  { key: 'ticket-types', label: 'ປະເພດບັນຫາ (Ticket Types)' },
+  { key: 'sla', label: 'ການຈັດການ SLA' },
+  { key: 'kb', label: 'ຖານຂໍ້ມູນຄວາມຮູ້ (Knowledge Base)' },
   { key: 'rooms', label: 'ຈອງຫ້ອງປະຊຸມ (Meeting Rooms)' },
+  { key: 'supplies', label: 'ຂໍອຸປະກອນສິ້ນເປືອງ (Supplies)' },
+  { key: 'announcements', label: 'ປະກາດ (Announcements)' },
+  { key: 'reports', label: 'ບົດລາຍງານ (Reports)' },
+  { key: 'audit-logs', label: 'ບັນທຶກການກວດສອບ (Audit Logs)' },
 ];
+
+// ໝາຍເຫດ: module key ຕ້ອງກົງກັບ string ທີ່ backend ໃຊ້ໃນ @RequirePermission(module, action)
+// ຢ່າແກ້ key ພວກນີ້ໂດຍບໍ່ກວດ backend controller ກ່ອນ — ບໍ່ດັ່ງນັ້ນ permission ຈະບໍ່ກົງກັນ ແລະ guard ຈະບລັອກທຸກຄົນ
 
 const AVAILABLE_ACTIONS = [
   { key: 'create', label: 'ສ້າງ (Create)' },
@@ -20,9 +33,19 @@ const AVAILABLE_ACTIONS = [
   { key: 'update', label: 'ແກ້ໄຂ (Update)' },
   { key: 'delete', label: 'ລົບ (Delete)' },
   { key: 'approve', label: 'ອະນຸມັດ (Approve)' },
+  { key: 'assign', label: 'ມອບໝາຍ (Assign)' },
+  { key: 'fulfill', label: 'ຮັບເຄື່ອງ (Fulfill)' },
+  { key: 'publish', label: 'ເຜີຍແຜ່ (Publish)' },
+  { key: 'export', label: 'ສົ່ງອອກ (Export)' },
 ];
 
 export default function RolesManagement() {
+  // ຕົວຢ່າງການກວດສິດລະດັບ action (ບໍ່ແມ່ນແຄ່ລະດັບໜ້າ) — ຄົນທີ່ເຂົ້າໜ້ານີ້ໄດ້ (read)
+  // ອາດຈະບໍ່ມີສິດ create/update/delete ກໍ່ໄດ້, ຈຶ່ງຕ້ອງເຊັກແຍກແຕ່ລະປຸ່ມ
+  const canCreate = hasPermission('roles', 'create');
+  const canUpdate = hasPermission('roles', 'update');
+  const canDelete = hasPermission('roles', 'delete');
+
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -161,13 +184,15 @@ export default function RolesManagement() {
             <h1 className="text-2xl font-bold text-gray-800">ຈັດການສິດ ແລະ ບົດບາດ (Roles Management)</h1>
             <p className="text-sm text-gray-500 mt-1">ກຳນົດສິດທິການເຂົ້າເຖິງໂມດູນຕ່າງໆຕາມໂຄງສ້າງ Backend</p>
           </div>
-          <button 
-            onClick={handleOpenCreate}
-            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={18} />
-            <span>ເພີ່ມ Role ໃໝ່</span>
-          </button>
+          {canCreate && (
+            <button 
+              onClick={handleOpenCreate}
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Plus size={18} />
+              <span>ເພີ່ມ Role ໃໝ່</span>
+            </button>
+          )}
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -219,19 +244,24 @@ export default function RolesManagement() {
                     </td>
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center gap-2">
-                        <button 
-                          onClick={() => handleOpenEdit(role)} 
-                          className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-medium transition shadow-sm"
-                        >
-                          ແກ້ໄຂ
-                        </button>
-                        {!role.isSystemRole && (
+                        {canUpdate && (
+                          <button 
+                            onClick={() => handleOpenEdit(role)} 
+                            className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-medium transition shadow-sm"
+                          >
+                            ແກ້ໄຂ
+                          </button>
+                        )}
+                        {canDelete && !role.isSystemRole && (
                           <button 
                             onClick={() => handleDelete(role._id)} 
                             className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition shadow-sm"
                           >
                             ລົບ
                           </button>
+                        )}
+                        {!canUpdate && !canDelete && (
+                          <span className="text-xs text-gray-400">ອ່ານໄດ້ຢ່າງດຽວ</span>
                         )}
                       </div>
                     </td>

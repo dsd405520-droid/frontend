@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2 } from 'lucide-react';
+import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
 export default function MeetingRooms() {
+  const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
+
   const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
   
   // States ສຳລັບ Rooms
@@ -559,12 +562,14 @@ export default function MeetingRooms() {
           >
             ການຈອງຂອງຂ້ອຍ (My Bookings)
           </button>
-          <button 
-            onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
-            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'admin' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-            ຈັດການຫ້ອງ (Admin)
-          </button>
+          {canApproveBookings && (
+            <button 
+              onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
+              className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'admin' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              ຈັດການຫ້ອງ (Admin)
+            </button>
+          )}
         </div>
 
         {error && (
@@ -851,7 +856,7 @@ export default function MeetingRooms() {
         )}
 
         {/* TAB 3: ADMIN — Pending approvals + Maintenance toggle + Org-wide utilization report */}
-        {activeTab === 'admin' && (
+        {activeTab === 'admin' && canApproveBookings && (
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-gray-100 flex items-center justify-between">

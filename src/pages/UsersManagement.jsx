@@ -2,10 +2,15 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import MainLayout from '../layouts/MainLayout';
 import { Users, Plus, X, Loader2, AlertCircle, Building2, Layers } from 'lucide-react';
+import { hasPermission } from '../utils/permissions';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
 export default function UsersManagement() {
+  const canCreate = hasPermission('users', 'create');
+  const canUpdate = hasPermission('users', 'update');
+  const canDelete = hasPermission('users', 'delete');
+
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -160,13 +165,15 @@ export default function UsersManagement() {
             <h1 className="text-2xl font-bold text-gray-800">ຈັດການຜູ້ໃຊ້ (Users Management)</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການຂໍ້ມູນພະນັກງານ, ສາຂາ, ພະແນກ ແລະ ສິດທິການໃຊ້ງານ</p>
           </div>
-          <button 
-            onClick={handleOpenCreate}
-            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={18} />
-            <span>ເພີ່ມຜູ້ໃຊ້</span>
-          </button>
+          {canCreate && (
+            <button 
+              onClick={handleOpenCreate}
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Plus size={18} />
+              <span>ເພີ່ມຜູ້ໃຊ້</span>
+            </button>
+          )}
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -221,18 +228,23 @@ export default function UsersManagement() {
                     </td>
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center gap-2">
-                        <button
-                          onClick={() => handleOpenEdit(user)}
-                          className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-medium transition shadow-sm"
-                        >
-                          ແກ້ໄຂ
-                        </button>
-                        <button
-                          onClick={() => handleDelete(user._id || user.id)}
-                          className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition shadow-sm"
-                        >
-                          ລົບ
-                        </button>
+                        {canUpdate && (
+                          <button
+                            onClick={() => handleOpenEdit(user)}
+                            className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-medium transition shadow-sm"
+                          >
+                            ແກ້ໄຂ
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            onClick={() => handleDelete(user._id || user.id)}
+                            className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition shadow-sm"
+                          >
+                            ລົບ
+                          </button>
+                        )}
+                        {!canUpdate && !canDelete && <span className="text-xs text-gray-400">ອ່ານໄດ້ຢ່າງດຽວ</span>}
                       </div>
                     </td>
                   </tr>
