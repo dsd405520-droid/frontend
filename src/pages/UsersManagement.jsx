@@ -25,8 +25,8 @@ export default function UsersManagement() {
     password: '',
     phone: '',
     role: '',
-    branchId: '', // ປ່ຽນຈາກ branchID ເປັນ branchId ໃຫ້ົງກັບ Backend
-    department: '',
+    branchId: '',
+    departmentId: '',        // ← rename to departmentId
   });
 
   const getToken = () => localStorage.getItem('token') || '';
@@ -67,7 +67,7 @@ export default function UsersManagement() {
       phone: '',
       role: '',
       branchId: '',
-      department: '',
+      departmentId: '',
     });
     setError('');
     setIsModalOpen(true);
@@ -80,11 +80,11 @@ export default function UsersManagement() {
       firstName: user.firstName || '',
       lastName: user.lastName || '',
       email: user.email || '',
-      password: '', 
+      password: '',
       phone: user.phone || '',
       role: user.role?._id || user.role?.id || user.role || '',
       branchId: user.branchId?._id || user.branchId?.id || user.branchId || user.branchID?._id || user.branchID?.id || user.branchID || user.branch?._id || user.branch?.id || user.branch || '',
-      department: user.department?._id || user.department?.id || user.department || '',
+      departmentId: user.departmentId?._id || user.departmentId?.id || user.departmentId || '',
     });
     setError('');
     setIsModalOpen(true);
@@ -160,7 +160,7 @@ export default function UsersManagement() {
             <h1 className="text-2xl font-bold text-gray-800">ຈັດການຜູ້ໃຊ້ (Users Management)</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການຂໍ້ມູນພະນັກງານ, ສາຂາ, ພະແນກ ແລະ ສິດທິການໃຊ້ງານ</p>
           </div>
-          <button 
+          <button
             onClick={handleOpenCreate}
             className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
           >
@@ -204,7 +204,7 @@ export default function UsersManagement() {
                       </div>
                       <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
                         <Layers size={14} className="text-gray-400" />
-                        {getDepartmentName(user.department)}
+                        {getDepartmentName(user.departmentId)}
                       </div>
                     </td>
                     <td className="p-4">
@@ -213,9 +213,8 @@ export default function UsersManagement() {
                       </span>
                     </td>
                     <td className="p-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        user.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        }`}>
                         {user.isActive !== false ? 'ເປີດໃຊ້ງານ' : 'ປິດໃຊ້ງານ'}
                       </span>
                     </td>
@@ -372,8 +371,8 @@ export default function UsersManagement() {
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ພະແນກ (Department)</label>
                   <select
-                    value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                    value={formData.departmentId}
+                    onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
                     className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 bg-white"
                   >
                     <option value="">-- ເລືອກພະແນກ --</option>
