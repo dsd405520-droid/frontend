@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Package, Plus, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import axios from '../services/api';
 
 export default function InventorySupplies() {
+  const canRequest = hasPermission('supplies', 'create');
+
   const [requests, setRequests] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -134,13 +137,15 @@ export default function InventorySupplies() {
             <h1 className="text-2xl font-bold text-gray-800">ຂໍອຸປະກອນສິ້ນເປືອງ (Supply Requests)</h1>
             <p className="text-sm text-gray-500 mt-1">ຍື່ນຄຳຂໍເບີກວັດສະດຸ ແລະ ຕິດຕາມສະຖານະການອະນຸມັດ</p>
           </div>
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={18} />
-            <span>ສ້າງຄຳຂໍອຸປະກອນ</span>
-          </button>
+          {canRequest && (
+            <button 
+              onClick={() => setIsModalOpen(true)}
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Plus size={18} />
+              <span>ສ້າງຄຳຂໍອຸປະກອນ</span>
+            </button>
+          )}
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">

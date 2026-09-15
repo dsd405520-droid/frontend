@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   ChevronDown,
@@ -19,13 +19,28 @@ import {
   Settings,
   Tag
 } from 'lucide-react';
-
 import { canView } from '../utils/permissions';
+import api from '../services/api';
 
+// ກວດ module ດຽວ ຫຼື array (any-of) — ໃຊ້ກັບ /branches ທີ່ອີງໃສ່ທັງ 'branches' ແລະ 'departments'
 function canViewAny(moduleOrArray) {
   if (!moduleOrArray) return true;
   const mods = Array.isArray(moduleOrArray) ? moduleOrArray : [moduleOrArray];
   return mods.some((m) => canView(m));
+}
+
+// Backend ຫໍ່ທຸກ response ດ້ວຍ interceptor: { response, msg, data: <ຕົວຈິງ>, time }
+// ຕ້ອງແກະຊັ້ນ .data ອອກກ່ອນ ບໍ່ດັ່ງນັ້ນຄ່າທີ່ອ່ານໄດ້ຈະເປັນ undefined ຕະຫຼອດ (badge ຈຶ່ງບໍ່ເຄີຍຂຶ້ນ)
+function unwrap(payload) {
+  return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
+}
+
+// ສະຖານະ ticket ທີ່ຍັງຖືວ່າ "ຄ້າງ/ຕ້ອງເຮັດ" (ບໍ່ນັບ RESOLVED/CLOSED) — ຕົງກັບ TicketStatus enum ຝັ່ງ backend
+const ACTIVE_TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_ON_USER'];
+
+function countActiveTickets(byStatus) {
+  if (!byStatus) return 0;
+  return ACTIVE_TICKET_STATUSES.reduce((sum, status) => sum + (byStatus[status] || 0), 0);
 }
 
 // ແຕ່ລະລາຍການ menu ຜູກກັບ module key (ຕົງກັບ AVAILABLE_MODULES ໃນ RolesManagement.jsx)
@@ -40,7 +55,7 @@ const MENU_SECTIONS = [
   {
     heading: 'ການບໍລິການ',
     items: [
-      { to: '/issues', label: 'ປັນຫາທີ່ແຈ້ງເຂົ້າມາ', icon: Ticket, module: 'tickets', badge: '4' },
+      { to: '/issues', label: 'ປັນຫາທີ່ແຈ້ງເຂົ້າມາ', icon: Ticket, module: 'tickets', badgeKey: 'tickets' },
       { to: '/sla-management', label: 'ການຈັດການ SLA', icon: Clock, module: 'sla' },
       { to: '/ticket-types', label: 'ປະເພດບັນຫາ', icon: Tag, module: 'ticket-types' },
       { to: '/knowledge-base', label: 'ຖານຂໍ້ມູນຄວາມຮູ້ / FAQ', icon: BookOpen, module: 'kb' },
@@ -74,49 +89,49 @@ const MENU_SECTIONS = [
   },
 ];
 
-
 export default function Sidebar() {
   const location = useLocation();
   const isActive = (path) => location.pathname === path;
 
-  const [unreadAnnouncements, setUnreadAnnouncements] = useState(0);
-  const [unreadNotifications, setUnreadNotifications] = useState(0);
-
-  const fetchUnreadCounts = () => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    const headers = { 'Authorization': `Bearer ${token}` };
-
-    fetch('http://localhost:3000/api/notifications/unread-count', { headers })
-      .then(res => res.ok ? res.json() : null)
-      .then(body => {
-        if (body) setUnreadNotifications(body.data ?? body ?? 0);
-      })
-      .catch(err => console.error('Error fetching notification count:', err));
-
-    fetch('http://localhost:3000/api/announcements/active', { headers })
-      .then(res => res.ok ? res.json() : null)
-      .then(body => {
-        if (!body) return;
-        const list = Array.isArray(body.data) ? body.data : (Array.isArray(body) ? body : []);
-        setUnreadAnnouncements(list.filter(a => !a.isRead).length);
-      })
-      .catch(err => console.error('Error fetching announcement count:', err));
-  };
+  // ຈຳນວນແຈ້ງເຕືອນຕົວຈິງ ດຶງມາຈາກ API ແທນທີ່ຈະ hardcode — ໂຫຼດຕອນເປີດ ແລະ refresh ທຸກໆ 60 ວິນາທີ
+  const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, announcements: 0, notifications: 0 });
 
   useEffect(() => {
-    fetchUnreadCounts();
-  }, [location.pathname]);
+    let cancelled = false;
 
-  useEffect(() => {
-    window.addEventListener('unread-counts-changed', fetchUnreadCounts);
-    return () => window.removeEventListener('unread-counts-changed', fetchUnreadCounts);
+    async function loadCounts() {
+      try {
+        // /dashboard ໃຫ້ທັງ ticket ທີ່ຄ້າງ (ຕາມສິດ: assignedToMe ຖ້າມີ, ບໍ່ດັ່ງນັ້ນໃຊ້ myTickets) ແລະ notifications.unreadCount ໃນຄັ້ງດຽວ
+        const [dashboardRes, announcementsRes] = await Promise.all([
+          api.get('/dashboard'),
+          api.get('/announcements/active'),
+        ]);
+
+        if (cancelled) return;
+
+        const dash = unwrap(dashboardRes.data);
+        const ticketSource = dash?.assignedToMe ?? dash?.myTickets;
+        const ticketsCount = countActiveTickets(ticketSource?.byStatus);
+        const notificationsCount = dash?.notifications?.unreadCount ?? 0;
+
+        const announcementsList = unwrap(announcementsRes.data);
+        const announcementsCount = Array.isArray(announcementsList)
+          ? announcementsList.filter((a) => !a.isRead).length
+          : 0;
+
+        setBadgeCounts({ tickets: ticketsCount, announcements: announcementsCount, notifications: notificationsCount });
+      } catch {
+        // ຖ້າ endpoint ໃດ fail (ເຊັ່ນ role ນີ້ບໍ່ມີສິດ) ໃຫ້ badge ບໍ່ສະແດງ ແທນທີ່ຈະລົ້ມທັງໜ້າ
+      }
+    }
+
+    loadCounts();
+    const interval = setInterval(loadCounts, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
-
-  const badgeCounts = {
-    announcements: unreadAnnouncements,
-    notifications: unreadNotifications,
-  };
 
   return (
     <aside className="w-64 bg-[#111827] text-gray-300 flex flex-col h-screen fixed left-0 top-0 border-r border-gray-800 z-20 overflow-y-auto">
@@ -140,7 +155,7 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Menu List */}
+      {/* Menu List — ຄັດຕອງແຕ່ລະລາຍການດ້ວຍ canView(module) ກ່ອນສະແດງ */}
       <div className="flex-1 p-4 space-y-6">
         {MENU_SECTIONS.map((section) => {
           const visibleItems = section.items.filter((item) => canViewAny(item.module));
@@ -150,22 +165,21 @@ export default function Sidebar() {
             <div key={section.heading}>
               <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2 font-semibold">{section.heading}</p>
               <nav className="space-y-1">
-                {visibleItems.map(({ to, label, icon: Icon, badge, badgeKey, badgeColor }) => {
-                  const liveCount = badgeKey ? badgeCounts[badgeKey] : null;
-                  const displayBadge = badgeKey
-                    ? (liveCount > 0 ? (liveCount > 9 ? '9+' : liveCount) : null)
-                    : badge;
-
+                {visibleItems.map(({ to, label, icon: Icon, badgeKey, badgeColor }) => {
+                  const count = badgeKey ? badgeCounts[badgeKey] : 0;
                   return (
                     <Link
                       key={to}
                       to={to}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
-                        }`}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
+                        isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
+                      }`}
                     >
                       <Icon size={18} /> <span>{label}</span>
-                      {displayBadge && (
-                        <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeColor || 'bg-amber-500 text-black'}`}>{displayBadge}</span>
+                      {count > 0 && (
+                        <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeColor || 'bg-amber-500 text-black'}`}>
+                          {count > 99 ? '99+' : count}
+                        </span>
                       )}
                     </Link>
                   );

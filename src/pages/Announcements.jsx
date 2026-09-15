@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Megaphone, Plus, X, Loader2, Calendar, Pin, Trash2, CheckCircle2, Eye, Building2, Users } from 'lucide-react';
-import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
+import MainLayout from '../layouts/MainLayout';
 
 export default function Announcements() {
+  const canCreate = hasPermission('announcements', 'create');
+  const canUpdate = hasPermission('announcements', 'update'); // pin/unpin ໃຊ້ action 'update' ຕາມ backend
+  const canDelete = hasPermission('announcements', 'delete');
+
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  const canCreate = hasPermission('announcements', 'create');
-  const canUpdate = hasPermission('announcements', 'update');
-  const canDelete = hasPermission('announcements', 'delete');
-
+  
   // State ສຳລັບເບິ່ງລາຍລະອຽດປະກາດ
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -120,8 +120,8 @@ export default function Announcements() {
 
   const handleTogglePin = async (id, currentPinned, e) => {
     e.stopPropagation();
-    const endpoint = currentPinned
-      ? `http://localhost:3000/api/announcements/${id}/unpin`
+    const endpoint = currentPinned 
+      ? `http://localhost:3000/api/announcements/${id}/unpin` 
       : `http://localhost:3000/api/announcements/${id}/pin`;
     try {
       const res = await fetch(endpoint, {
@@ -155,7 +155,6 @@ export default function Announcements() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       setItems(items.map(item => item._id === id ? { ...item, isRead: true } : item));
-      window.dispatchEvent(new Event('unread-counts-changed'));
     } catch (error) {
       console.error('Error marking as read:', error);
     }
@@ -178,17 +177,8 @@ export default function Announcements() {
             <h1 className="text-2xl font-bold text-gray-800">ປະກາດ ແລະ ຂ່າວສານ</h1>
             <p className="text-sm text-gray-500 mt-1">ແຈ້ງຂໍ້ມູນຂ່າວສານສຳຄັນພາຍໃນອົງກອນ</p>
           </div>
-
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={18} />
-            <span>ສ້າງປະກາດໃໝ່</span>
-          </button>
-=======
           {canCreate && (
-            <button
+            <button 
               onClick={() => setIsModalOpen(true)}
               className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
             >
@@ -196,7 +186,6 @@ export default function Announcements() {
               <span>ສ້າງປະກາດໃໝ່</span>
             </button>
           )}
-
         </div>
 
         <div className="space-y-4">
@@ -207,13 +196,14 @@ export default function Announcements() {
             </div>
           ) : items.length > 0 ? (
             items.map((ann) => (
-              <div
-                key={ann._id}
+              <div 
+                key={ann._id} 
                 onClick={() => handleOpenDetail(ann)}
-                className={`bg-white p-5 rounded-xl border transition cursor-pointer hover:border-amber-400 hover:shadow-md space-y-3 ${ann.pinned
-                  ? 'border-amber-400 shadow-sm ring-1 ring-amber-400/20'
-                  : 'border-gray-200'
-                  } ${!ann.isRead ? 'bg-amber-50/20' : ''}`}
+                className={`bg-white p-5 rounded-xl border transition cursor-pointer hover:border-amber-400 hover:shadow-md space-y-3 ${
+                  ann.pinned 
+                    ? 'border-amber-400 shadow-sm ring-1 ring-amber-400/20' 
+                    : 'border-gray-200'
+                } ${!ann.isRead ? 'bg-amber-50/20' : ''}`}
               >
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -236,41 +226,24 @@ export default function Announcements() {
                       <Calendar size={12} />
                       {new Date(ann.createdAt).toLocaleDateString()}
                     </span>
-
-                    <button
-                      onClick={(e) => handleTogglePin(ann._id, ann.pinned, e)}
-                      className="text-gray-400 hover:text-amber-600 transition p-1"
-                      title={ann.pinned ? "ຍົກເລີກປັກໝຸດ" : "ປັກໝຸດ"}
-                    >
-                      <Pin size={16} />
-                    </button>
-                    <button
-                      onClick={(e) => handleDelete(ann._id, e)}
-                      className="text-gray-400 hover:text-rose-600 transition p-1"
-                      title="ລຶບປະກາດ"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-=======
                     {canUpdate && (
-                      <button
-                        onClick={(e) => handleTogglePin(ann._id, ann.pinned, e)}
-                        className="text-gray-400 hover:text-amber-600 transition p-1"
+                      <button 
+                        onClick={(e) => handleTogglePin(ann._id, ann.pinned, e)} 
+                        className="text-gray-400 hover:text-amber-600 transition p-1" 
                         title={ann.pinned ? "ຍົກເລີກປັກໝຸດ" : "ປັກໝຸດ"}
                       >
                         <Pin size={16} />
                       </button>
                     )}
                     {canDelete && (
-                      <button
-                        onClick={(e) => handleDelete(ann._id, e)}
-                        className="text-gray-400 hover:text-rose-600 transition p-1"
+                      <button 
+                        onClick={(e) => handleDelete(ann._id, e)} 
+                        className="text-gray-400 hover:text-rose-600 transition p-1" 
                         title="ລຶບປະກາດ"
                       >
                         <Trash2 size={16} />
                       </button>
                     )}
-
                   </div>
                 </div>
                 <p className="text-sm text-gray-600 line-clamp-2 pl-6">{ann.body}</p>
@@ -299,10 +272,10 @@ export default function Announcements() {
                 <X size={20} />
               </button>
             </div>
-
+            
             <div className="p-6 space-y-4">
               <h2 className="text-xl font-bold text-gray-800">{selectedAnnouncement.title}</h2>
-
+              
               <div className="flex items-center gap-4 text-xs text-gray-500 bg-gray-50 p-3 rounded-xl border border-gray-100">
                 <div><span className="font-semibold">ຂອບເຂດ:</span> {selectedAnnouncement.scope}</div>
                 {selectedAnnouncement.branchId && <div><span className="font-semibold">ສາຂາ:</span> {selectedAnnouncement.branchId}</div>}
@@ -314,7 +287,7 @@ export default function Announcements() {
               </div>
 
               <div className="flex justify-end pt-4 border-t border-gray-100">
-                <button
+                <button 
                   onClick={() => setIsDetailOpen(false)}
                   className="px-5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-medium transition"
                 >
@@ -336,25 +309,25 @@ export default function Announcements() {
                 <X size={20} />
               </button>
             </div>
-
+            
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ຫົວຂໍ້ປະກາດ (Title)</label>
-                <input
-                  type="text"
+                <input 
+                  type="text" 
                   required
                   value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="ລະບຸຫົວຂໍ້ປະກາດ..."
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
+                  placeholder="ລະບຸຫົວຂໍ້ປະກາດ..." 
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ຂອບເຂດການເບິ່ງເຫັນ (Scope)</label>
-                <select
+                <select 
                   value={formData.scope}
-                  onChange={(e) => setFormData({ ...formData, scope: e.target.value })}
+                  onChange={(e) => setFormData({...formData, scope: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
                 >
                   <option value="COMPANY">ທົ່ວອົງກອນ (Company)</option>
@@ -366,12 +339,12 @@ export default function Announcements() {
               {formData.scope === 'BRANCH' && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ລະຫັດສາຂາ (Branch ID - BX001)</label>
-                  <input
-                    type="text"
+                  <input 
+                    type="text" 
                     required
                     value={formData.branchId}
-                    onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
-                    placeholder="BX001"
+                    onChange={(e) => setFormData({...formData, branchId: e.target.value})}
+                    placeholder="BX001" 
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                   />
                 </div>
@@ -380,12 +353,12 @@ export default function Announcements() {
               {formData.scope === 'DEPARTMENT' && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ລະຫັດພະແນກ (Department ID - DX001)</label>
-                  <input
-                    type="text"
+                  <input 
+                    type="text" 
                     required
                     value={formData.departmentId}
-                    onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
-                    placeholder="DX001"
+                    onChange={(e) => setFormData({...formData, departmentId: e.target.value})}
+                    placeholder="DX001" 
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                   />
                 </div>
@@ -394,19 +367,19 @@ export default function Announcements() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ວັນທີເລີ່ມເຜີຍແຜ່ (Publish At)</label>
-                  <input
-                    type="datetime-local"
+                  <input 
+                    type="datetime-local" 
                     value={formData.publishAt}
-                    onChange={(e) => setFormData({ ...formData, publishAt: e.target.value })}
+                    onChange={(e) => setFormData({...formData, publishAt: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ວັນທີໝົດອາຍຸ (Expire At)</label>
-                  <input
-                    type="datetime-local"
+                  <input 
+                    type="datetime-local" 
                     value={formData.expireAt}
-                    onChange={(e) => setFormData({ ...formData, expireAt: e.target.value })}
+                    onChange={(e) => setFormData({...formData, expireAt: e.target.value})}
                     className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                   />
                 </div>
@@ -414,37 +387,37 @@ export default function Announcements() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ເນື້ອໃນ (Body)</label>
-                <textarea
+                <textarea 
                   rows="4"
                   required
                   value={formData.body}
-                  onChange={(e) => setFormData({ ...formData, body: e.target.value })}
+                  onChange={(e) => setFormData({...formData, body: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
                   placeholder="ລາຍລະອຽດເນື້ອໃນປະກາດ..."
                 />
               </div>
 
               <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+                <input 
+                  type="checkbox" 
                   id="pinned"
                   checked={formData.pinned}
-                  onChange={(e) => setFormData({ ...formData, pinned: e.target.checked })}
+                  onChange={(e) => setFormData({...formData, pinned: e.target.checked})}
                   className="w-4 h-4 text-amber-500 border-gray-300 rounded focus:ring-amber-500"
                 />
                 <label htmlFor="pinned" className="text-xs font-medium text-gray-700 cursor-pointer">ປັກໝຸດປະກາດນີ້ (Pin Announcement)</label>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
-                <button
-                  type="button"
+                <button 
+                  type="button" 
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
                 >
                   ຍົກເລີກ
                 </button>
-                <button
-                  type="submit"
+                <button 
+                  type="submit" 
                   disabled={submitting}
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm disabled:opacity-50"
                 >
