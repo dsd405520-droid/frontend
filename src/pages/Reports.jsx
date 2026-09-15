@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart3, Download } from 'lucide-react';
-import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
 const REPORT_TYPE_LABELS = {
@@ -11,8 +10,6 @@ const REPORT_TYPE_LABELS = {
 };
 
 export default function Reports() {
-  const canExport = hasPermission('reports', 'export');
-
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -97,26 +94,22 @@ export default function Reports() {
                 <option key={key} value={key}>{label}</option>
               ))}
             </select>
-            {canExport && (
-              <>
-                <select
-                  value={exportFormat}
-                  onChange={(e) => setExportFormat(e.target.value)}
-                  className="border border-gray-300 rounded-xl px-3 py-2 text-sm"
-                >
-                  <option value="csv">CSV</option>
-                  <option value="pdf">PDF</option>
-                </select>
-                <button
-                  onClick={handleExport}
-                  disabled={exporting}
-                  className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-                >
-                  <Download size={18} />
-                  <span>{exporting ? 'ກຳລັງສົ່ງອອກ...' : 'ສົ່ງອອກລາຍງານ'}</span>
-                </button>
-              </>
-            )}
+            <select
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value)}
+              className="border border-gray-300 rounded-xl px-3 py-2 text-sm"
+            >
+              <option value="csv">CSV</option>
+              <option value="pdf">PDF</option>
+            </select>
+            <button
+              onClick={handleExport}
+              disabled={exporting}
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+            >
+              <Download size={18} />
+              <span>{exporting ? 'ກຳລັງສົ່ງອອກ...' : 'ສົ່ງອອກລາຍງານ'}</span>
+            </button>
           </div>
         </div>
 

@@ -31,38 +31,24 @@ export default function App() {
         {/* ໜ້າ Login ບໍ່ຕ້ອງປ້ອງກັນ */}
         <Route path="/login" element={<Login />} />
 
-        {/* Dashboard: ຕ້ອງ login ຢ່າງດຽວ, ບໍ່ຮຽກຮ້ອງ permission ສະເພາະໂມດູນ */}
+        {/* ໂມດູນທັງໝົດທີ່ຕ້ອງ Login ກ່ອນຈຶ່ງເຂົ້າເບິ່ງໄດ້ (ໃຊ້ ProtectedRoute ຄອບ) */}
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-
-        {/* ການບໍລິການ / Tickets */}
-        <Route path="/issues" element={<ProtectedRoute module="tickets"><Issues /></ProtectedRoute>} />
-        <Route path="/issues/:id/chat" element={<ProtectedRoute module="tickets"><TicketChat /></ProtectedRoute>} />
-        <Route path="/sla-management" element={<ProtectedRoute module="sla"><Slamanagement /></ProtectedRoute>} />
-        <Route path="/ticket-types" element={<ProtectedRoute module="ticket-types"><TicketTypesManagement /></ProtectedRoute>} />
-        <Route path="/knowledge-base" element={<ProtectedRoute module="kb"><KnowledgeBase /></ProtectedRoute>} />
-
-        {/* ອົງກອນ / Admin-level */}
-        <Route path="/users" element={<ProtectedRoute module="users"><UsersManagement /></ProtectedRoute>} />
-        <Route path="/roles" element={<ProtectedRoute module="roles"><RolesManagement /></ProtectedRoute>} />
-        <Route path="/branches" element={<ProtectedRoute module={["branches", "departments"]}><BranchesManagement /></ProtectedRoute>} />
-        {/* ໝາຍເຫດ: AssetManagement.jsx (route /assets) ໃນຄວາມເປັນຈິງເອີ້ນແຕ່ /supply-catalog ແລະ
-            /supply-requests — ບໍ່ໄດ້ແຕະ backend module 'assets' ເລີຍ (ໂມດູນ assets ແທ້ໆ ສຳລັບ
-            ມອບໝາຍອຸປະກອນ/serial number ຍັງບໍ່ມີໜ້າ frontend), ຈຶ່ງ guard ດ້ວຍ 'supplies' ໃຫ້ຕົງກັບ API ຈິງ */}
-        <Route path="/assets" element={<ProtectedRoute module="supplies"><AssetManagement /></ProtectedRoute>} />
-
-        {/* ພື້ນທີ່ເຮັດວຽກ */}
-        <Route path="/meeting-rooms" element={<ProtectedRoute module="rooms"><MeetingRooms /></ProtectedRoute>} />
-        <Route path="/supplies" element={<ProtectedRoute module="supplies"><InventorySupplies /></ProtectedRoute>} />
-
-        {/* ລະບົບ */}
-        <Route path="/announcements" element={<ProtectedRoute module="announcements"><Announcements /></ProtectedRoute>} />
-        {/* Notifications ແມ່ນຂໍ້ມູນສ່ວນຕົວຂອງແຕ່ລະຄົນ ບໍ່ຈຳກັດຕາມ module permission */}
+        <Route path="/issues" element={<ProtectedRoute><Issues /></ProtectedRoute>} />
+        <Route path="/sla-management" element={<ProtectedRoute><Slamanagement /></ProtectedRoute>} />
+        <Route path="/roles" element={<ProtectedRoute><RolesManagement /></ProtectedRoute>} />
+        <Route path="/branches" element={<ProtectedRoute><BranchesManagement /></ProtectedRoute>} />
+        <Route path="/announcements" element={<ProtectedRoute><Announcements /></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
-        <Route path="/reports" element={<ProtectedRoute module="reports"><Reports /></ProtectedRoute>} />
-        <Route path="/audit-logs" element={<ProtectedRoute module="audit-logs"><AuditLogs /></ProtectedRoute>} />
-        {/* Settings ແມ່ນການຕັ້ງຄ່າສ່ວນຕົວ (ລະຫັດຜ່ານ, MFA, Session ຂອງຕົນເອງ) — backend ບໍ່ມີ module 'settings'
-            ແຍກຕ່າງຫາກ, endpoint /sessions/me ທີ່ໜ້ານີ້ໃຊ້ບໍ່ຮຽກຮ້ອງ permission ໃດໆນອກຈາກ login */}
+        <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+        <Route path="/audit-logs" element={<ProtectedRoute><AuditLogs /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/assets" element={<ProtectedRoute><AssetManagement /></ProtectedRoute>} />
+        <Route path="/users" element={<ProtectedRoute><UsersManagement /></ProtectedRoute>} />
+        <Route path="/meeting-rooms" element={<ProtectedRoute><MeetingRooms /></ProtectedRoute>} />
+        <Route path="/supplies" element={<ProtectedRoute><InventorySupplies /></ProtectedRoute>} />
+        <Route path="/knowledge-base" element={<ProtectedRoute><KnowledgeBase /></ProtectedRoute>} />
+        <Route path="/ticket-types" element={<ProtectedRoute><TicketTypesManagement /></ProtectedRoute>} />
+        <Route path="/issues/:id/chat" element={<ProtectedRoute><TicketChat /></ProtectedRoute>} />
 
         {/* ຖ້າພິມ URL ຜິດ ໃຫ້ສົ່ງກັບໄປໜ້າຫຼັກ (ເຊິ່ງຈະຖືກບັງຄັບໄປ Login ຖ້າຫາກຍັງບໍ່ທັນເຂົ້າສູ່ລະບົບ) */}
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,13 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Package, Plus, AlertTriangle, X, Clock, CheckCircle, XCircle } from 'lucide-react';
-import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
 
 export default function AssetManagement() {
-  const canCreateCatalog = hasPermission('supplies', 'create');
-  const canApproveRequests = hasPermission('supplies', 'approve');
-
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'pending'
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -185,15 +181,13 @@ export default function AssetManagement() {
                 <AlertTriangle size={16} />
                 <span>{lowStockOnly ? 'ສະແດງທັງໝົດ' : 'ສະຕັອກໃກ້ໝົດ'}</span>
               </button>
-              {canCreateCatalog && (
-                <button
-                  onClick={() => setIsModalOpen(true)}
-                  className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-                >
-                  <Plus size={18} />
-                  <span>ເພີ່ມລາຍການໃໝ່</span>
-                </button>
-              )}
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ເພີ່ມລາຍການໃໝ່</span>
+              </button>
             </div>
           )}
         </div>
@@ -264,28 +258,22 @@ export default function AssetManagement() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {canApproveRequests ? (
-                        <>
-                          <button
-                            onClick={() => handleApprove(req._id)}
-                            disabled={reviewingId === req._id}
-                            className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium transition disabled:opacity-50 flex items-center gap-1"
-                          >
-                            <CheckCircle size={14} />
-                            <span>{reviewingId === req._id ? 'ກຳລັງດຳເນີນການ...' : 'ອະນຸມັດ'}</span>
-                          </button>
-                          <button
-                            onClick={() => handleReject(req._id)}
-                            disabled={reviewingId === req._id}
-                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-medium transition disabled:opacity-50 flex items-center gap-1"
-                          >
-                            <XCircle size={14} />
-                            <span>ປະຕິເສດ</span>
-                          </button>
-                        </>
-                      ) : (
-                        <span className="text-xs text-gray-400">ບໍ່ມີສິດອະນຸມັດ</span>
-                      )}
+                      <button
+                        onClick={() => handleApprove(req._id)}
+                        disabled={reviewingId === req._id}
+                        className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium transition disabled:opacity-50 flex items-center gap-1"
+                      >
+                        <CheckCircle size={14} />
+                        <span>{reviewingId === req._id ? 'ກຳລັງດຳເນີນການ...' : 'ອະນຸມັດ'}</span>
+                      </button>
+                      <button
+                        onClick={() => handleReject(req._id)}
+                        disabled={reviewingId === req._id}
+                        className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-medium transition disabled:opacity-50 flex items-center gap-1"
+                      >
+                        <XCircle size={14} />
+                        <span>ປະຕິເສດ</span>
+                      </button>
                     </div>
                   </div>
                 );

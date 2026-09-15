@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Clock, Plus, Loader2, X, ChevronDown, Pencil, Trash2, Search, Filter } from 'lucide-react';
-import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
 const PRIORITY_KEYWORDS = {
@@ -34,10 +33,6 @@ const RESPONSE_TIME_SLIDER_MAX = 240;    // ນາທີ — ປັບໄດ້�
 const RESOLUTION_TIME_SLIDER_MAX = 1440; // ນາທີ (24 ຊົ່ວໂມງ)
 
 export default function Slamanagement() {
-  const canCreate = hasPermission('sla', 'create');
-  const canUpdate = hasPermission('sla', 'update');
-  const canDelete = hasPermission('sla', 'delete');
-
   const [searchParams, setSearchParams] = useSearchParams();
   const ticketTypeFilterId = searchParams.get('ticketTypeId') || '';
 
@@ -291,15 +286,13 @@ export default function Slamanagement() {
             <h1 className="text-2xl font-bold text-gray-800">ການຈັດການ SLA</h1>
             <p className="text-sm text-gray-500 mt-1">ກຳນົດນະໂຍບາຍເວລາຕອບກັບ ແລະ ແກ້ໄຂບັນຫາ (NestJS + MongoDB)</p>
           </div>
-          {canCreate && (
-            <button
-              onClick={openCreateModal}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ເພີ່ມນະໂຍບາຍ SLA</span>
-            </button>
-          )}
+          <button
+            onClick={openCreateModal}
+            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+          >
+            <Plus size={18} />
+            <span>ເພີ່ມນະໂຍບາຍ SLA</span>
+          </button>
         </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
@@ -453,24 +446,20 @@ export default function Slamanagement() {
                     </td>
                     <td className="p-4">
                       <div className="flex items-center justify-end gap-2">
-                        {canUpdate && (
-                          <button
-                            onClick={() => openEditModal(item)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-amber-600 transition"
-                            title="ແກ້ໄຂ"
-                          >
-                            <Pencil size={16} />
-                          </button>
-                        )}
-                        {canDelete && (
-                          <button
-                            onClick={() => handleDelete(item)}
-                            className="p-1.5 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition"
-                            title="ລຶບ"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => openEditModal(item)}
+                          className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-amber-600 transition"
+                          title="ແກ້ໄຂ"
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(item)}
+                          className="p-1.5 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition"
+                          title="ລຶບ"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </td>
                   </tr>
