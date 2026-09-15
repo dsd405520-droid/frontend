@@ -300,7 +300,20 @@ export default function Issues() {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.ok ? res.json() : null)
-      .then(data => data && setAvailablePriorities(data.data || []))
+      .then(data => {
+        const priorities = (data && data.data) || [];
+        setAvailablePriorities(priorities);
+        setFormData(prev => {
+          if (priorities.length > 0 && !priorities.includes(prev.priority)) {
+            const type = ticketTypes.find(t => (t._id || t.id) === prev.ticketTypeId);
+            const fallback = type?.defaultPriority && priorities.includes(type.defaultPriority)
+              ? type.defaultPriority
+              : priorities[0];
+            return { ...prev, priority: fallback };
+          }
+          return prev;
+        });
+      })
       .catch(err => console.error('Error fetching available priorities:', err));
   }, [formData.ticketTypeId]);
   const handleSelectTicketType = (type) => {
@@ -322,6 +335,12 @@ export default function Issues() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (availablePriorities && availablePriorities.length > 0 && !availablePriorities.includes(formData.priority)) {
+      alert(`ບໍ່ມີ SLA ສຳລັບລະດັບຄວາມສຳຄັນນີ້. ກະລຸນາເລືອກ: ${availablePriorities.join(', ')}`);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
