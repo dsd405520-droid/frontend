@@ -2,15 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
-import { hasPermission } from '../utils/permissions';
 
 export default function MeetingRooms() {
-<<<<<<< HEAD
   const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
-=======
-  const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
-  const canApproveBookings = hasPermission('rooms', 'update'); // gates room-admin actions (disable room, utilization, approvals)
->>>>>>> 47f1bddff4170179d882303ae36b37f6d4bf7409
 
   const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
   
@@ -568,10 +562,6 @@ export default function MeetingRooms() {
           >
             ການຈອງຂອງຂ້ອຍ (My Bookings)
           </button>
-<<<<<<< HEAD
-=======
-
->>>>>>> 47f1bddff4170179d882303ae36b37f6d4bf7409
           {canApproveBookings && (
             <button 
               onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
@@ -615,16 +605,10 @@ export default function MeetingRooms() {
                             <h3 className="font-bold text-gray-800 text-base">{room.name}</h3>
                             <p className="text-xs text-gray-400">ລະຫັດ: {roomId}</p>
                           </div>
-<<<<<<< HEAD
                           <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
                             room.liveStatus === 'AVAILABLE' ? 'bg-green-100 text-green-700' :
                             room.liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
                           }`}>
-=======
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${room.liveStatus === 'AVAILABLE' ? 'bg-green-100 text-green-700' :
-                            room.liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                            }`}>
->>>>>>> 47f1bddff4170179d882303ae36b37f6d4bf7409
                             {roomStatusLabel(room.liveStatus || room.status)}
                           </span>
                         </div>
@@ -959,18 +943,11 @@ export default function MeetingRooms() {
                         <button
                           onClick={() => toggleRoomStatus(room)}
                           disabled={statusUpdatingRoomId === roomId}
-<<<<<<< HEAD
                           className={`px-4 py-2 rounded-lg text-xs font-medium transition ${
                             isMaintenance
                               ? 'bg-green-50 text-green-700 hover:bg-green-100'
                               : 'bg-red-50 text-red-600 hover:bg-red-100'
                           } disabled:opacity-50`}
-=======
-                          className={`px-4 py-2 rounded-lg text-xs font-medium transition ${isMaintenance
-                            ? 'bg-green-50 text-green-700 hover:bg-green-100'
-                            : 'bg-red-50 text-red-600 hover:bg-red-100'
-                            } disabled:opacity-50`}
->>>>>>> 47f1bddff4170179d882303ae36b37f6d4bf7409
                         >
                           {statusUpdatingRoomId === roomId
                             ? 'ກຳລັງອັບເດດ...'
