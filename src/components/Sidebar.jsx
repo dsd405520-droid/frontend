@@ -22,7 +22,6 @@ import {
 import { canView } from '../utils/permissions';
 import api from '../services/api';
 
-// ກວດ module ດຽວ ຫຼື array (any-of) — ໃຊ້ກັບ /branches ທີ່ອີງໃສ່ທັງ 'branches' ແລະ 'departments'
 function canViewAny(moduleOrArray) {
   if (!moduleOrArray) return true;
   const mods = Array.isArray(moduleOrArray) ? moduleOrArray : [moduleOrArray];

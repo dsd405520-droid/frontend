@@ -35,6 +35,8 @@ export default function KnowledgeBase() {
   const [showUnpublished, setShowUnpublished] = useState(false); // managers only
   const [departments, setDepartments] = useState([]);
   const [knownCategories, setKnownCategories] = useState(new Set());
+  const [knownTags, setKnownTags] = useState(new Set());
+  const [tagFilter, setTagFilter] = useState('');
 
   const token = localStorage.getItem('token');
 
@@ -116,9 +118,11 @@ export default function KnowledgeBase() {
     }
   };
 
-  const displayedArticles = articles.filter(a =>
-    !searchQuery.trim() || a.title?.toLowerCase().includes(searchQuery.trim().toLowerCase())
-  );
+  const displayedArticles = articles.filter(a => {
+    const matchesQuery = !searchQuery.trim() || a.title?.toLowerCase().includes(searchQuery.trim().toLowerCase());
+    const matchesTag = !tagFilter || (a.tags || []).includes(tagFilter);
+    return matchesQuery && matchesTag;
+  });
 
   const openDetail = async (id) => {
     setIsDetailOpen(true);
@@ -306,6 +310,11 @@ export default function KnowledgeBase() {
       articles.forEach(a => a.category && next.add(a.category));
       return next;
     });
+    setKnownTags(prev => {
+      const next = new Set(prev);
+      articles.forEach(a => (a.tags || []).forEach(t => next.add(t)));
+      return next;
+    });
   }, [articles]);
 
   const handleSubmit = async (e) => {
@@ -414,6 +423,17 @@ export default function KnowledgeBase() {
               <option value="">-- ທຸກພະແນກ --</option>
               {departments.map(dept => (
                 <option key={dept._id || dept.id} value={dept._id || dept.id}>{dept.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
+            >
+              <option value="">-- ທຸກ Tag --</option>
+              {[...knownTags].sort().map(tag => (
+                <option key={tag} value={tag}>#{tag}</option>
               ))}
             </select>
 
