@@ -504,13 +504,13 @@ export default function MeetingRooms() {
     }
   };
 
-  // ແປສະຖານະຫ້ອງ (ຄ່າ enum ຈາກ Backend) ໃຫ້ເປັນຄຳລາວທີ່ອ່ານງ່າຍ
+  // ແປສະຖານະຫ້ອງ (ຄ່າ enum ຈາກ Backend, 3 ຄ່າ: AVAILABLE / BOOKED / MAINTENANCE) ໃຫ້ເປັນຄຳລາວທີ່ອ່ານງ່າຍ
   const roomStatusLabel = (status) => {
     switch (status) {
       case 'BOOKED': return 'ກຳລັງໃຊ້ງານ';
-      case 'MAINTENANCE': return 'ປິດປັບປຸງ';
+      case 'MAINTENANCE': return 'ປິດບຳລຸງ';
       case 'AVAILABLE':
-      default: return 'ບໍ່ມີການໃຊ້ງານ';
+      default: return 'ວ່າງ';
     }
   };
 
@@ -921,12 +921,13 @@ export default function MeetingRooms() {
 
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-gray-100 font-bold text-gray-800">
-                ຈັດການສະຖານະຫ້ອງ (Available / Maintenance)
+                ຈັດການສະຖານະຫ້ອງ (ວ່າງ / ກຳລັງໃຊ້ງານ / ປິດບຳລຸງ)
               </div>
               <div className="divide-y divide-gray-100">
                 {rooms.map(room => {
                   const roomId = room.roomId || room._id;
-                  const isMaintenance = room.status === 'MAINTENANCE';
+                  const isMaintenance = room.status === 'MAINTENANCE'; // ໃຊ້ຄວບຄຸມປຸ່ມ toggle (ຕັ້ງຄ່າ static ເທົ່ານັ້ນ)
+                  const liveStatus = room.liveStatus || room.status; // ໃຊ້ສະແດງປ້າຍ badge — ອາດເປັນ BOOKED ໄດ້ຖ້າມີການຈອງຄອບຄຸມເວລານີ້
                   return (
                     <div key={roomId} className="p-4 flex items-center justify-between gap-4">
                       <div>
@@ -934,11 +935,12 @@ export default function MeetingRooms() {
                         <div className="text-xs text-gray-500">{room.location} — ຄວາມຈຸ {room.capacity} ຄົນ</div>
                       </div>
                       <div className="flex items-center gap-3">
-                        {/* ສະຖານະປັດຈຸບັນ — ຄົນລະສ່ວນຈາກປຸ່ມຄຳສັ່ງດ້ານລຸ່ມ ເພື່ອບໍ່ໃຫ້ສັບສົນ */}
+                        {/* ສະຖານະປັດຈຸບັນ (3 ຄ່າ: ວ່າງ / ກຳລັງໃຊ້ງານ / ປິດບຳລຸງ) — ຄົນລະສ່ວນຈາກປຸ່ມຄຳສັ່ງດ້ານລຸ່ມ ເພື່ອບໍ່ໃຫ້ສັບສົນ */}
                         <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                          isMaintenance ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                          liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' :
+                          liveStatus === 'BOOKED' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
                         }`}>
-                          ສະຖານະປັດຈຸບັນ: {isMaintenance ? 'ປິດປັບປຸງ' : 'ເປີດໃຫ້ຈອງ'}
+                          ສະຖານະປັດຈຸບັນ: {roomStatusLabel(liveStatus)}
                         </span>
                         <button
                           onClick={() => toggleRoomStatus(room)}
@@ -951,7 +953,7 @@ export default function MeetingRooms() {
                         >
                           {statusUpdatingRoomId === roomId
                             ? 'ກຳລັງອັບເດດ...'
-                            : isMaintenance ? 'ກົດເພື່ອເປີດໃຊ້ຄືນ →' : 'ກົດເພື່ອປິດສ້ອມແປງ →'}
+                            : isMaintenance ? 'ກົດເພື່ອເປີດໃຊ້ຄືນ →' : 'ກົດເພື່ອປິດບຳລຸງ →'}
                         </button>
                       </div>
                     </div>

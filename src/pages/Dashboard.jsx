@@ -266,14 +266,23 @@ export default function Dashboard() {
               <div className="py-10 text-center text-sm text-gray-400">ບໍ່ມີສິດເຂົ້າເຖິງ ຫຼື ຍັງບໍ່ມີຂໍ້ມູນ</div>
             ) : rooms.length > 0 ? (
               <div className="space-y-2 max-h-56 overflow-y-auto">
-                {rooms.map((r) => (
-                  <div key={r._id} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-700">{r.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.status === 'AVAILABLE' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                      {r.status === 'AVAILABLE' ? 'ວ່າງ' : 'ບຳລຸງຮັກສາ'}
-                    </span>
-                  </div>
-                ))}
+                {rooms.map((r) => {
+                  const liveStatus = r.liveStatus || r.status;
+                  const statusStyle =
+                    liveStatus === 'MAINTENANCE' ? 'bg-red-100 text-red-700' :
+                    liveStatus === 'BOOKED' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700';
+                  const statusLabel =
+                    liveStatus === 'MAINTENANCE' ? 'ປິດບຳລຸງ' :
+                    liveStatus === 'BOOKED' ? 'ກຳລັງໃຊ້ງານ' : 'ວ່າງ';
+                  return (
+                    <div key={r._id} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-700">{r.name}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusStyle}`}>
+                        {statusLabel}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="py-10 text-center text-sm text-gray-400">ບໍ່ມີຫ້ອງປະຊຸມ</div>
