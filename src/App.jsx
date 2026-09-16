@@ -19,6 +19,7 @@ import Settings from './pages/Settings';
 import AssetManagement from './pages/AssetManagement';
 import UsersManagement from './pages/UsersManagement';
 import MeetingRooms from './pages/MeetingRooms';
+import RoomStatusReport from './pages/RoomStatusReport';
 import InventorySupplies from './pages/InventorySupplies';
 import KnowledgeBase from './pages/KnowledgeBase';
 import TicketTypesManagement from './pages/TicketTypesManagement';
@@ -52,6 +53,9 @@ export default function App() {
 
         {/* ພື້ນທີ່ເຮັດວຽກ */}
         <Route path="/meeting-rooms" element={<ProtectedRoute module="rooms"><MeetingRooms /></ProtectedRoute>} />
+        {/* ລາຍງານສະຖານະຫ້ອງຕົວຈິງ — check-in/out, ຜູ້ເຂົ້າຮ່ວມ, ຕໍ່ເວລາ — ອ່ານໄດ້ທຸກຄົນທີ່ມີສິດ rooms:read,
+            ສ່ວນ check-in/checkout/attendees/reschedule ຄວບຄຸມ ownership ພາຍໃນ backend ເອງ (ບໍ່ແມ່ນທີ່ນີ້) */}
+        <Route path="/room-status" element={<ProtectedRoute module="rooms"><RoomStatusReport /></ProtectedRoute>} />
         <Route path="/supplies" element={<ProtectedRoute module="supplies"><InventorySupplies /></ProtectedRoute>} />
 
         {/* ລະບົບ */}

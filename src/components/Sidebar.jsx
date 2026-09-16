@@ -11,6 +11,7 @@ import {
   Building2,
   Package,
   Calendar,
+  Activity,
   Briefcase,
   Megaphone,
   Bell,
@@ -74,6 +75,7 @@ const MENU_SECTIONS = [
     heading: 'ພື້ນທີ່ເຮັດວຽກ',
     items: [
       { to: '/meeting-rooms', label: 'ຈອງຫ້ອງປະຊຸມ', icon: Calendar, module: 'rooms' },
+      { to: '/room-status', label: 'ສະຖານະຫ້ອງປະຊຸມຕົວຈິງ', icon: Activity, module: 'rooms' },
       { to: '/supplies', label: 'ຂໍອຸປະກອນສິ້ນເປືອງ', icon: Briefcase, module: 'supplies' },
     ],
   },
