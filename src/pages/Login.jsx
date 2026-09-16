@@ -17,6 +17,15 @@ export default function Login() {
   const [mfaSubmitting, setMfaSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
 
+  // Forced MFA enrollment (first login on an admin role with mfaRequired)
+  const [setupToken, setSetupToken] = useState('');
+  const [mfaSetupStep, setMfaSetupStep] = useState(null); // null | 'choose' | 'totp' | 'email'
+  const [setupQr, setSetupQr] = useState('');
+  const [setupOtpauthUrl, setSetupOtpauthUrl] = useState('');
+  const [setupCode, setSetupCode] = useState('');
+  const [setupSubmitting, setSetupSubmitting] = useState(false);
+  const [resendingSetup, setResendingSetup] = useState(false);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
@@ -38,9 +47,10 @@ export default function Login() {
       }
 
       if (result.data.mfaSetupRequired) {
-        // First-time forced MFA enrollment (TOTP QR / backup codes) is a
-        // separate flow this UI doesn't implement yet.
-        throw new Error('ບັນຊີນີ້ຕ້ອງການຕັ້ງຄ່າ MFA ກ່ອນ — ຟີເຈີນີ້ຍັງບໍ່ຮອງຮັບຢູ່ໜ້ານີ້');
+        setSetupToken(result.data.setupToken);
+        setMfaSetupStep('choose');
+        setLoading(false);
+        return;
       }
 
       if (result.data.mfaRequired) {
@@ -75,6 +85,77 @@ export default function Login() {
 
     navigate('/');
     window.location.reload();
+  };
+
+  const handleChooseSetupMethod = async (method) => {
+    setError('');
+    setSetupSubmitting(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/mfa/setup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${setupToken}`,
+        },
+        body: JSON.stringify({ method }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.msg || 'ຕັ້ງຄ່າ MFA ບໍ່ສຳເລັດ');
+
+      if (method === 'totp') {
+        setSetupQr(result.data.qrCodeDataUrl);
+        setSetupOtpauthUrl(result.data.otpauthUrl);
+        setMfaSetupStep('totp');
+      } else {
+        setMfaSetupStep('email');
+      }
+    } catch (err) {
+      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setSetupSubmitting(false);
+    }
+  };
+
+  const handleEnableMfa = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSetupSubmitting(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/mfa/enable', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${setupToken}`,
+        },
+        body: JSON.stringify({ code: setupCode }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.msg || 'ລະຫັດບໍ່ຖືກຕ້ອງ');
+
+      // Forced-setup flow logs the user straight in on success.
+      completeLoginWithToken(result.data.accessToken);
+    } catch (err) {
+      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setSetupSubmitting(false);
+    }
+  };
+
+  const handleResendSetupCode = async () => {
+    setResendingSetup(true);
+    setError('');
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/mfa/resend-code', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${setupToken}` },
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.msg || 'ສົ່ງລະຫັດຄືນບໍ່ສຳເລັດ');
+    } catch (err) {
+      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setResendingSetup(false);
+    }
   };
 
   const handleMfaVerify = async (e) => {
@@ -143,7 +224,86 @@ export default function Login() {
           </div>
         )}
 
-        {!mfaStep ? (
+        {mfaSetupStep ? (
+          <div className="space-y-4">
+            {mfaSetupStep === 'choose' && (
+              <>
+                <p className="text-sm text-yellow-200/90">ບັນຊີນີ້ຕ້ອງການຕັ້ງຄ່າ MFA ກ່ອນເຂົ້າສູ່ລະບົບ — ເລືອກວິທີ:</p>
+                <button
+                  type="button"
+                  disabled={setupSubmitting}
+                  onClick={() => handleChooseSetupMethod('totp')}
+                  className="w-full bg-emerald-950/80 border border-emerald-600/60 hover:border-yellow-400 text-white py-3 rounded-xl text-sm transition disabled:opacity-50"
+                >
+                  ແອັບ Authenticator (Google Authenticator, Authy...)
+                </button>
+                <button
+                  type="button"
+                  disabled={setupSubmitting}
+                  onClick={() => handleChooseSetupMethod('email')}
+                  className="w-full bg-emerald-950/80 border border-emerald-600/60 hover:border-yellow-400 text-white py-3 rounded-xl text-sm transition disabled:opacity-50"
+                >
+                  ອີເມວ
+                </button>
+              </>
+            )}
+
+            {mfaSetupStep === 'totp' && (
+              <form onSubmit={handleEnableMfa} className="space-y-4">
+                <p className="text-sm text-yellow-200/90">ສະແກນ QR ນີ້ດ້ວຍແອັບ Authenticator ຂອງທ່ານ:</p>
+                {setupQr && (
+                  <img src={setupQr} alt="MFA QR code" className="mx-auto rounded-xl bg-white p-2" style={{ width: 200, height: 200 }} />
+                )}
+                <input
+                  type="text"
+                  required
+                  maxLength={6}
+                  value={setupCode}
+                  onChange={(e) => setSetupCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456"
+                  className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                />
+                <button
+                  type="submit"
+                  disabled={setupSubmitting || setupCode.length !== 6}
+                  className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50"
+                >
+                  {setupSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>ຢືນຢັນ ແລະ ເປີດໃຊ້ MFA</span>}
+                </button>
+              </form>
+            )}
+
+            {mfaSetupStep === 'email' && (
+              <form onSubmit={handleEnableMfa} className="space-y-4">
+                <p className="text-sm text-yellow-200/90">ພວກເຮົາໄດ້ສົ່ງລະຫັດໄປທາງອີເມວຂອງທ່ານແລ້ວ</p>
+                <input
+                  type="text"
+                  required
+                  maxLength={6}
+                  value={setupCode}
+                  onChange={(e) => setSetupCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456"
+                  className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                />
+                <button
+                  type="submit"
+                  disabled={setupSubmitting || setupCode.length !== 6}
+                  className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50"
+                >
+                  {setupSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>ຢືນຢັນ ແລະ ເປີດໃຊ້ MFA</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResendSetupCode}
+                  disabled={resendingSetup}
+                  className="w-full text-yellow-300 text-xs underline disabled:opacity-50"
+                >
+                  {resendingSetup ? 'ກຳລັງສົ່ງ...' : 'ສົ່ງລະຫັດອີກຄັ້ງ'}
+                </button>
+              </form>
+            )}
+          </div>
+        ) : !mfaStep ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-yellow-200/90 mb-1">ອີເມວ (Email)</label>
