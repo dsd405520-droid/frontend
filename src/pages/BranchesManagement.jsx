@@ -35,12 +35,15 @@ export default function BranchesManagement() {
   const [deptForm, setDeptForm] = useState({
     branchId: '',
     name: '',
-    managerIds: '',
+    managerIds: [],
     isActive: true,
   });
 
   const [branchSearchQuery, setBranchSearchQuery] = useState('');
   const [deptSearchQuery, setDeptSearchQuery] = useState('');
+  const [eligibleManagers, setEligibleManagers] = useState([]); // users with the DEPT_MANAGER role
+  const [managerSearchQuery, setManagerSearchQuery] = useState('');
+  const [isManagerDropdownOpen, setIsManagerDropdownOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
   const [editingDept, setEditingDept] = useState(null);
 
@@ -50,13 +53,30 @@ export default function BranchesManagement() {
     const headers = { 'Authorization': `Bearer ${token}` };
 
     try {
-      const [branchRes, deptRes] = await Promise.all([
+      const [branchRes, deptRes, usersRes, rolesRes] = await Promise.all([
         fetch('http://localhost:3000/api/branches', { headers }),
-        fetch('http://localhost:3000/api/departments', { headers })
+        fetch('http://localhost:3000/api/departments', { headers }),
+        fetch('http://localhost:3000/api/users', { headers }),
+        fetch('http://localhost:3000/api/roles', { headers }),
       ]);
 
       const branchData = await branchRes.json();
       const deptData = await deptRes.json();
+
+      if (usersRes.ok && rolesRes.ok) {
+        const usersData = await usersRes.json();
+        const rolesData = await rolesRes.json();
+        const userList = Array.isArray(usersData) ? usersData : (usersData?.data || []);
+        const roleList = Array.isArray(rolesData) ? rolesData : (rolesData?.data || []);
+        const managerRole = roleList.find(r => r.name === 'DEPT_MANAGER');
+        const managerRoleId = managerRole?._id || managerRole?.id;
+        setEligibleManagers(
+          userList.filter(u => {
+            const roleId = u.role?._id || u.role?.id || u.role;
+            return roleId === managerRoleId;
+          })
+        );
+      }
 
       if (Array.isArray(branchData)) {
         setBranches(branchData);
@@ -143,14 +163,11 @@ export default function BranchesManagement() {
     setSubmittingDept(true);
 
     const token = localStorage.getItem('token');
-    const formattedManagerIds = deptForm.managerIds
-      ? deptForm.managerIds.split(',').map(id => id.trim()).filter(Boolean)
-      : [];
 
     const payload = {
       branchId: deptForm.branchId,
       name: deptForm.name,
-      managerIds: formattedManagerIds,
+      managerIds: deptForm.managerIds,
       isActive: deptForm.isActive,
     };
 
@@ -178,7 +195,7 @@ export default function BranchesManagement() {
       setDeptForm({
         branchId: '',
         name: '',
-        managerIds: '',
+        managerIds: [],
         isActive: true,
       });
       fetchData();
@@ -245,7 +262,7 @@ export default function BranchesManagement() {
     setDeptForm({
       branchId: '',
       name: '',
-      managerIds: '',
+      managerIds: [],
       isActive: true,
     });
     setDeptError('');
@@ -257,12 +274,31 @@ export default function BranchesManagement() {
     setDeptForm({
       branchId: dept.branchId?._id || dept.branchId?.id || dept.branchId || '',
       name: dept.name || '',
-      managerIds: Array.isArray(dept.managerIds) ? dept.managerIds.join(', ') : '',
+      managerIds: Array.isArray(dept.managerIds) ? dept.managerIds : [],
       isActive: dept.isActive !== false,
     });
     setDeptError('');
     setIsDeptModalOpen(true);
   };
+
+  const getManagerName = (id) => {
+    const m = eligibleManagers.find(u => (u._id || u.id) === id);
+    return m ? [m.firstName, m.lastName].filter(Boolean).join(' ') || m.email : id;
+  };
+
+  const toggleManager = (userId) => {
+    setDeptForm(prev => ({
+      ...prev,
+      managerIds: prev.managerIds.includes(userId)
+        ? prev.managerIds.filter(id => id !== userId)
+        : [...prev.managerIds, userId]
+    }));
+  };
+
+  const filteredEligibleManagers = eligibleManagers.filter(u =>
+    [u.firstName, u.lastName].filter(Boolean).join(' ').toLowerCase().includes(managerSearchQuery.toLowerCase())
+    || u.email?.toLowerCase().includes(managerSearchQuery.toLowerCase())
+  );
 
   const handleDeptDelete = async (id) => {
     if (!confirm('ທ່ານຕ້ອງການລຶບພະແນກນີ້ແທ້ບໍ?')) return;
@@ -446,7 +482,7 @@ export default function BranchesManagement() {
                         {getBranchName(item.branchId)}
                       </td>
                       <td className="p-4 text-xs text-gray-500">
-                        {item.managerIds && item.managerIds.length > 0 ? item.managerIds.join(', ') : 'ຍັງບໍ່ມີຜູ້ຈັດການ'}
+                        {item.managerIds && item.managerIds.length > 0 ? item.managerIds.map(getManagerName).join(', ') : 'ຍັງບໍ່ມີຜູ້ຈັດການ'}
                       </td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${item.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -643,15 +679,56 @@ export default function BranchesManagement() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Manager IDs (ຂັ້ນດ້ວຍເຄື່ອງໝາຍຈຸດ ,)</label>
+              <div className="relative">
+                <label className="block text-xs font-medium text-gray-700 mb-1">ຜູ້ຈັດການພະແນກ (Department Managers)</label>
+
+                {deptForm.managerIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {deptForm.managerIds.map(id => (
+                      <span key={id} className="flex items-center gap-1 bg-amber-50 text-amber-700 text-xs px-2 py-1 rounded-lg">
+                        {getManagerName(id)}
+                        <button type="button" onClick={() => toggleManager(id)} className="text-amber-500 hover:text-amber-700">
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <input
                   type="text"
-                  value={deptForm.managerIds}
-                  onChange={(e) => setDeptForm({ ...deptForm, managerIds: e.target.value })}
-                  placeholder="ຕົວຢ່າງ: U010, U011"
+                  value={managerSearchQuery}
+                  onChange={(e) => setManagerSearchQuery(e.target.value)}
+                  onFocus={() => setIsManagerDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setIsManagerDropdownOpen(false), 150)}
+                  placeholder="ພິມຊື່ຜູ້ຈັດການ..."
                   className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
                 />
+
+                {isManagerDropdownOpen && (
+                  <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {filteredEligibleManagers.length > 0 ? (
+                      filteredEligibleManagers.map(u => {
+                        const id = u._id || u.id;
+                        const selected = deptForm.managerIds.includes(id);
+                        return (
+                          <div
+                            key={id}
+                            onMouseDown={() => toggleManager(id)}
+                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-amber-50 flex items-center justify-between ${selected ? 'bg-amber-50 text-amber-800 font-medium' : 'text-gray-700'}`}
+                          >
+                            <span>{[u.firstName, u.lastName].filter(Boolean).join(' ') || u.email}</span>
+                            {selected && <span className="text-amber-500 text-xs">✓</span>}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="px-3 py-3 text-xs text-gray-400 text-center">
+                        {eligibleManagers.length === 0 ? 'ບໍ່ພົບຜູ້ໃຊ້ທີ່ມີສິດ DEPT_MANAGER' : 'ບໍ່ພົບຜູ້ໃຊ້'}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 pt-2">
