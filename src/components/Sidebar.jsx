@@ -20,7 +20,8 @@ import {
   Settings,
   Tag
 } from 'lucide-react';
-import { canView } from '../utils/permissions';
+import { LogOut } from 'lucide-react';
+import { canView, logout, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 
 // ກວດ module ດຽວ ຫຼື array (any-of) — ໃຊ້ກັບ /branches ທີ່ອີງໃສ່ທັງ 'branches' ແລະ 'departments'
@@ -94,6 +95,8 @@ const MENU_SECTIONS = [
 export default function Sidebar() {
   const location = useLocation();
   const isActive = (path) => location.pathname === path;
+  const user = getCurrentUser();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // ຈຳນວນແຈ້ງເຕືອນຕົວຈິງ ດຶງມາຈາກ API ແທນທີ່ຈະ hardcode — ໂຫຼດຕອນເປີດ ແລະ refresh ທຸກໆ 60 ວິນາທີ
   const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, announcements: 0, notifications: 0 });
@@ -173,9 +176,8 @@ export default function Sidebar() {
                     <Link
                       key={to}
                       to={to}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
-                        isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
-                      }`}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
+                        }`}
                     >
                       <Icon size={18} /> <span>{label}</span>
                       {count > 0 && (
@@ -191,6 +193,49 @@ export default function Sidebar() {
           );
         })}
       </div>
+
+      {/* User info + Logout */}
+      <div className="p-4 border-t border-gray-800">
+        {user && (
+          <div className="mb-2 px-1 overflow-hidden">
+            <p className="text-sm font-medium text-white truncate">{user.email}</p>
+            <p className="text-[11px] text-gray-400 truncate">{user.role}</p>
+          </div>
+        )}
+        <button
+          onClick={() => setShowLogoutConfirm(true)}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-red-500/10 hover:text-red-400 transition"
+        >
+          <LogOut size={18} />
+          <span>ອອກຈາກລະບົບ</span>
+        </button>
+      </div>
+
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-4">
+              <LogOut size={22} />
+            </div>
+            <h3 className="font-bold text-gray-800 text-lg mb-2">ອອກຈາກລະບົບ</h3>
+            <p className="text-sm text-gray-500 mb-6">ທ່ານຕ້ອງການອອກຈາກລະບົບແທ້ບໍ?</p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition"
+              >
+                ຍົກເລີກ
+              </button>
+              <button
+                onClick={logout}
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+              >
+                ອອກຈາກລະບົບ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

@@ -1,13 +1,33 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
-import { canView } from '../utils/permissions';
+import { canView, logout } from '../utils/permissions';
+
+function isTokenExpired(token) {
+  try {
+    const { exp } = JSON.parse(atob(token.split('.')[1]));
+    return !exp || exp * 1000 < Date.now();
+  } catch {
+    return true;
+  }
+}
 
 export default function ProtectedRoute({ children, module, action = 'read' }) {
   const token = localStorage.getItem('token');
 
-  // ຖ້າບໍ່ມີ Token ໃຫ້ສົ່ງກັບໄປໜ້າ Login ທັນທີ
-  if (!token) {
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const current = localStorage.getItem('token');
+      if (current && isTokenExpired(current)) {
+        logout();
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!token || isTokenExpired(token)) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     return <Navigate to="/login" replace />;
   }
 
