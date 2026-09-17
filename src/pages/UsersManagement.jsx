@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import MainLayout from '../layouts/MainLayout';
-import { Users, Plus, X, Loader2, AlertCircle, Building2, Layers, Search, Filter } from 'lucide-react';
+import { Users, Plus, X, Loader2, AlertCircle, Building2, Layers } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 
 const API_BASE_URL = 'http://localhost:3000/api';
@@ -16,14 +16,6 @@ export default function UsersManagement() {
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState([]);
-  const [statusFilter, setStatusFilter] = useState([]);
-  const [branchFilter, setBranchFilter] = useState([]);
-  const [departmentFilter, setDepartmentFilter] = useState([]);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const filterRef = useRef(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -93,7 +85,7 @@ export default function UsersManagement() {
       firstName: user.firstName || '',
       lastName: user.lastName || '',
       email: user.email || '',
-      password: '',
+      password: '', 
       phone: user.phone || '',
       role: user.role?._id || user.role?.id || user.role || '',
       branchId: user.branchId?._id || user.branchId?.id || user.branchId || user.branchID?._id || user.branchID?.id || user.branchID || user.branch?._id || user.branch?.id || user.branch || '',
@@ -165,52 +157,6 @@ export default function UsersManagement() {
     return found?.name || r || 'USER';
   };
 
-  const toggleRoleFilter = (id) => {
-    setRoleFilter(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
-  };
-  const toggleStatusFilter = (status) => {
-    setStatusFilter(prev => prev.includes(status) ? prev.filter(v => v !== status) : [...prev, status]);
-  };
-  const toggleBranchFilter = (id) => {
-    setBranchFilter(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
-  };
-  const toggleDepartmentFilter = (id) => {
-    setDepartmentFilter(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
-  };
-
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (filterRef.current && !filterRef.current.contains(e.target)) {
-        setIsFilterOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const activeFilterCount = roleFilter.length + statusFilter.length + branchFilter.length + departmentFilter.length;
-
-  const filteredUsers = users.filter((user) => {
-    const query = searchQuery.trim().toLowerCase();
-    const matchesSearch = !query || [user.firstName, user.lastName, user.email, user.employeeCode]
-      .filter(Boolean)
-      .some((field) => field.toLowerCase().includes(query));
-
-    const roleId = user.role?._id || user.role?.id || user.role;
-    const matchesRole = roleFilter.length === 0 || roleFilter.includes(roleId);
-
-    const status = user.isActive !== false ? 'active' : 'inactive';
-    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(status);
-
-    const branchIdVal = user.branchId?._id || user.branchId?.id || user.branchId || user.branchID?._id || user.branchID?.id || user.branchID || user.branch?._id || user.branch?.id || user.branch;
-    const matchesBranch = branchFilter.length === 0 || branchFilter.includes(branchIdVal);
-
-    const deptIdVal = user.departmentId?._id || user.departmentId?.id || user.departmentId;
-    const matchesDepartment = departmentFilter.length === 0 || departmentFilter.includes(deptIdVal);
-
-    return matchesSearch && matchesRole && matchesStatus && matchesBranch && matchesDepartment;
-  });
-
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -220,7 +166,7 @@ export default function UsersManagement() {
             <p className="text-sm text-gray-500 mt-1">ຈັດການຂໍ້ມູນພະນັກງານ, ສາຂາ, ພະແນກ ແລະ ສິດທິການໃຊ້ງານ</p>
           </div>
           {canCreate && (
-            <button
+            <button 
               onClick={handleOpenCreate}
               className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
             >
@@ -228,93 +174,6 @@ export default function UsersManagement() {
               <span>ເພີ່ມຜູ້ໃຊ້</span>
             </button>
           )}
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ຄົ້ນຫາຊື່, ອີເມວ, ລະຫັດພະນັກງານ..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-            />
-          </div>
-
-          <div className="relative" ref={filterRef}>
-            <button
-              onClick={() => setIsFilterOpen(!isFilterOpen)}
-              className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition"
-            >
-              <Filter size={16} />
-              <span>FILTER</span>
-              {activeFilterCount > 0 && <span>{` (${activeFilterCount})`}</span>}
-            </button>
-
-            {isFilterOpen && (
-              <div className="absolute right-0 mt-2 w-[30rem] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
-                <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2">
-                  <div>
-                    <p className="text-[11px] font-semibold text-gray-400 uppercase mb-1 px-1">Role</p>
-                    <div className="max-h-40 overflow-y-auto">
-                      {roles.map((r) => (
-                        <label key={r._id || r.id} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs text-gray-700">
-                          <input type="checkbox" checked={roleFilter.includes(r._id || r.id)} onChange={() => toggleRoleFilter(r._id || r.id)} className="rounded" />
-                          {r.name}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border-l border-gray-100 pl-2">
-                    <p className="text-[11px] font-semibold text-gray-400 uppercase mb-1 px-1">ສະຖານະ</p>
-                    <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs text-gray-700">
-                      <input type="checkbox" checked={statusFilter.includes('active')} onChange={() => toggleStatusFilter('active')} className="rounded" />
-                      ເປີດໃຊ້ງານ
-                    </label>
-                    <label className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs text-gray-700">
-                      <input type="checkbox" checked={statusFilter.includes('inactive')} onChange={() => toggleStatusFilter('inactive')} className="rounded" />
-                      ປິດໃຊ້ງານ
-                    </label>
-                  </div>
-
-                  <div className="border-l border-gray-100 pl-2">
-                    <p className="text-[11px] font-semibold text-gray-400 uppercase mb-1 px-1">ສາຂາ</p>
-                    <div className="max-h-40 overflow-y-auto">
-                      {branches.map((b) => (
-                        <label key={b._id || b.id} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs text-gray-700">
-                          <input type="checkbox" checked={branchFilter.includes(b._id || b.id)} onChange={() => toggleBranchFilter(b._id || b.id)} className="rounded" />
-                          {b.name}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border-l border-gray-100 pl-2">
-                    <p className="text-[11px] font-semibold text-gray-400 uppercase mb-1 px-1">ພະແນກ</p>
-                    <div className="max-h-40 overflow-y-auto">
-                      {departments.map((d) => (
-                        <label key={d._id || d.id} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-gray-50 cursor-pointer text-xs text-gray-700">
-                          <input type="checkbox" checked={departmentFilter.includes(d._id || d.id)} onChange={() => toggleDepartmentFilter(d._id || d.id)} className="rounded" />
-                          {d.name}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {activeFilterCount > 0 && (
-                  <button
-                    onClick={() => { setRoleFilter([]); setStatusFilter([]); setBranchFilter([]); setDepartmentFilter([]); }}
-                    className="w-full text-center text-xs text-amber-600 hover:text-amber-700 mt-3 pt-2 border-t border-gray-100"
-                  >
-                    ລ້າງຕົວກອງທັງໝົດ
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -334,8 +193,8 @@ export default function UsersManagement() {
                 <tr>
                   <td colSpan="6" className="py-12 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td>
                 </tr>
-              ) : filteredUsers.length > 0 ? (
-                filteredUsers.map((user) => (
+              ) : users.length > 0 ? (
+                users.map((user) => (
                   <tr key={user._id || user.id} className="hover:bg-gray-50">
                     <td className="p-4">
                       <div className="font-semibold text-gray-900">{user.firstName} {user.lastName}</div>
@@ -361,8 +220,9 @@ export default function UsersManagement() {
                       </span>
                     </td>
                     <td className="p-4">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${user.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                        }`}>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        user.isActive !== false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
                         {user.isActive !== false ? 'ເປີດໃຊ້ງານ' : 'ປິດໃຊ້ງານ'}
                       </span>
                     </td>
@@ -391,9 +251,7 @@ export default function UsersManagement() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6" className="py-12 text-center text-sm text-gray-400">
-                    {users.length === 0 ? 'ຍັງບໍ່ມີຂໍ້ມູນຜູ້ໃຊ້ໃນລະບົບ' : 'ບໍ່ພົບຜູ້ໃຊ້ທີ່ກົງກັບການຄົ້ນຫາ/ຕົວກອງ'}
-                  </td>
+                  <td colSpan="6" className="py-12 text-center text-sm text-gray-400">ຍັງບໍ່ມີຂໍ້ມູນຜູ້ໃຊ້ໃນລະບົບ</td>
                 </tr>
               )}
             </tbody>

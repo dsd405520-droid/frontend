@@ -22,6 +22,8 @@ export default function RoomStatusReport() {
   const [extendNewEndAt, setExtendNewEndAt] = useState('');
   const [extendError, setExtendError] = useState('');
   const [extendSubmitting, setExtendSubmitting] = useState(false);
+  const [historyLimit, setHistoryLimit] = useState(10);
+  const [activeTab, setActiveTab] = useState('status'); // 'status' | 'my-meetings' | 'history'
 
   useEffect(() => {
     fetchRooms();
@@ -72,6 +74,11 @@ export default function RoomStatusReport() {
     .filter((b) => b.status === 'CONFIRMED' || b.status === 'PENDING')
     .filter((b) => new Date(b.endAt) >= new Date(now.getTime() - 60 * 60000)) // ຍັງບໍ່ຈົບເກີນ 1 ຊົ່ວໂມງ
     .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
+
+  // ປະຫວັດການປະຊຸມທີ່ຈົບໄປແລ້ວ (CONFIRMED ແລະ ຮອດ endAt ແລ້ວ) — ໂຊລ້າສຸດກ່ອນ
+  const pastBookings = myBookings
+    .filter((b) => b.status === 'CONFIRMED' && new Date(b.endAt) < now)
+    .sort((a, b) => new Date(b.startAt) - new Date(a.startAt));
 
   function isActiveNow(b) {
     return new Date(b.startAt) <= now && now < new Date(b.endAt);
@@ -151,7 +158,33 @@ export default function RoomStatusReport() {
           </p>
         </div>
 
-        {/* ສ່ວນ 1: ສະຖານະຫ້ອງທັງໝົດ (ອ່ານໄດ້ທຸກຄົນ) */}
+        {/* ແຖບເລືອກ (tabs) — ແທນການລຽນລ້ວນລົງມາ ໃຫ້ເບິ່ງງ່າຍ ແລະ ສະບາຍຕາຂຶ້ນ */}
+        <div className="flex border-b border-gray-200 gap-6">
+          <button
+            onClick={() => setActiveTab('status')}
+            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'status' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            ສະຖານະຫ້ອງທັງໝົດ
+          </button>
+          <button
+            onClick={() => setActiveTab('my-meetings')}
+            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'my-meetings' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            ການປະຊຸມຂອງທ່ານ
+            {relevantBookings.length > 0 && (
+              <span className="ml-1.5 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">{relevantBookings.length}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'history' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            ປະຫວັດການປະຊຸມ
+          </button>
+        </div>
+
+        {/* ແຖບ 1: ສະຖານະຫ້ອງທັງໝົດ (ອ່ານໄດ້ທຸກຄົນ) */}
+        {activeTab === 'status' && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 font-bold text-gray-800">ສະຖານະຫ້ອງທັງໝົດ</div>
           {roomsError && <div className="p-4 text-sm text-red-600">{roomsError}</div>}
@@ -178,8 +211,10 @@ export default function RoomStatusReport() {
             </div>
           )}
         </div>
+        )}
 
-        {/* ສ່ວນ 2: ການຈອງຂອງຂ້ອຍ — check-in / check-out / ຜູ້ເຂົ້າຮ່ວມ / ຕໍ່ເວລາ */}
+        {/* ແຖບ 2: ການຈອງຂອງຂ້ອຍ — check-in / check-out / ຜູ້ເຂົ້າຮ່ວມ / ຕໍ່ເວລາ */}
+        {activeTab === 'my-meetings' && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 font-bold text-gray-800">ການປະຊຸມຂອງທ່ານ</div>
           {bookingsError && <div className="p-4 text-sm text-red-600">{bookingsError}</div>}
@@ -282,6 +317,64 @@ export default function RoomStatusReport() {
             </div>
           )}
         </div>
+        )}
+
+        {/* ແຖບ 3: ປະຫວັດການປະຊຸມທີ່ຈົບໄປແລ້ວ — ຈຳນວນ ແລະ ຊື່ຄົນເຂົ້າຮ່ວມແຕ່ລະຄັ້ງ */}
+        {activeTab === 'history' && (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-gray-100 font-bold text-gray-800">ປະຫວັດການປະຊຸມຂອງທ່ານ</div>
+          {pastBookings.length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-400">ຍັງບໍ່ມີປະຫວັດການປະຊຸມທີ່ຈົບແລ້ວ</div>
+          ) : (
+            <>
+              <div className="divide-y divide-gray-100">
+                {pastBookings.slice(0, historyLimit).map((b) => {
+                  const roomName = b.roomId?.name || b.roomId;
+                  const attendeeCount = (b.attendees || []).length;
+                  return (
+                    <div key={b._id} className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="font-semibold text-gray-800">{b.title || 'ການປະຊຸມ'} — {roomName}</div>
+                          <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                            <Clock size={12} />
+                            {new Date(b.startAt).toLocaleString()} — {new Date(b.endAt).toLocaleTimeString()}
+                          </div>
+                          {!b.checkedInAt && (
+                            <div className="text-xs text-amber-600 mt-1">⚠ ບໍ່ໄດ້ check-in ຄັ້ງນີ້ — ອາດບໍ່ໄດ້ໃຊ້ຫ້ອງແທ້ໆ</div>
+                          )}
+                        </div>
+                        <span className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 font-medium shrink-0 flex items-center gap-1">
+                          <Users size={12} /> {attendeeCount} ຄົນ
+                        </span>
+                      </div>
+                      {attendeeCount > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {b.attendees.map((name, i) => (
+                            <span key={i} className="text-xs px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-gray-600">
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {pastBookings.length > historyLimit && (
+                <div className="p-3 text-center border-t border-gray-100">
+                  <button
+                    onClick={() => setHistoryLimit((n) => n + 10)}
+                    className="text-xs text-amber-600 hover:text-amber-700 font-medium"
+                  >
+                    ໂຊເພີ່ມ ({pastBookings.length - historyLimit} ຄັ້ງທີ່ຍັງເຫຼືອ)
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        )}
 
         {/* Modal ຕໍ່ເວລາ */}
         {extendModalBooking && (

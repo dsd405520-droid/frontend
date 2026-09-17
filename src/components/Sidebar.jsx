@@ -18,10 +18,9 @@ import {
   BarChart3,
   FileText,
   Settings,
-  Tag,
-  LogOut
+  Tag
 } from 'lucide-react';
-import { canView, logout } from '../utils/permissions';
+import { canView } from '../utils/permissions';
 import api from '../services/api';
 
 // ກວດ module ດຽວ ຫຼື array (any-of) — ໃຊ້ກັບ /branches ທີ່ອີງໃສ່ທັງ 'branches' ແລະ 'departments'
@@ -98,7 +97,6 @@ export default function Sidebar() {
 
   // ຈຳນວນແຈ້ງເຕືອນຕົວຈິງ ດຶງມາຈາກ API ແທນທີ່ຈະ hardcode — ໂຫຼດຕອນເປີດ ແລະ refresh ທຸກໆ 60 ວິນາທີ
   const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, announcements: 0, notifications: 0 });
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,8 +173,9 @@ export default function Sidebar() {
                     <Link
                       key={to}
                       to={to}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
-                        }`}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${
+                        isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
+                      }`}
                     >
                       <Icon size={18} /> <span>{label}</span>
                       {count > 0 && (
@@ -192,38 +191,6 @@ export default function Sidebar() {
           );
         })}
       </div>
-
-      <div className="p-4 border-t border-gray-800">
-        <button
-          onClick={() => setShowLogoutConfirm(true)}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-gray-800/60 hover:text-red-400 transition"
-        >
-          <LogOut size={18} /> <span>ອອກຈາກລະບົບ</span>
-        </button>
-      </div>
-
-      {showLogoutConfirm && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-6">
-          <div className="bg-white rounded-2xl shadow-lg p-6 max-w-sm w-full">
-            <h3 className="text-lg font-bold text-gray-800 mb-2">ອອກຈາກລະບົບ</h3>
-            <p className="text-sm text-gray-500 mb-6">ທ່ານຕ້ອງການອອກຈາກລະບົບແທ້ບໍ?</p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setShowLogoutConfirm(false)}
-                className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition"
-              >
-                ຍົກເລີກ
-              </button>
-              <button
-                onClick={logout}
-                className="px-4 py-2 rounded-xl text-sm font-medium bg-red-500 hover:bg-red-600 text-white transition"
-              >
-                ອອກຈາກລະບົບ
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </aside>
   );
 }
