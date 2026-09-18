@@ -180,13 +180,17 @@ export default function Issues() {
     CLOSED: 'ປິດແລ້ວ',
   };
 
+  const getUserDisplayName = (u) =>
+    [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || '';
+
   const getAgentDisplayName = (agent) => {
     if (!agent) return 'ຍັງບໍ່ມີຜູ້ຮັບຜິດຊອບ';
     if (typeof agent === 'object') {
-      const fullName = [agent.firstName, agent.lastName].filter(Boolean).join(' ');
-      return fullName || agent.email || 'ບໍ່ລະບຸຊື່';
+      return getUserDisplayName(agent) || 'ບໍ່ລະບຸຊື່';
     }
-    return agent;
+    // API ຄືນມາເປັນ id ດິບ (ບໍ່ໄດ້ populate) — ຫາຊື່ຈາກ users ທີ່ໂຫຼດໄວ້ແລ້ວ (ໃຊ້ຮ່ວມກັບ dropdown ມອບໝາຍ)
+    const matched = users.find((u) => (u._id || u.id) === agent);
+    return matched ? getUserDisplayName(matched) || 'ບໍ່ລະບຸຊື່' : agent;
   };
 
   const extractArrayData = (resData) => {
@@ -456,9 +460,6 @@ export default function Issues() {
     }
     submitStatusChange(status);
   };
-
-  const getUserDisplayName = (u) =>
-    [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || '';
 
   const filteredUsersForAssign = users.filter(u =>
     getUserDisplayName(u).toLowerCase().includes(assignSearchQuery.toLowerCase())

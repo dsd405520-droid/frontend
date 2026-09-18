@@ -10,6 +10,7 @@ import {
   Shield,
   Building2,
   Package,
+  Laptop,
   Calendar,
   Activity,
   Briefcase,
@@ -70,6 +71,7 @@ const MENU_SECTIONS = [
       { to: '/roles', label: 'ສິດ ແລະ ບົດບາດ', icon: Shield, module: 'roles' },
       { to: '/branches', label: 'ສາຂາ ແລະ ພະແນກ', icon: Building2, module: ['branches', 'departments'] },
       { to: '/assets', label: 'ຈັດການຊັບສິນ', icon: Package, module: 'supplies' },
+      { to: '/asset-registry', label: 'ທະບຽນຊັບສິນບໍລິສັດ', icon: Laptop, module: 'assets' },
     ],
   },
   {
