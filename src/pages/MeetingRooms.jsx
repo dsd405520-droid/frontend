@@ -623,8 +623,10 @@ export default function MeetingRooms() {
       return;
     }
 
-    setStartAt(toDateTimeLocalValue(getSlotDateTime(dayIndex, pickStart.time)));
-    setEndAt(toDateTimeLocalValue(getSlotDateTime(dayIndex, time)));
+    const startVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, pickStart.time));
+    const endVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, time));
+    setStartAt(startVal);
+    setEndAt(endVal);
     setPickStart(null);
   };
 
@@ -1166,7 +1168,7 @@ export default function MeetingRooms() {
             <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center pb-2 border-b border-gray-100">
                 <h2 className="text-lg font-bold text-gray-800">ຟອມຈອງຫ້ອງປະຊຸມອອນໄລນ໌</h2>
-                <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+                <button onClick={() => { setIsModalOpen(false); setPickStart(null); setStartAt(''); setEndAt(''); }} className="text-gray-400 hover:text-gray-600">✕</button>
               </div>
 
               {bookingMessage.text && (
@@ -1317,7 +1319,7 @@ export default function MeetingRooms() {
                     </div>
                   )}
 
-                  <div className="mt-2 flex items-center gap-2 text-xs">
+                  <div className="mt-2 flex items-center gap-2 text-xs" translate="no">
                     {pickStart ? (
                       <span className="text-amber-600 font-medium">
                         ເລືອກຈຸດເລີ່ມແລ້ວ ({weekDays.find(d => d.dayIndex === pickStart.dayIndex)?.label} {pickStart.time}) — ກົດຈຸດສິ້ນສຸດຕໍ່
@@ -1382,7 +1384,7 @@ export default function MeetingRooms() {
                 </div>
 
                 <div className="flex justify-end gap-3 pt-2">
-                  <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium">ຍົກເລີກ</button>
+                  <button type="button" onClick={() => { setIsModalOpen(false); setPickStart(null); setStartAt(''); setEndAt(''); }} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium">ຍົກເລີກ</button>
                   <button type="submit" disabled={submitting} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
                     {submitting ? 'ກຳລັງບັນທຶກ...' : 'ຢືນຢັນການຈອງ'}
                   </button>
