@@ -199,10 +199,11 @@ export default function RolesManagement() {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
-                <th className="p-4 font-medium">ລະຫັດ / ຊື່ Role</th>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
+                  <th className="p-4 font-medium">ລະຫັດ / ຊື່ Role</th>
                 <th className="p-4 font-medium">ປະເພດ</th>
                 <th className="p-4 font-medium">ສິດທິການໃຊ້ງານ (Permissions)</th>
                 <th className="p-4 font-medium text-center">ຈັດການ</th>
@@ -275,6 +276,7 @@ export default function RolesManagement() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 

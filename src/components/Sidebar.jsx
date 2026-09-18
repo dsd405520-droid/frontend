@@ -19,7 +19,8 @@ import {
   BarChart3,
   FileText,
   Settings,
-  Tag
+  Tag,
+  X
 } from 'lucide-react';
 import { LogOut } from 'lucide-react';
 import { canView, logout, getCurrentUser } from '../utils/permissions';
@@ -95,7 +96,7 @@ const MENU_SECTIONS = [
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onClose }) {
   const location = useLocation();
   const isActive = (path) => location.pathname === path;
   const user = getCurrentUser();
@@ -154,18 +155,35 @@ export default function Sidebar() {
   }, []);
 
   return (
-    <aside className="w-64 bg-[#111827] text-gray-300 flex flex-col h-screen fixed left-0 top-0 border-r border-gray-800 z-20 overflow-y-auto">
+    <>
+      {/* Backdrop — ສະແດງເທິງ mobile ເທົ່ານັ້ນ ເມື່ອ drawer ເປີດ */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-20 lg:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
 
-      {/* Logo & Subtitle Section */}
-      <div className="p-4 border-b border-gray-800 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-amber-500 text-black font-extrabold flex items-center justify-center text-lg shadow-sm shrink-0">
-          HD
+      <aside className={`w-64 bg-[#111827] text-gray-300 flex flex-col h-screen fixed left-0 top-0 border-r border-gray-800 z-30 overflow-y-auto transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+
+        {/* Logo & Subtitle Section */}
+        <div className="p-4 border-b border-gray-800 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500 text-black font-extrabold flex items-center justify-center text-lg shadow-sm shrink-0">
+            HD
+          </div>
+          <div className="overflow-hidden flex-1">
+            <h1 className="text-white font-bold text-base truncate">{systemName}</h1>
+            <p className="text-[11px] text-gray-400 truncate">ລະບົບຊ່ວຍເຫຼືອພະນັກງານ</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="lg:hidden shrink-0 p-1.5 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition"
+            aria-label="ປິດເມນູ"
+          >
+            <X size={20} />
+          </button>
         </div>
-        <div className="overflow-hidden">
-          <h1 className="text-white font-bold text-base truncate">{systemName}</h1>
-          <p className="text-[11px] text-gray-400 truncate">ລະບົບຊ່ວຍເຫຼືອພະນັກງານ</p>
-        </div>
-      </div>
 
       {/* Branch Selector Header */}
       <div className="p-4 border-b border-gray-800">
@@ -191,6 +209,7 @@ export default function Sidebar() {
                     <Link
                       key={to}
                       to={to}
+                      onClick={onClose}
                       className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
                         }`}
                     >
@@ -252,5 +271,6 @@ export default function Sidebar() {
         </div>
       )}
     </aside>
+    </>
   );
 }

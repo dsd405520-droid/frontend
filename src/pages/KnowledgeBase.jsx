@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, BookOpen, Plus, Loader2, X, ThumbsUp, ThumbsDown, Eye } from 'lucide-react';
+import { Search, BookOpen, Plus, Loader2, X, ThumbsUp, ThumbsDown, Eye, Maximize2, ExternalLink } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
@@ -57,6 +57,19 @@ export default function KnowledgeBase() {
   const [fileUploading, setFileUploading] = useState(false);
 
   const [docxHtml, setDocxHtml] = useState({});
+  const [fullscreenAttachment, setFullscreenAttachment] = useState(null); // url ຂອງໄຟລ໌ທີ່ກຳລັງເປີດແບບເຕັມຈໍ
+
+  const openFullscreen = (url) => {
+    if (url.endsWith('.docx')) renderDocxPreview(url);
+    setFullscreenAttachment(url);
+  };
+
+  useEffect(() => {
+    if (!fullscreenAttachment) return;
+    const onKey = (e) => { if (e.key === 'Escape') setFullscreenAttachment(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreenAttachment]);
 
   const renderDocxPreview = async (url) => {
     if (docxHtml[url]) return; // already converted
@@ -507,7 +520,7 @@ export default function KnowledgeBase() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ໝວດໝູ່ (Category)</label>
                   <input
@@ -650,6 +663,17 @@ export default function KnowledgeBase() {
 
                   {selectedArticle.attachments?.map(url => (
                     <div key={url} className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 bg-gray-50 px-3 py-2 border-b border-gray-100">
+                        <span className="text-xs font-medium text-gray-600 truncate">{url.split('/').pop()}</span>
+                        <button
+                          type="button"
+                          onClick={() => openFullscreen(url)}
+                          className="flex items-center gap-1.5 shrink-0 text-xs font-medium px-2.5 py-1 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200 transition"
+                        >
+                          <Maximize2 size={13} />
+                          ເປີດແບບເຕັມຈໍ
+                        </button>
+                      </div>
                       {url.endsWith('.pdf') ? (
                         <iframe
                           src={`http://localhost:3000${url}`}
@@ -727,6 +751,56 @@ export default function KnowledgeBase() {
                   )}
                 </div>
               </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {fullscreenAttachment && (
+        <div className="fixed inset-0 bg-black z-[100] flex flex-col">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-900 text-white shrink-0">
+            <span className="text-sm font-medium truncate">{fullscreenAttachment.split('/').pop()}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={`http://localhost:3000${fullscreenAttachment}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition"
+              >
+                <ExternalLink size={13} /> ເປີດໃນແຖບໃໝ່
+              </a>
+              <button
+                onClick={() => setFullscreenAttachment(null)}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition"
+              >
+                <X size={14} /> ປິດ
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0">
+            {fullscreenAttachment.endsWith('.pdf') ? (
+              <iframe
+                src={`http://localhost:3000${fullscreenAttachment}`}
+                title={fullscreenAttachment}
+                className="w-full h-full bg-white"
+              />
+            ) : fullscreenAttachment.endsWith('.docx') ? (
+              docxHtml[fullscreenAttachment] ? (
+                <div
+                  className="bg-white h-full overflow-y-auto prose prose-sm max-w-4xl mx-auto p-8"
+                  dangerouslySetInnerHTML={{ __html: docxHtml[fullscreenAttachment] }}
+                />
+              ) : (
+                <div className="h-full flex items-center justify-center text-white text-sm gap-2">
+                  <Loader2 className="animate-spin" size={18} /> ກຳລັງແປງໄຟລ໌...
+                </div>
+              )
+            ) : (
+              <iframe
+                src={`http://localhost:3000${fullscreenAttachment}`}
+                title={fullscreenAttachment}
+                className="w-full h-full bg-white"
+              />
             )}
           </div>
         </div>

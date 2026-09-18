@@ -560,7 +560,7 @@ export default function Issues() {
               </button>
 
               {isFilterOpen && (
-                <div className="absolute right-0 mt-2 w-[26rem] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
+                <div className="absolute right-0 mt-2 w-[26rem] max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <p className="text-xs font-semibold text-gray-400 uppercase mb-1 px-1">ສະຖານະ</p>
@@ -814,7 +814,7 @@ export default function Issues() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ລະດັບຄວາມສຳຄັນ</label>
                   <select
@@ -901,7 +901,7 @@ export default function Issues() {
               <TicketProgressBar status={selectedTicket.status} />
 
               {/* ຂໍ້ມູນພື້ນຖານ */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-xs text-gray-400 mb-0.5">ຄວາມສຳຄັນ</div>
                   <span className={`px-2 py-1 rounded-md text-xs font-medium uppercase ${selectedTicket.priority === 'urgent' ? 'bg-red-100 text-red-700' :

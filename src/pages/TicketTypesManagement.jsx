@@ -377,8 +377,8 @@ export default function TicketTypesManagement() {
               </button>
 
               {isFilterOpen && (
-                <div className="absolute right-0 mt-2 w-[34rem] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
-                  <div className="grid grid-cols-3 gap-3">
+                <div className="absolute right-0 mt-2 w-[34rem] max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <p className="text-xs font-semibold text-gray-400 uppercase mb-1 px-1">ສະຖານະ</p>
                       {STATUS_OPTIONS.map(opt => (
@@ -459,7 +459,8 @@ export default function TicketTypesManagement() {
         )}
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
             <thead>
               <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
                 <th className="p-4 font-medium">ຊື່ປະເພດ</th>
@@ -515,6 +516,7 @@ export default function TicketTypesManagement() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
 
         {isModalOpen && (
@@ -679,7 +681,7 @@ export default function TicketTypesManagement() {
               </div>
 
               <div className="overflow-y-auto px-6 py-4 space-y-4">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                   <div>
                     <div className="text-xs text-gray-400 mb-0.5">ພະແນກຮັບຜິດຊອບ</div>
                     <div className="text-gray-700">{departmentName(selectedType.defaultDepartmentId)}</div>

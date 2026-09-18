@@ -410,7 +410,8 @@ export default function Slamanagement() {
 
         {/* Table Section */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
             <thead>
               <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
                 <th className="p-4 font-medium">ຊື່ນະໂຍບາຍ / ID</th>
@@ -486,6 +487,7 @@ export default function Slamanagement() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -581,7 +583,7 @@ export default function Slamanagement() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ເວລາຕອບກັບ (ນາທີ)</label>
                   <input

@@ -257,8 +257,8 @@ export default function UsersManagement() {
             </button>
 
             {isFilterOpen && (
-              <div className="absolute right-0 mt-2 w-[30rem] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
-                <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2">
+              <div className="absolute right-0 mt-2 w-[30rem] max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
+                <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr_1fr] gap-2">
                   <div>
                     <p className="text-[11px] font-semibold text-gray-400 uppercase mb-1 px-1">Role</p>
                     <div className="max-h-40 overflow-y-auto">
@@ -322,10 +322,11 @@ export default function UsersManagement() {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
-                <th className="p-4 font-medium">ລະຫັດ / ຊື່-ນາມສະກຸນ</th>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
+                  <th className="p-4 font-medium">ລະຫັດ / ຊື່-ນາມສະກຸນ</th>
                 <th className="p-4 font-medium">ອີເມວ / ເບີໂທ</th>
                 <th className="p-4 font-medium">ສາຂາ / ພະແນກ</th>
                 <th className="p-4 font-medium">Role</th>
@@ -402,6 +403,7 @@ export default function UsersManagement() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -426,7 +428,7 @@ export default function UsersManagement() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ລະຫັດພະນັກງານ (Employee Code)</label>
                   <input
@@ -453,7 +455,7 @@ export default function UsersManagement() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ຊື່ (First Name)</label>
                   <input
@@ -476,7 +478,7 @@ export default function UsersManagement() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ອີເມວ (Email)</label>
                   <input
@@ -512,7 +514,7 @@ export default function UsersManagement() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ສາຂາ (Branch)</label>
                   <select

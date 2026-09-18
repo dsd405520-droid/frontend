@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X, Search, Filter } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 
 // ໜ້າລາຍງານສະຖານະຫ້ອງປະຊຸມ "ຕົວຈິງ" — ບໍ່ແມ່ນແຄ່ອີງ booking (ຄາດເດົາ) ແຕ່ໃຫ້ຄົນທີ່ຢູ່ໃນຫ້ອງແທ້ໆ
@@ -24,6 +24,26 @@ export default function RoomStatusReport() {
   const [extendSubmitting, setExtendSubmitting] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(10);
   const [activeTab, setActiveTab] = useState('status'); // 'status' | 'my-meetings' | 'history'
+
+  // Search & Filter (ສຳລັບແຖບສະຖານະຫ້ອງ)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roomStatusFilter, setRoomStatusFilter] = useState([]); // ['AVAILABLE' | 'BOOKED' | 'MAINTENANCE']
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef(null);
+
+  const toggleRoomStatusFilter = (key) => {
+    setRoomStatusFilter(prev => prev.includes(key) ? prev.filter(v => v !== key) : [...prev, key]);
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (filterRef.current && !filterRef.current.contains(e.target)) {
+        setIsFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   function unwrap(body) {
     return body?.data !== undefined ? body.data : body;
@@ -71,6 +91,16 @@ export default function RoomStatusReport() {
   };
 
   const now = new Date();
+
+  const roomStatusKey = (room) => room.liveStatus || room.status || 'AVAILABLE';
+
+  const filteredRooms = rooms.filter((room) => {
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch = !q || [room.name, room.location, room.capacity != null ? String(room.capacity) : '']
+      .filter(Boolean).some((f) => String(f).toLowerCase().includes(q));
+    const matchesStatus = roomStatusFilter.length === 0 || roomStatusFilter.includes(roomStatusKey(room));
+    return matchesSearch && matchesStatus;
+  });
   // ການຈອງມື້ນີ້ຂອງຂ້ອຍ ທີ່ຍັງບໍ່ຈົບ (ບໍ່ນັບ CANCELLED/REJECTED) ແລະ ຍັງບໍ່ຫລົ້ນເວລາໄປໝົດ — ໂຊລຽນຕາມເວລາເລີ່ມ
   const relevantBookings = myBookings
     .filter((b) => b.status === 'CONFIRMED' || b.status === 'PENDING')
@@ -187,6 +217,61 @@ export default function RoomStatusReport() {
 
         {/* ແຖບ 1: ສະຖານະຫ້ອງທັງໝົດ (ອ່ານໄດ້ທຸກຄົນ) */}
         {activeTab === 'status' && (
+        <div className="space-y-4">
+          {/* Search & Filter */}
+          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full md:w-80">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ຄົ້ນຫາຊື່ຫ້ອງ, ສະຖານທີ່, ຄວາມຈຸ..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+              <div className="relative" ref={filterRef}>
+                <button
+                  onClick={() => setIsFilterOpen(!isFilterOpen)}
+                  className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition"
+                >
+                  <Filter size={16} />
+                  <span>FILTER</span>
+                  {roomStatusFilter.length > 0 && (
+                    <span key={roomStatusFilter.length}>({roomStatusFilter.length})</span>
+                  )}
+                </button>
+
+                {isFilterOpen && (
+                  <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-3">
+                    <p className="text-xs font-semibold text-gray-400 uppercase mb-1 px-1">ສະຖານະຫ້ອງ</p>
+                    <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                      <input type="checkbox" checked={roomStatusFilter.includes('AVAILABLE')} onChange={() => toggleRoomStatusFilter('AVAILABLE')} className="rounded" />
+                      ວ່າງ
+                    </label>
+                    <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                      <input type="checkbox" checked={roomStatusFilter.includes('BOOKED')} onChange={() => toggleRoomStatusFilter('BOOKED')} className="rounded" />
+                      ກຳລັງໃຊ້ງານ
+                    </label>
+                    <label className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                      <input type="checkbox" checked={roomStatusFilter.includes('MAINTENANCE')} onChange={() => toggleRoomStatusFilter('MAINTENANCE')} className="rounded" />
+                      ປິດບຳລຸງ
+                    </label>
+                    {roomStatusFilter.length > 0 && (
+                      <button
+                        onClick={() => setRoomStatusFilter([])}
+                        className="w-full text-center text-xs text-amber-600 hover:text-amber-700 mt-3 pt-2 border-t border-gray-100"
+                      >
+                        ລ້າງການກອງ
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 font-bold text-gray-800">ສະຖານະຫ້ອງທັງໝົດ</div>
           {roomsError && <div className="p-4 text-sm text-red-600">{roomsError}</div>}
@@ -194,7 +279,7 @@ export default function RoomStatusReport() {
             <div className="p-8 text-center text-sm text-gray-400">ກຳລັງໂຫຼດ...</div>
           ) : (
             <div className="divide-y divide-gray-100">
-              {rooms.map((room) => {
+              {filteredRooms.map((room) => {
                 const info = roomStatusInfo(room.liveStatus || room.status);
                 return (
                   <div key={room._id} className="p-4 flex items-center justify-between">
@@ -209,9 +294,14 @@ export default function RoomStatusReport() {
                   </div>
                 );
               })}
-              {rooms.length === 0 && <div className="p-8 text-center text-sm text-gray-400">ບໍ່ມີຫ້ອງປະຊຸມ</div>}
+              {filteredRooms.length === 0 && (
+                <div className="p-8 text-center text-sm text-gray-400">
+                  {rooms.length === 0 ? 'ບໍ່ມີຫ້ອງປະຊຸມ' : 'ບໍ່ພົບຫ້ອງທີ່ກົງກັບການຄົ້ນຫາ'}
+                </div>
+              )}
             </div>
           )}
+        </div>
         </div>
         )}
 

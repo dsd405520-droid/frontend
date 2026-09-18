@@ -100,7 +100,8 @@ export default function AuditLogs() {
         )}
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
             <thead>
               <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
                 <th className="p-4 font-medium">ລະຫັດ (_id)</th>
@@ -136,6 +137,7 @@ export default function AuditLogs() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </MainLayout>
