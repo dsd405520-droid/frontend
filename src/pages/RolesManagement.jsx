@@ -22,6 +22,7 @@ const AVAILABLE_MODULES = [
   { key: 'announcements', label: 'ປະກາດ (Announcements)' },
   { key: 'reports', label: 'ບົດລາຍງານ (Reports)' },
   { key: 'audit-logs', label: 'ບັນທຶກການກວດສອບ (Audit Logs)' },
+  { key: 'settings', label: 'ການຕັ້ງຄ່າອົງກອນ (Settings)' },
 ];
 
 // ໝາຍເຫດ: module key ຕ້ອງກົງກັບ string ທີ່ backend ໃຊ້ໃນ @RequirePermission(module, action)

@@ -24,6 +24,7 @@ import {
 import { LogOut } from 'lucide-react';
 import { canView, logout, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
+import { getOrgSettings, applySystemName, DEFAULT_SYSTEM_NAME } from '../utils/orgSettings';
 
 // ກວດ module ດຽວ ຫຼື array (any-of) — ໃຊ້ກັບ /branches ທີ່ອີງໃສ່ທັງ 'branches' ແລະ 'departments'
 function canViewAny(moduleOrArray) {
@@ -99,6 +100,7 @@ export default function Sidebar() {
   const isActive = (path) => location.pathname === path;
   const user = getCurrentUser();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [systemName, setSystemName] = useState(DEFAULT_SYSTEM_NAME);
 
   // ຈຳນວນແຈ້ງເຕືອນຕົວຈິງ ດຶງມາຈາກ API ແທນທີ່ຈະ hardcode — ໂຫຼດຕອນເປີດ ແລະ refresh ທຸກໆ 60 ວິນາທີ
   const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, announcements: 0, notifications: 0 });
@@ -140,6 +142,17 @@ export default function Sidebar() {
     };
   }, []);
 
+  // ດຶງຊື່ລະບົບຈາກການຕັ້ງຄ່າອົງກອນ ເພື່ອສະແດງໃນ header ຂ້າງຊ້າຍ + ແຖບຊື່ພາຍ (browser tab)
+  useEffect(() => {
+    let cancelled = false;
+    getOrgSettings().then((settings) => {
+      if (cancelled) return;
+      setSystemName(settings.systemName);
+      applySystemName(settings.systemName);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <aside className="w-64 bg-[#111827] text-gray-300 flex flex-col h-screen fixed left-0 top-0 border-r border-gray-800 z-20 overflow-y-auto">
 
@@ -149,7 +162,7 @@ export default function Sidebar() {
           HD
         </div>
         <div className="overflow-hidden">
-          <h1 className="text-white font-bold text-base truncate">Helpdesk Enterprise</h1>
+          <h1 className="text-white font-bold text-base truncate">{systemName}</h1>
           <p className="text-[11px] text-gray-400 truncate">ລະບົບຊ່ວຍເຫຼືອພະນັກງານ</p>
         </div>
       </div>

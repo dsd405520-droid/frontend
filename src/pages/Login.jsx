@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, Loader2, AlertCircle } from 'lucide-react';
+import { getOrgSettings, applySystemName, DEFAULT_SYSTEM_NAME } from '../utils/orgSettings';
 
 export default function Login() {
+  const [systemName, setSystemName] = useState('Agricultural Promotion Bank CO.,LTD');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -24,6 +26,17 @@ export default function Login() {
   const [setupCode, setSetupCode] = useState('');
   const [setupSubmitting, setSetupSubmitting] = useState(false);
   const [resendingSetup, setResendingSetup] = useState(false);
+
+  // ດຶງຊື່ລະບົບຈາກການຕັ້ງຄ່າອົງກອນ ມາສະແດງໃນໜ້າ Login
+  useEffect(() => {
+    let cancelled = false;
+    getOrgSettings().then((settings) => {
+      if (cancelled) return;
+      setSystemName(settings.systemName);
+      applySystemName(settings.systemName);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleChooseSetupMethod = async (method) => {
     setError('');
@@ -210,7 +223,7 @@ export default function Login() {
             APB
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white tracking-wide">Agricultural Promotion Bank CO.,LTD</h1>
+            <h1 className="text-lg font-bold text-white tracking-wide">{systemName}</h1>
             <p className="text-base text-yellow-400 font-medium mt-0.5">ທະນາຄານສົ່ງເສີມກະສິກຳ ຈຳກົດ</p>
           </div>
         </div>

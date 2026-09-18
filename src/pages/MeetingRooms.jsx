@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
+import { getSocket } from '../utils/socket';
 
 export default function MeetingRooms() {
   const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
@@ -67,6 +68,12 @@ export default function MeetingRooms() {
 
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
 
+  const selectedCalendarRoomRef = useRef(selectedCalendarRoom);
+  useEffect(() => { selectedCalendarRoomRef.current = selectedCalendarRoom; }, [selectedCalendarRoom]);
+
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
   useEffect(() => {
     fetchRooms();
   }, []);
@@ -88,8 +95,40 @@ export default function MeetingRooms() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCalendarRoom, calendarViewMode, calendarAnchorDate]);
 
-  const fetchRooms = () => {
-    setLoading(true);
+  // ຟັງເຫດການ real-time ຈາກ Backend (WebSocket):
+  // ພໍມີການຈອງ ຫຼື ແກ້ໄຂຫ້ອງຈາກໜ້າຈໍອື່ນ/ຜູ້ອື່ນ →
+  // ດຶງຂໍ້ມູນມາສະແດງໃໝ່ທັນທີ ໂດຍບໍ່ຕ້ອງ reload ໜ້າ
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const refreshFromServer = () => {
+      fetchRooms(true);
+      const room = selectedCalendarRoomRef.current;
+      if (room) {
+        fetchCalendarBookings(room.roomId || room._id);
+      }
+      if (activeTabRef.current === 'my-bookings') {
+        fetchMyBookings();
+      }
+      if (activeTabRef.current === 'admin') {
+        fetchPendingApprovals();
+        fetchUtilization();
+      }
+    };
+
+    socket.on('room-bookings:changed', refreshFromServer);
+    socket.on('room:changed', refreshFromServer);
+
+    return () => {
+      socket.off('room-bookings:changed', refreshFromServer);
+      socket.off('room:changed', refreshFromServer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fetchRooms = (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     fetch('http://localhost:3000/api/rooms', {
       headers: {
