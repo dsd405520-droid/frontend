@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
@@ -73,59 +73,6 @@ export default function MeetingRooms() {
 
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
-
-  useEffect(() => {
-    fetchRooms();
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === 'my-bookings') {
-      fetchMyBookings();
-    }
-  }, [activeTab]);
-
-  // ດຶງຂໍ້ມູນການຈອງຂອງຫ້ອງທີ່ຖືກເລືອກມາສະແດງໃນຕາຕະລາງ
-  useEffect(() => {
-    if (selectedCalendarRoom) {
-      const roomId = selectedCalendarRoom.roomId || selectedCalendarRoom._id;
-      if (roomId) {
-        fetchCalendarBookings(roomId);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCalendarRoom, calendarViewMode, calendarAnchorDate]);
-
-  // ຟັງເຫດການ real-time ຈາກ Backend (WebSocket):
-  // ພໍມີການຈອງ ຫຼື ແກ້ໄຂຫ້ອງຈາກໜ້າຈໍອື່ນ/ຜູ້ອື່ນ →
-  // ດຶງຂໍ້ມູນມາສະແດງໃໝ່ທັນທີ ໂດຍບໍ່ຕ້ອງ reload ໜ້າ
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
-    const refreshFromServer = () => {
-      fetchRooms(true);
-      const room = selectedCalendarRoomRef.current;
-      if (room) {
-        fetchCalendarBookings(room.roomId || room._id);
-      }
-      if (activeTabRef.current === 'my-bookings') {
-        fetchMyBookings();
-      }
-      if (activeTabRef.current === 'admin') {
-        fetchPendingApprovals();
-        fetchUtilization();
-      }
-    };
-
-    socket.on('room-bookings:changed', refreshFromServer);
-    socket.on('room:changed', refreshFromServer);
-
-    return () => {
-      socket.off('room-bookings:changed', refreshFromServer);
-      socket.off('room:changed', refreshFromServer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const fetchRooms = (silent = false) => {
     if (!silent) setLoading(true);
@@ -263,6 +210,63 @@ export default function MeetingRooms() {
         setLoadingPending(false);
       });
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchRooms();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'my-bookings') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchMyBookings();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // ດຶງຂໍ້ມູນການຈອງຂອງຫ້ອງທີ່ຖືກເລືອກມາສະແດງໃນຕາຕະລາງ
+  useEffect(() => {
+    if (selectedCalendarRoom) {
+      const roomId = selectedCalendarRoom.roomId || selectedCalendarRoom._id;
+      if (roomId) {
+        fetchCalendarBookings(roomId);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCalendarRoom, calendarViewMode, calendarAnchorDate]);
+
+  // ຟັງເຫດການ real-time ຈາກ Backend (WebSocket):
+  // ພໍມີການຈອງ ຫຼື ແກ້ໄຂຫ້ອງຈາກໜ້າຈໍອື່ນ/ຜູ້ອື່ນ →
+  // ດຶງຂໍ້ມູນມາສະແດງໃໝ່ທັນທີ ໂດຍບໍ່ຕ້ອງ reload ໜ້າ
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const refreshFromServer = () => {
+      fetchRooms(true);
+      const room = selectedCalendarRoomRef.current;
+      if (room) {
+        fetchCalendarBookings(room.roomId || room._id);
+      }
+      if (activeTabRef.current === 'my-bookings') {
+        fetchMyBookings();
+      }
+      if (activeTabRef.current === 'admin') {
+        fetchPendingApprovals();
+        fetchUtilization();
+      }
+    };
+
+    socket.on('room-bookings:changed', refreshFromServer);
+    socket.on('room:changed', refreshFromServer);
+
+    return () => {
+      socket.off('room-bookings:changed', refreshFromServer);
+      socket.off('room:changed', refreshFromServer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const reviewBooking = (id, action, body) => {
     setReviewingId(id);

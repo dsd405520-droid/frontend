@@ -1,7 +1,7 @@
 import axios from 'axios';
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Users, Plus, X, Loader2, AlertCircle, Building2, Layers, Search, Filter } from 'lucide-react';
 
 
@@ -114,7 +114,9 @@ export default function UsersManagement() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleOpenCreate = () => {

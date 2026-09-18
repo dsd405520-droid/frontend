@@ -1,4 +1,3 @@
-import React from 'react';
 import { Search, Bell, HelpCircle, Plus } from 'lucide-react';
 
 export default function Navbar() {

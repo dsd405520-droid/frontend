@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Mail, Loader2, AlertCircle } from 'lucide-react';
-import { getOrgSettings, applySystemName, DEFAULT_SYSTEM_NAME } from '../utils/orgSettings';
+import { getOrgSettings, applySystemName } from '../utils/orgSettings';
 
 export default function Login() {
   const [systemName, setSystemName] = useState('Agricultural Promotion Bank CO.,LTD');
@@ -22,7 +22,6 @@ export default function Login() {
   const [setupToken, setSetupToken] = useState('');
   const [mfaSetupStep, setMfaSetupStep] = useState(null); // null | 'choose' | 'totp' | 'email'
   const [setupQr, setSetupQr] = useState('');
-  const [setupOtpauthUrl, setSetupOtpauthUrl] = useState('');
   const [setupCode, setSetupCode] = useState('');
   const [setupSubmitting, setSetupSubmitting] = useState(false);
   const [resendingSetup, setResendingSetup] = useState(false);
@@ -55,7 +54,6 @@ export default function Login() {
 
       if (method === 'totp') {
         setSetupQr(result.data.qrCodeDataUrl);
-        setSetupOtpauthUrl(result.data.otpauthUrl);
         setMfaSetupStep('totp');
       } else {
         setMfaSetupStep('email');

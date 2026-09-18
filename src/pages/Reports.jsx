@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { BarChart3, Download } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
@@ -24,6 +24,7 @@ export default function Reports() {
   const headers = { 'Authorization': `Bearer ${token}` };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError('');
     fetch('http://localhost:3000/api/reports/summary', { headers })

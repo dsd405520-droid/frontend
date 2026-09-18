@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
 import { canView, logout } from '../utils/permissions';
@@ -12,7 +12,7 @@ function isTokenExpired(token) {
   }
 }
 
-export default function ProtectedRoute({ children, module, action = 'read' }) {
+export default function ProtectedRoute({ children, module }) {
   const token = localStorage.getItem('token');
 
   useEffect(() => {

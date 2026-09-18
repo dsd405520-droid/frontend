@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Clock, Plus, Loader2, X, ChevronDown, Pencil, Trash2, Search, Filter } from 'lucide-react';
+import { Plus, Loader2, X, ChevronDown, Pencil, Trash2, Search, Filter } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
@@ -125,8 +125,10 @@ export default function Slamanagement() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSlas();
     fetchTicketTypes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

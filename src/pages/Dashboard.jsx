@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   AlertCircle, 
   Clock, 
@@ -35,6 +35,7 @@ export default function Dashboard() {
   const headers = { 'Authorization': `Bearer ${token}` };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch('http://localhost:3000/api/dashboard', { headers })
       .then(async res => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tag, Plus, X, Loader2, AlertCircle, Pencil, Trash2, Clock, ArrowRight, Search, Filter } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
@@ -128,7 +128,6 @@ export default function TicketTypesManagement() {
       return false;
     }
   };
-  const canRead = hasPermission('ticket-types', 'read');
   const canCreate = hasPermission('ticket-types', 'create');
   const canUpdate = hasPermission('ticket-types', 'update');
   const canDelete = hasPermission('ticket-types', 'delete');
@@ -166,6 +165,7 @@ export default function TicketTypesManagement() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

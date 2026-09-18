@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Settings as SettingsIcon,
   Monitor,
@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
-import { getOrgSettings, cacheOrgSettings, applySystemName } from '../utils/orgSettings';
+import { cacheOrgSettings, applySystemName } from '../utils/orgSettings';
 
 // ຕົງກັບ SECRET_MASK ຝັ່ງ backend — ຖ້າຄ່ານີ້ຖືກສົ່ງຄືນ ໝາຍຄວາມວ່າ "ຮັກສາຄ່າເກົ່າ"
 const SECRET_MASK = '••••••••';
@@ -67,6 +67,7 @@ export default function Settings() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingProfile(true);
     fetch('http://localhost:3000/api/auth/me', { headers })
       .then(async res => {
@@ -92,6 +93,7 @@ export default function Settings() {
   // ດຶງການຕັ້ງຄ່າອົງກອນ (ສະເພາະຜູ້ທີ່ມີສິດ settings:read)
   useEffect(() => {
     if (!canReadOrg) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingOrg(true);
     fetch('http://localhost:3000/api/settings/org', { headers })
       .then(async res => {
@@ -134,6 +136,7 @@ export default function Settings() {
         setOrgMessage({ type: 'error', text: err.message });
         setLoadingOrg(false);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canReadOrg]);
 
   const setTop = (key, value) => setForm(prev => ({ ...prev, [key]: value }));

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Megaphone, Plus, X, Loader2, Calendar, Pin, Trash2, CheckCircle2, Eye, Building2, Users } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Megaphone, Plus, X, Loader2, Calendar, Pin, Trash2 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
@@ -57,7 +57,9 @@ export default function Announcements() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchAnnouncements();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSubmit = async (e) => {

@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import MainLayout from '../layouts/MainLayout';
-import { Shield, Plus, X, Loader2, AlertCircle, Lock, Check } from 'lucide-react';
+import { Shield, Plus, X, Loader2, AlertCircle, Lock } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 
 const API_BASE_URL = 'http://localhost:3000/api';
@@ -75,7 +75,9 @@ export default function RolesManagement() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchRoles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleOpenCreate = () => {

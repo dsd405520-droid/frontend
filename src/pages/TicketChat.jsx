@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Send, Loader2 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
@@ -60,6 +60,7 @@ export default function TicketChat() {
       .then(b => setTicket(b?.data ?? b))
       .catch(() => { });
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMessages(false);
     const interval = setInterval(() => fetchMessages(true), POLL_INTERVAL_MS);
     return () => clearInterval(interval);

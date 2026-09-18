@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 
@@ -24,11 +24,6 @@ export default function RoomStatusReport() {
   const [extendSubmitting, setExtendSubmitting] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(10);
   const [activeTab, setActiveTab] = useState('status'); // 'status' | 'my-meetings' | 'history'
-
-  useEffect(() => {
-    fetchRooms();
-    fetchMyBookings();
-  }, []);
 
   function unwrap(body) {
     return body?.data !== undefined ? body.data : body;
@@ -59,6 +54,13 @@ export default function RoomStatusReport() {
       .catch((err) => setBookingsError(err.message))
       .finally(() => setLoadingBookings(false));
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchRooms();
+    fetchMyBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const roomStatusInfo = (liveStatus) => {
     switch (liveStatus) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, BookOpen, Plus, Loader2, X, ThumbsUp, ThumbsDown, Eye } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import mammoth from 'mammoth';
@@ -19,10 +19,6 @@ export default function KnowledgeBase() {
     tags: '',
     attachments: []
   });
-
-  // Live KB suggestions while typing the ticket title
-  const [suggestedArticles, setSuggestedArticles] = useState([]);
-  const [suggestLoading, setSuggestLoading] = useState(false);
 
   // Article detail modal
   const [selectedArticle, setSelectedArticle] = useState(null);
@@ -45,7 +41,7 @@ export default function KnowledgeBase() {
       const perms = payload.permissions || [];
       const entry = perms.find(p => p.module === module);
       return !!entry?.actions?.includes(action);
-    } catch (err) {
+    } catch {
       return false;
     }
   };
@@ -81,6 +77,7 @@ export default function KnowledgeBase() {
     (selectedArticle?.attachments || [])
       .filter(url => url.endsWith('.docx'))
       .forEach(renderDocxPreview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedArticle]);
 
   const extractArrayData = (resData) => {
@@ -290,7 +287,9 @@ export default function KnowledgeBase() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchArticles();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryFilter, departmentFilter, showUnpublished]);
 
   useEffect(() => {
@@ -298,9 +297,11 @@ export default function KnowledgeBase() {
       .then(res => res.ok ? res.json() : null)
       .then(data => data && setDepartments(extractArrayData(data)))
       .catch(err => console.error('Error fetching departments:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setKnownCategories(prev => {
       const next = new Set(prev);
       articles.forEach(a => a.category && next.add(a.category));

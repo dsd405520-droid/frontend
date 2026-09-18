@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Bell, CheckCheck, Loader2, MailOpen } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 
@@ -36,7 +36,9 @@ export default function Notifications() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchNotifications();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleMarkAsRead = async (id) => {

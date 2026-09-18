@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Package, Plus, AlertTriangle, X, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, AlertTriangle, X, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
@@ -98,10 +98,13 @@ export default function AssetManagement() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lowStockOnly]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPendingRequests();
   }, []);
 

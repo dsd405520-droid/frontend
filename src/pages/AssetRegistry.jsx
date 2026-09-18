@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Laptop, Plus, X, Loader2, AlertCircle, Search, UserCheck, Undo2,
   Wrench, History, AlertTriangle, Trash2,
@@ -54,16 +54,6 @@ export default function AssetRegistry() {
     return body?.data !== undefined ? body.data : body;
   }
 
-  useEffect(() => {
-    fetchAssets();
-    fetchBranches();
-    fetchUsers();
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === 'overdue') fetchOverdue();
-  }, [activeTab]);
-
   function fetchAssets() {
     setLoadingAssets(true);
     setAssetsError('');
@@ -103,6 +93,22 @@ export default function AssetRegistry() {
       .catch((err) => setOverdueError(err.message))
       .finally(() => setLoadingOverdue(false));
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchAssets();
+    fetchBranches();
+    fetchUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'overdue') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchOverdue();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const branchName = (id) => branches.find((b) => b._id === id)?.name || id;
   const userName = (id) => {
