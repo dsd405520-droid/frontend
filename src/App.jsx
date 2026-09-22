@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 // Import ໂມດູນ Login ແລະ ປ້ອງກັນ Route
 import Login from './pages/Login';
 import ProtectedRoute from './components/ProtectedRoute';
+import { BranchProvider } from './contexts/BranchContext';
 
 // Import ໂມດູນຕ່າງໆຈາກໂຟນເດີ pages
 import Dashboard from './pages/Dashboard';
@@ -27,8 +28,9 @@ import TicketChat from './pages/TicketChat';
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
+    <BranchProvider>
+      <Router>
+        <Routes>
         {/* ໜ້າ Login ບໍ່ຕ້ອງປ້ອງກັນ */}
         <Route path="/login" element={<Login />} />
 
@@ -72,7 +74,8 @@ export default function App() {
 
         {/* ຖ້າພິມ URL ຜິດ ໃຫ້ສົ່ງກັບໄປໜ້າຫຼັກ (ເຊິ່ງຈະຖືກບັງຄັບໄປ Login ຖ້າຫາກຍັງບໍ່ທັນເຂົ້າສູ່ລະບົບ) */}
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
+        </Routes>
+      </Router>
+    </BranchProvider>
   );
 }

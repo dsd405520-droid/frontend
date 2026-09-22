@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BarChart3, Download } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
+import { useBranch } from '../contexts/BranchContext';
 
 const REPORT_TYPE_LABELS = {
   sla: 'SLA Compliance',
@@ -10,7 +11,112 @@ const REPORT_TYPE_LABELS = {
   csat: 'ຄວາມພໍໃຈ (CSAT)',
 };
 
+function polarPoint(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy - r * Math.sin(rad) };
+}
+
+function arcPath(cx, cy, r, startDeg, endDeg) {
+  const s = polarPoint(cx, cy, r, startDeg);
+  const e = polarPoint(cx, cy, r, endDeg);
+  const large = Math.abs(endDeg - startDeg) > 100 ? 1 : 0;
+  return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`;
+}
+
+function SlaDonut({ percent, loading }) {
+  const radius = 58;
+  const circumference = 2 * Math.PI * radius;
+  const hasData = !loading && percent !== null && percent !== undefined;
+  const color = percent >= 90 ? '#16a34a' : percent >= 70 ? '#f59e0b' : '#dc2626';
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-2">
+      <svg viewBox="0 0 240 165" className="w-full max-w-[260px]">
+        <circle cx="120" cy="83" r={radius} fill="none" stroke="#e5e7eb" strokeWidth="18" />
+        {hasData && (
+          <circle
+            cx="120"
+            cy="83"
+            r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth="18"
+            strokeLinecap="round"
+            strokeDasharray={`${(percent / 100) * circumference} ${circumference}`}
+            transform="rotate(-90 120 83)"
+          />
+        )}
+      </svg>
+      <div className="text-2xl font-bold text-gray-800">
+        {hasData ? `${percent}%` : loading ? '-' : 'N/A'}
+      </div>
+      <div className="flex gap-4 text-xs text-gray-500">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-green-600 inline-block" />
+          ປະຕິບັດຕາມ SLA
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-gray-200 inline-block" />
+          ບໍ່ໄດ້ຕາມ SLA
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function CsatGauge({ value }) {
+  const min = 1;
+  const max = 5;
+  const valid = typeof value === 'number' && !Number.isNaN(value);
+  const clamped = valid ? Math.max(min, Math.min(max, value)) : 1;
+  const pct = (clamped - min) / (max - min);
+  const color = pct < 0.35 ? '#dc2626' : pct < 0.65 ? '#f59e0b' : '#16a34a';
+
+  const cx = 120;
+  const cy = 120;
+  const r = 90;
+  const angleDeg = 180 - pct * 180;
+  const tip = polarPoint(cx, cy, r, angleDeg);
+  const tail = polarPoint(cx, cy, r * 0.25, angleDeg + 180);
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-2">
+      <svg viewBox="0 0 240 165" className="w-full max-w-[260px]">
+        <path d={arcPath(cx, cy, r, 180, 120)} stroke="#dc2626" strokeWidth="11" fill="none" strokeLinecap="round" />
+        <path d={arcPath(cx, cy, r, 120, 60)} stroke="#f59e0b" strokeWidth="11" fill="none" strokeLinecap="round" />
+        <path d={arcPath(cx, cy, r, 60, 0)} stroke="#16a34a" strokeWidth="11" fill="none" strokeLinecap="round" />
+        <text x={cx - r} y={cy + 22} textAnchor="middle" fontSize="13" fill="#6b7280">1</text>
+        <text x={cx} y={cy + 22} textAnchor="middle" fontSize="13" fill="#6b7280">3</text>
+        <text x={cx + r} y={cy + 22} textAnchor="middle" fontSize="13" fill="#6b7280">5</text>
+        <text x={cx - r} y={20} textAnchor="middle" fontSize="12" fill="#6b7280">Bad</text>
+        <text x={cx + r} y={20} textAnchor="middle" fontSize="12" fill="#6b7280">Good</text>
+        {valid && (
+          <>
+            <line x1={tail.x} y1={tail.y} x2={tip.x} y2={tip.y} stroke={color} strokeWidth="4" strokeLinecap="round" />
+            <circle cx={cx} cy={cy} r="6" fill={color} />
+          </>
+        )}
+      </svg>
+      <div className="text-2xl font-bold text-gray-800">
+        {valid ? value.toFixed(1) : loading ? '-' : 'N/A'}
+        {valid && <span className="text-sm text-gray-400 font-medium"> / 5</span>}
+      </div>
+      <div className="flex justify-between w-full max-w-[260px] text-xs text-gray-500">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-red-600 inline-block" />
+          ບໍ່ພໍໃຈ (Bad)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-green-600 inline-block" />
+          ພໍໃຈຫຼາຍ (Good)
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function Reports() {
+  const { selectedBranchId } = useBranch();
   const canExport = hasPermission('reports', 'export');
 
   const [data, setData] = useState(null);
@@ -27,7 +133,8 @@ export default function Reports() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError('');
-    fetch('http://localhost:3000/api/reports/summary', { headers })
+    const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
+    fetch(`http://localhost:3000/api/reports/summary${branchParam}`, { headers })
       .then(async res => {
         if (res.status === 403) {
           throw new Error('ບໍ່ມີສິດເຂົ້າເຖິງລາຍງານ (reports:read)');
@@ -47,7 +154,7 @@ export default function Reports() {
         setLoading(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   const totalTickets = data?.tickets?.byDepartment?.reduce((sum, d) => sum + d.count, 0) ?? 0;
   const slaRate = data?.sla?.complianceRate;
@@ -58,7 +165,8 @@ export default function Reports() {
 
   const handleExport = () => {
     setExporting(true);
-    fetch(`http://localhost:3000/api/reports/export/${exportFormat}?type=${exportType}`, { headers })
+    const branchParam = selectedBranchId ? `&branchId=${encodeURIComponent(selectedBranchId)}` : '';
+    fetch(`http://localhost:3000/api/reports/export/${exportFormat}?type=${exportType}${branchParam}`, { headers })
       .then(async res => {
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));
@@ -128,21 +236,19 @@ export default function Reports() {
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
+          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col">
             <p className="text-sm text-gray-500">ປັນຫາທັງໝົດ (ຕາມພະແນກ)</p>
-            <h3 className="text-3xl font-bold text-gray-800">{loading ? '-' : totalTickets}</h3>
+            <div className="flex-1 flex items-center justify-center">
+              <h3 className="text-5xl font-bold text-gray-800">{loading ? '-' : totalTickets}</h3>
+            </div>
           </div>
           <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
             <p className="text-sm text-gray-500">ອັດຕາການເຮັດຕາມ SLA</p>
-            <h3 className="text-3xl font-bold text-green-600">
-              {loading || slaRate === null || slaRate === undefined ? '-' : `${Math.round(slaRate * 100)}%`}
-            </h3>
+            <SlaDonut percent={loading ? null : slaRate === null || slaRate === undefined ? null : Math.round(slaRate * 100)} loading={loading} />
           </div>
           <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
             <p className="text-sm text-gray-500">ຄະແນນຄວາມພໍໃຈ (CSAT)</p>
-            <h3 className="text-3xl font-bold text-amber-500">
-              {loading || csatAvg === null ? '-' : csatAvg.toFixed(1)}
-            </h3>
+            <CsatGauge value={csatAvg} loading={loading} />
           </div>
         </div>
 

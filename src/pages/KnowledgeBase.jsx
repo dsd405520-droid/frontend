@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Search, BookOpen, Plus, Loader2, X, ThumbsUp, ThumbsDown, Eye, Maximize2, ExternalLink } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
 
@@ -386,13 +388,33 @@ export default function KnowledgeBase() {
             <p className="text-sm text-gray-500 mt-1">ຄູ່ມື ແລະ ວິທີແກ້ໄຂບັນຫາເບື້ອງຕົ້ນໃນລະບົບ (MongoDB)</p>
           </div>
           {canCreateArticle && (
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ເພີ່ມບົດຄວາມ</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <CsvImportButton
+                endpoint="/kb-articles/bulk-import"
+                refresh={fetchArticles}
+                permitted={canCreateArticle}
+                csvHint="CSV ຖັນ: title, body, category, departmentId (DX###) — ຈຳເປັນ; tags (ຄັ້ນດ້ວຍ , ຫຼື ;) — ເພີ່ມໄດ້"
+              />
+              <CsvExportButton
+                data={displayedArticles}
+                filename="kb-articles.csv"
+                label="Export CSV"
+                columns={[
+                  { key: 'title', label: 'title' },
+                  { key: 'category', label: 'category' },
+                  { key: 'status', label: 'status' },
+                  { key: '_id', label: 'id' },
+                  { label: 'department', value: (r) => departments.find(d => (d._id || d.id) === r.departmentId)?.name || r.departmentId || '' },
+                ]}
+              />
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ເພີ່ມບົດຄວາມ</span>
+              </button>
+            </div>
           )}
         </div>
 

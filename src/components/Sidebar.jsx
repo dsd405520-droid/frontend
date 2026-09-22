@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   ChevronDown,
+  Check,
   LayoutDashboard,
   Ticket,
   Clock,
@@ -26,6 +27,7 @@ import { LogOut } from 'lucide-react';
 import { canView, logout, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 import { getOrgSettings, applySystemName, DEFAULT_SYSTEM_NAME } from '../utils/orgSettings';
+import { useBranch } from '../contexts/BranchContext';
 
 // ກວດ module ດຽວ ຫຼື array (any-of) — ໃຊ້ກັບ /branches ທີ່ອີງໃສ່ທັງ 'branches' ແລະ 'departments'
 function canViewAny(moduleOrArray) {
@@ -106,14 +108,33 @@ export default function Sidebar({ open = false, onClose }) {
   // ຈຳນວນແຈ້ງເຕືອນຕົວຈິງ ດຶງມາຈາກ API ແທນທີ່ຈະ hardcode — ໂຫຼດຕອນເປີດ ແລະ refresh ທຸກໆ 60 ວິນາທີ
   const [badgeCounts, setBadgeCounts] = useState({ tickets: 0, announcements: 0, notifications: 0 });
 
+  // ຕົວເລືອກສາຂາທົ່ວລະບົບ (Branch Selector) — ອ່ານ/ຂຽນຈາກ BranchContext
+  const { branches, loading: loadingBranches, selectedBranchId, selectedBranch, changeBranch } = useBranch();
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const branchMenuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (branchMenuRef.current && !branchMenuRef.current.contains(e.target)) {
+        setBranchMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
     async function loadCounts() {
       try {
         // /dashboard ໃຫ້ທັງ ticket ທີ່ຄ້າງ (ຕາມສິດ: assignedToMe ຖ້າມີ, ບໍ່ດັ່ງນັ້ນໃຊ້ myTickets) ແລະ notifications.unreadCount ໃນຄັ້ງດຽວ
+        // — ຖ້າເລືອກສາຂາໄວ້ ໃຫ້ສົ່ງ branchId ໄປພ້ອມ ເພື່ອໃຫ້ຕົວເລກກົງກັບສາຂາທີ່ເລືອກ
+        const dashUrl = selectedBranchId
+          ? `/dashboard?branchId=${encodeURIComponent(selectedBranchId)}`
+          : '/dashboard';
         const [dashboardRes, announcementsRes] = await Promise.all([
-          api.get('/dashboard'),
+          api.get(dashUrl),
           api.get('/announcements/active'),
         ]);
 
@@ -141,7 +162,7 @@ export default function Sidebar({ open = false, onClose }) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [selectedBranchId]);
 
   // ດຶງຊື່ລະບົບຈາກການຕັ້ງຄ່າອົງກອນ ເພື່ອສະແດງໃນ header ຂ້າງຊ້າຍ + ແຖບຊື່ພາຍ (browser tab)
   useEffect(() => {
@@ -173,8 +194,8 @@ export default function Sidebar({ open = false, onClose }) {
             HD
           </div>
           <div className="overflow-hidden flex-1">
-            <h1 className="text-white font-bold text-base truncate">{systemName}</h1>
-            <p className="text-[11px] text-gray-400 truncate">ລະບົບຊ່ວຍເຫຼືອພະນັກງານ</p>
+            <h1 translate="no" className="text-white font-bold text-base truncate">{systemName}</h1>
+            <p translate="no" className="text-[11px] text-gray-400 truncate">ລະບົບຊ່ວຍເຫຼືອພະນັກງານ</p>
           </div>
           <button
             onClick={onClose}
@@ -185,12 +206,46 @@ export default function Sidebar({ open = false, onClose }) {
           </button>
         </div>
 
-      {/* Branch Selector Header */}
-      <div className="p-4 border-b border-gray-800">
-        <button className="w-full bg-[#1f2937] hover:bg-gray-800 text-white px-3 py-2.5 rounded-xl flex items-center justify-between text-sm font-medium transition border border-gray-700/50">
-          <span className="truncate">ສາຂາ: ສຳນັກງານໃຫຍ່ ວຽງຈັນ</span>
-          <ChevronDown size={16} className="text-gray-400 shrink-0" />
+      {/* Branch Selector Header — ເລືອກສາຂາທົ່ວລະບົບ (ກັ່ນຕອງຂໍ້ມູນໃນທຸກໜ້າ) */}
+      <div className="p-4 border-b border-gray-800 relative" ref={branchMenuRef}>
+        <button
+          onClick={() => setBranchMenuOpen((v) => !v)}
+          className="w-full bg-[#1f2937] hover:bg-gray-800 text-white px-3 py-2.5 rounded-xl flex items-center justify-between text-sm font-medium transition border border-gray-700/50"
+        >
+          <span className="truncate">
+            {selectedBranch ? `ສາຂາ: ${selectedBranch.name}` : 'ສາຂາ: ທຸກສາຂາ'}
+          </span>
+          <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${branchMenuOpen ? 'rotate-180' : ''}`} />
         </button>
+
+        {branchMenuOpen && (
+          <div className="absolute left-4 right-4 top-full z-40 mt-2 bg-[#1f2937] border border-gray-700 rounded-xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
+            <button
+              onClick={() => { changeBranch(''); setBranchMenuOpen(false); }}
+              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm transition ${!selectedBranchId ? 'text-amber-400' : 'text-gray-300 hover:bg-gray-800'}`}
+            >
+              <span className="truncate">ທຸກສາຂາ</span>
+              {!selectedBranchId && <Check size={16} className="shrink-0" />}
+            </button>
+            {loadingBranches ? (
+              <div className="px-3 py-2.5 text-sm text-gray-500">ກຳລັງໂຫຼດ...</div>
+            ) : (
+              branches.map((b) => (
+                <button
+                  key={b._id}
+                  onClick={() => { changeBranch(b._id); setBranchMenuOpen(false); }}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm transition ${selectedBranchId === b._id ? 'text-amber-400' : 'text-gray-300 hover:bg-gray-800'}`}
+                >
+                  <span className="truncate">{b.name}</span>
+                  {selectedBranchId === b._id && <Check size={16} className="shrink-0" />}
+                </button>
+              ))
+            )}
+            {!loadingBranches && branches.length === 0 && (
+              <div className="px-3 py-2.5 text-sm text-gray-500">ຍັງບໍ່ມີສາຂາ</div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Menu List — ຄັດຕອງແຕ່ລະລາຍການດ້ວຍ canView(module) ກ່ອນສະແດງ */}

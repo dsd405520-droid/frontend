@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, Check, MessageSquare } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import { useBranch } from '../contexts/BranchContext';
 
 const TICKET_STEPS = [
   { key: 'OPEN', label: 'ແຈ້ງເຂົ້າມາ' },
@@ -63,6 +64,7 @@ function TicketProgressBar({ status }) {
 
 export default function Issues() {
   const navigate = useNavigate();
+  const { selectedBranchId } = useBranch();
   const [issues, setIssues] = useState([]);
   const [ticketTypes, setTicketTypes] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -209,8 +211,12 @@ export default function Issues() {
         'Content-Type': 'application/json'
       };
 
+      const ticketsUrl = selectedBranchId
+        ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
+        : 'http://localhost:3000/api/tickets';
+
       const [issuesRes, typesRes, branchesRes, deptsRes] = await Promise.all([
-        fetch('http://localhost:3000/api/tickets', { headers }),
+        fetch(ticketsUrl, { headers }),
         fetch('http://localhost:3000/api/ticket-types', { headers }),
         fetch('http://localhost:3000/api/branches', { headers }),
         fetch('http://localhost:3000/api/departments', { headers })
@@ -258,7 +264,7 @@ export default function Issues() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {

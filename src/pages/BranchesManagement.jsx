@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Building2, Layers, Plus, X, Loader2, AlertCircle, Search, Filter } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 
 export default function BranchesManagement() {
   const canCreateBranch = hasPermission('branches', 'create');
@@ -233,26 +235,6 @@ export default function BranchesManagement() {
             <h1 className="text-2xl font-bold text-gray-800">ສາຂາ ແລະ ພະແນກ</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການຂໍ້ມູນສາຂາ, ພະແນກ ແລະ ເວລາເຮັດວຽກ</p>
           </div>
-          <div className="flex items-center gap-3">
-            {canCreateBranch && (
-              <button 
-                onClick={() => setIsBranchModalOpen(true)}
-                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-              >
-                <Plus size={18} />
-                <span>ເພີ່ມສາຂາ</span>
-              </button>
-            )}
-            {canCreateDept && (
-              <button 
-                onClick={() => setIsDeptModalOpen(true)}
-                className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-              >
-                <Plus size={18} />
-                <span>ເພີ່ມພະແນກ</span>
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Search & Filter */}
@@ -323,10 +305,44 @@ export default function BranchesManagement() {
 
         {/* ตารางສາຂາ */}
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <Building2 size={20} className="text-amber-500" />
-            ລາຍຊື່ສາຂາທັງໝົດ
-          </h2>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+              <Building2 size={20} className="text-amber-500" />
+              ລາຍຊື່ສາຂາທັງໝົດ
+            </h2>
+            <div className="flex items-center gap-3">
+              {canCreateBranch && (
+                <CsvImportButton
+                  endpoint="/branches/bulk-import"
+                  refresh={fetchData}
+                  permitted={canCreateBranch}
+                  csvHint="CSV ສາຂາ: name, address, city, country, timezone — ຈຳເປັນ; isActive (true/false) — ເພີ່ມໄດ້"
+                />
+              )}
+              <CsvExportButton
+                data={filteredBranches}
+                filename="branches.csv"
+                label="Export ສາຂາ"
+                columns={[
+                  { key: 'name', label: 'name' },
+                  { key: '_id', label: 'id' },
+                  { label: 'city', value: (r) => r.location?.city || '' },
+                  { label: 'country', value: (r) => r.location?.country || '' },
+                  { label: 'timezone', value: (r) => r.location?.timezone || '' },
+                  { key: 'isActive', label: 'isActive' },
+                ]}
+              />
+              {canCreateBranch && (
+                <button 
+                  onClick={() => setIsBranchModalOpen(true)}
+                  className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Plus size={18} />
+                  <span>ເພີ່ມສາຂາ</span>
+                </button>
+              )}
+            </div>
+          </div>
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -376,12 +392,45 @@ export default function BranchesManagement() {
           </div>
         </div>
 
-        {/* ตາລາງພະແນກ */}
+{/* ตາລາງພະແນກ */}
         <div className="space-y-3">
-          <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <Layers size={20} className="text-amber-500" />
-            ລາຍຊື່ພະແນກທັງໝົດ
-          </h2>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+              <Layers size={20} className="text-amber-500" />
+              ລາຍຊື່ພະແນກທັງໝົດ
+            </h2>
+            <div className="flex items-center gap-3">
+              {canCreateDept && (
+                <CsvImportButton
+                  endpoint="/departments/bulk-import"
+                  refresh={fetchData}
+                  permitted={canCreateDept}
+                  csvHint="CSV ພະແນກ: branchId, name — ຈຳເປັນ; managerIds (ຄັ້ນດ້ວຍ , ຫຼື ;), isActive (true/false) — ເພີ່ມໄດ້"
+                />
+              )}
+              <CsvExportButton
+                data={filteredDepartments}
+                filename="departments.csv"
+                label="Export ພະແນກ"
+                columns={[
+                  { key: 'name', label: 'name' },
+                  { key: '_id', label: 'id' },
+                  { label: 'branch', value: (r) => getBranchName(r.branchId) },
+                  { label: 'managerIds', value: (r) => (r.managerIds || []).join(', ') },
+                  { key: 'isActive', label: 'isActive' },
+                ]}
+              />
+              {canCreateDept && (
+                <button 
+                  onClick={() => setIsDeptModalOpen(true)}
+                  className="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Plus size={18} />
+                  <span>ເພີ່ມພະແນກ</span>
+                </button>
+              )}
+            </div>
+          </div>
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">

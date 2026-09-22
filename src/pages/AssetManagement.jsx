@@ -3,6 +3,8 @@ import { Plus, AlertTriangle, X, Clock, CheckCircle, XCircle, Search, Filter } f
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 
 export default function AssetManagement() {
   const canCreateCatalog = hasPermission('supplies', 'create');
@@ -234,6 +236,28 @@ export default function AssetManagement() {
                 <AlertTriangle size={16} />
                 <span>{lowStockOnly ? 'ສະແດງທັງໝົດ' : 'ສະຕັອກໃກ້ໝົດ'}</span>
               </button>
+              {canCreateCatalog && (
+                <CsvImportButton
+                  endpoint="/supply-catalog/bulk-import"
+                  refresh={fetchCatalog}
+                  permitted={canCreateCatalog}
+                  csvHint="CSV ຖັນ: name, category, unit — ຈຳເປັນ; stockQty, lowStockThreshold, isActive (true/false) — ເພີ່ມໄດ້"
+                />
+              )}
+              <CsvExportButton
+                data={filteredAssets}
+                filename="supply-catalog.csv"
+                label="Export CSV"
+                columns={[
+                  { key: '_id', label: 'id' },
+                  { key: 'name', label: 'name' },
+                  { key: 'category', label: 'category' },
+                  { key: 'unit', label: 'unit' },
+                  { key: 'stockQty', label: 'stockQty' },
+                  { key: 'lowStockThreshold', label: 'lowStockThreshold' },
+                  { key: 'isActive', label: 'isActive' },
+                ]}
+              />
               {canCreateCatalog && (
                 <button
                   onClick={() => setIsModalOpen(true)}

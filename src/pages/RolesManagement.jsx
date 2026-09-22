@@ -3,6 +3,8 @@ import axios from 'axios';
 import MainLayout from '../layouts/MainLayout';
 import { Shield, Plus, X, Loader2, AlertCircle, Lock } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
@@ -188,13 +190,33 @@ export default function RolesManagement() {
             <p className="text-sm text-gray-500 mt-1">ກຳນົດສິດທິການເຂົ້າເຖິງໂມດູນຕ່າງໆຕາມໂຄງສ້າງ Backend</p>
           </div>
           {canCreate && (
-            <button 
-              onClick={handleOpenCreate}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ເພີ່ມ Role ໃໝ່</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <CsvImportButton
+                endpoint="/roles/bulk-import"
+                refresh={fetchRoles}
+                permitted={canCreate}
+                csvHint='CSV ຖັນ: name — ຈຳເປັນ; permissions (ຮູບແບບ "module:action1,action2|module2:action1"), mfaRequired (true/false) — ເພີ່ມໄດ້'
+              />
+              <CsvExportButton
+                data={roles}
+                filename="roles.csv"
+                label="Export CSV"
+                columns={[
+                  { key: 'name', label: 'name' },
+                  { key: '_id', label: 'id' },
+                  { label: 'isSystemRole', value: (r) => (r.isSystemRole ? 'true' : 'false') },
+                  { label: 'mfaRequired', value: (r) => (r.mfaRequired ? 'true' : 'false') },
+                  { label: 'permissions', value: (r) => (r.permissions || []).map((p) => `${p.module}: ${(p.actions || []).join(', ')}`).join(' | ') },
+                ]}
+              />
+              <button 
+                onClick={handleOpenCreate}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ເພີ່ມ Role ໃໝ່</span>
+              </button>
+            </div>
           )}
         </div>
 

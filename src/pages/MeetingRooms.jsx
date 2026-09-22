@@ -2,10 +2,16 @@ import { useState, useEffect, useRef } from 'react';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2, Search, X } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 import { getSocket } from '../utils/socket';
+import { useBranch } from '../contexts/BranchContext';
 
 export default function MeetingRooms() {
+  const { selectedBranchId } = useBranch();
   const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
+  const canCreateBooking = hasPermission('rooms', 'create');
+  const canCreateRoom = hasPermission('rooms', 'create');
 
   const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
 
@@ -72,10 +78,11 @@ export default function MeetingRooms() {
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
-  const fetchRooms = (silent = false) => {
+  const fetchRooms = (silent = false, branchId = selectedBranchId) => {
     if (!silent) setLoading(true);
     setError(null);
-    fetch('http://localhost:3000/api/rooms', {
+    const branchParam = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
+    fetch(`http://localhost:3000/api/rooms${branchParam}`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -208,7 +215,7 @@ export default function MeetingRooms() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchRooms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   useEffect(() => {
     if (activeTab === 'my-bookings') {
@@ -251,7 +258,7 @@ export default function MeetingRooms() {
       socket.off('room:changed', refreshFromServer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   const reviewBooking = (id, action, body) => {
     setReviewingId(id);
@@ -755,19 +762,44 @@ export default function MeetingRooms() {
             <h1 className="text-2xl font-bold text-gray-800">ລະບົບຈອງຫ້ອງປະຊຸມ</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການ, ກວດສອບສະຖານະ ແລະ ຈອງຫ້ອງປະຊຸມອອນໄລນ໌</p>
           </div>
-          <button
-            onClick={() => {
-              const firstRoom = rooms.length > 0 ? rooms[0] : null;
-              setSelectedRoom(firstRoom ? (firstRoom.roomId || firstRoom._id) : '');
-              setCalendarViewMode('week');
-              setPickStart(null);
-              setIsModalOpen(true);
-            }}
-            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={18} />
-            <span>ຈອງຫ້ອງປະຊຸມ</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {canCreateBooking && (
+              <CsvImportButton
+                endpoint="/room-bookings/bulk-import"
+                refresh={() => { fetchCalendarBookings(); fetchMyBookings(); }}
+                permitted={canCreateBooking}
+                csvHint="CSV ການຈອງ: title, roomId, startAt, endAt (ISO datetime) — ຈຳເປັນ"
+              />
+            )}
+            <CsvExportButton
+              data={calendarBookings}
+              filename="room-bookings.csv"
+              label="Export ການຈອງ"
+              columns={[
+                { key: 'title', label: 'title' },
+                { label: 'room', value: (b) => (b.roomId?.name || b.roomId?._id || b.roomId || '') },
+                { key: 'startAt', label: 'startAt' },
+                { key: 'endAt', label: 'endAt' },
+                { key: 'status', label: 'status' },
+                { label: 'bookedBy', value: (b) => ([b.bookedBy?.firstName, b.bookedBy?.lastName].filter(Boolean).join(' ') || b.bookedBy?.email || (typeof b.bookedBy === 'string' ? b.bookedBy : '')) },
+                { key: 'seriesId', label: 'seriesId' },
+                { key: '_id', label: 'id' },
+              ]}
+            />
+            <button
+              onClick={() => {
+                const firstRoom = rooms.length > 0 ? rooms[0] : null;
+                setSelectedRoom(firstRoom ? (firstRoom.roomId || firstRoom._id) : '');
+                setCalendarViewMode('week');
+                setPickStart(null);
+                setIsModalOpen(true);
+              }}
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Plus size={18} />
+              <span>ຈອງຫ້ອງປະຊຸມ</span>
+            </button>
+          </div>
         </div>
 
         <div className="flex border-b border-gray-200 gap-6">
@@ -1224,8 +1256,35 @@ export default function MeetingRooms() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-              <div className="p-4 border-b border-gray-100 font-bold text-gray-800">
-                ຈັດການສະຖານະຫ້ອງ (ວ່າງ / ກຳລັງໃຊ້ງານ / ປິດບຳລຸງ)
+              <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="font-bold text-gray-800">
+                  ຈັດການສະຖານະຫ້ອງ (ວ່າງ / ກຳລັງໃຊ້ງານ / ປິດບຳລຸງ)
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {canCreateRoom && (
+                    <CsvImportButton
+                      endpoint="/rooms/bulk-import"
+                      refresh={() => fetchRooms(true)}
+                      permitted={canCreateRoom}
+                      csvHint="CSV ຫ້ອງ: branchId, name, capacity — ຈຳເປັນ; location, amenities (ແບ່ງດ້ວຍ , ຫຼື ;), status (AVAILABLE/MAINTENANCE), isActive (true/false) — ເພີ່ມໄດ້"
+                    />
+                  )}
+                  <CsvExportButton
+                    data={rooms}
+                    filename="rooms.csv"
+                    label="Export ຫ້ອງ"
+                    columns={[
+                      { key: '_id', label: 'id' },
+                      { key: 'name', label: 'name' },
+                      { label: 'branchId', value: (r) => (r.branchId?._id || r.branchId || '') },
+                      { key: 'location', label: 'location' },
+                      { key: 'capacity', label: 'capacity' },
+                      { label: 'amenities', value: (r) => (r.amenities || []).join('; ') },
+                      { label: 'status', value: (r) => r.status || 'AVAILABLE' },
+                      { key: 'isActive', label: 'isActive' },
+                    ]}
+                  />
+                </div>
               </div>
               <div className="divide-y divide-gray-100">
                 {rooms.map(room => {

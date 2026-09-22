@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X, Search, Filter } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import CsvExportButton from '../components/CsvExportButton';
+import { useBranch } from '../contexts/BranchContext';
 
 // ໜ້າລາຍງານສະຖານະຫ້ອງປະຊຸມ "ຕົວຈິງ" — ບໍ່ແມ່ນແຄ່ອີງ booking (ຄາດເດົາ) ແຕ່ໃຫ້ຄົນທີ່ຢູ່ໃນຫ້ອງແທ້ໆ
 // ຢືນຢັນເອງ (check-in / check-out), ບັນທຶກລາຍຊື່ຄົນເຂົ້າຮ່ວມ, ແລະ ຕໍ່ເວລາໄດ້ຖ້າໃກ້ໝົດ (ຜ່ານ endpoint reschedule ທີ່ມີແລ້ວ)
 export default function RoomStatusReport() {
+  const { selectedBranchId } = useBranch();
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
@@ -52,7 +55,8 @@ export default function RoomStatusReport() {
   function fetchRooms() {
     setLoadingRooms(true);
     setRoomsError('');
-    fetch('http://localhost:3000/api/rooms', { headers })
+    const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
+    fetch(`http://localhost:3000/api/rooms${branchParam}`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດຂໍ້ມູນຫ້ອງໄດ້');
@@ -80,7 +84,7 @@ export default function RoomStatusReport() {
     fetchRooms();
     fetchMyBookings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   const roomStatusInfo = (liveStatus) => {
     switch (liveStatus) {
@@ -188,6 +192,22 @@ export default function RoomStatusReport() {
           <p className="text-sm text-gray-500 mt-1">
             ສະຖານະຫ້ອງແບບສົດ, ບັນທຶກຄົນເຂົ້າຮ່ວມ, ແລະ ຕໍ່ເວລາປະຊຸມທີ່ໃກ້ໝົດເວລາ
           </p>
+        </div>
+
+        {/* Export: ສະຖານະຫ້ອງຕົວຈິງ */}
+        <div className="flex justify-end">
+          <CsvExportButton
+            data={filteredRooms}
+            filename="room-status.csv"
+            label="Export CSV"
+            columns={[
+              { key: 'name', label: 'name' },
+              { key: '_id', label: 'id' },
+              { key: 'location', label: 'location' },
+              { key: 'capacity', label: 'capacity' },
+              { label: 'status', value: (r) => r.liveStatus || r.status || 'AVAILABLE' },
+            ]}
+          />
         </div>
 
         {/* ແຖບເລືອກ (tabs) — ແທນການລຽນລ້ວນລົງມາ ໃຫ້ເບິ່ງງ່າຍ ແລະ ສະບາຍຕາຂຶ້ນ */}

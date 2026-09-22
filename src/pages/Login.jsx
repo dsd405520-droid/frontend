@@ -221,8 +221,8 @@ export default function Login() {
             APB
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white tracking-wide">{systemName}</h1>
-            <p className="text-base text-yellow-400 font-medium mt-0.5">ທະນາຄານສົ່ງເສີມກະສິກຳ ຈຳກົດ</p>
+            <h1 translate="no" className="text-lg font-bold text-white tracking-wide">ທະນາຄານສົ່ງເສີມກະສິກຳ ຈຳກົດ</h1>
+            <p translate="no" className="text-base text-yellow-400 font-medium mt-0.5">Agricultural Promotion Bank Co., Ltd</p>
           </div>
         </div>
 

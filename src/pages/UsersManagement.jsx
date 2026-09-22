@@ -2,12 +2,15 @@ import axios from 'axios';
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
 import { useState, useEffect, useRef } from 'react';
-import { Users, Plus, X, Loader2, AlertCircle, Building2, Layers, Search, Filter } from 'lucide-react';
+import { Users, Plus, X, Loader2, AlertCircle, Building2, Layers, Search, Filter, Upload } from 'lucide-react';
+import CsvExportButton from '../components/CsvExportButton';
+import { useBranch } from '../contexts/BranchContext';
 
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
 export default function UsersManagement() {
+  const { selectedBranchId } = useBranch();
   const canCreate = hasPermission('users', 'create');
   const canUpdate = hasPermission('users', 'update');
   const canDelete = hasPermission('users', 'delete');
@@ -22,6 +25,10 @@ export default function UsersManagement() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [editingUser, setEditingUser] = useState(null);
+
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState([]);
@@ -95,8 +102,11 @@ export default function UsersManagement() {
   const fetchData = async () => {
     const headers = { Authorization: `Bearer ${getToken()}` };
     try {
+      const usersUrl = selectedBranchId
+        ? `${API_BASE_URL}/users?branchId=${encodeURIComponent(selectedBranchId)}`
+        : `${API_BASE_URL}/users`;
       const [userRes, branchRes, deptRes, roleRes] = await Promise.all([
-        axios.get(`${API_BASE_URL}/users`, { headers }),
+        axios.get(usersUrl, { headers }),
         axios.get(`${API_BASE_URL}/branches`, { headers }),
         axios.get(`${API_BASE_URL}/departments`, { headers }),
         axios.get(`${API_BASE_URL}/roles`, { headers }).catch(() => ({ data: [] }))
@@ -117,7 +127,7 @@ export default function UsersManagement() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   const handleOpenCreate = () => {
     setEditingUser(null);
@@ -134,6 +144,31 @@ export default function UsersManagement() {
     });
     setError('');
     setIsModalOpen(true);
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await axios.post(`${API_BASE_URL}/users/bulk-import`, formData, {
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      setImportResult(res.data?.data || res.data);
+      fetchData();
+    } catch (err) {
+      console.error('Error importing CSV:', err);
+      setError(err.response?.data?.message || err.response?.data?.msg || 'ການນຳເຂົ້າ CSV ລົ້ມເຫຼວ');
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleOpenEdit = (user) => {
@@ -223,15 +258,53 @@ export default function UsersManagement() {
             <h1 className="text-2xl font-bold text-gray-800">ຈັດການຜູ້ໃຊ້ (Users Management)</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການຂໍ້ມູນພະນັກງານ, ສາຂາ, ພະແນກ ແລະ ສິດທິການໃຊ້ງານ</p>
           </div>
-          {canCreate && (
-            <button
-              onClick={handleOpenCreate}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ເພີ່ມຜູ້ໃຊ້</span>
-            </button>
-          )}
+          <div className="w-full sm:w-auto">
+            <div className="flex items-center gap-2">
+              <CsvExportButton
+                data={filteredUsers}
+                filename="users.csv"
+                label="Export CSV"
+                columns={[
+                  { key: 'employeeCode', label: 'employeeCode' },
+                  { key: 'firstName', label: 'firstName' },
+                  { key: 'lastName', label: 'lastName' },
+                  { key: 'email', label: 'email' },
+                  { key: 'phone', label: 'phone' },
+                  { label: 'role', value: (user) => getRoleName(user.role) },
+                  { label: 'branch', value: (user) => getBranchName(user.branchId || user.branchID || user.branch) },
+                  { label: 'department', value: (user) => getDepartmentName(user.department) },
+                  { key: 'isActive', label: 'isActive' },
+                  { key: '_id', label: 'id' },
+                ]}
+              />
+              {canCreate && (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={handleImportFile}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={importing}
+                    className="border border-gray-200 hover:bg-gray-50 text-gray-600 px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                  >
+                    {importing ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />}
+                    <span>{importing ? 'ກຳລັງນຳເຂົ້າ...' : 'Import CSV'}</span>
+                  </button>
+                  <button
+                    onClick={handleOpenCreate}
+                    className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <Plus size={18} />
+                    <span>ເພີ່ມຜູ້ໃຊ້</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -554,6 +627,81 @@ export default function UsersManagement() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {importResult && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden border border-gray-100 my-8">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50">
+              <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                <Upload className="text-amber-500" size={20} />
+                ຜົນການນຳເຂົ້າ CSV
+              </h3>
+              <button onClick={() => setImportResult(null)} className="text-gray-400 hover:text-gray-600 transition p-1 rounded-lg">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-center">
+                  <p className="text-xs text-gray-500">ທັງໝົດ (Total)</p>
+                  <p className="text-2xl font-bold text-gray-800">{importResult.total ?? 0}</p>
+                </div>
+                <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
+                  <p className="text-xs text-green-600">ນຳເຂົ້າສຳເລັດ (Created)</p>
+                  <p className="text-2xl font-bold text-green-700">{importResult.created ?? 0}</p>
+                </div>
+                <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-center">
+                  <p className="text-xs text-red-600">ລົ້ມເຫຼວ (Failed)</p>
+                  <p className="text-2xl font-bold text-red-600">{importResult.failed ?? 0}</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-400">
+                ຮູບແບບ CSV: ຖັນທີ່ຈຳເປັນ — employeeCode, firstName, lastName, email, role, branchId (ລະຫັດ
+                ໃນລະບົບ); ຖັນເພີ່ມເຕີມ — phone, departmentId
+              </p>
+
+              {(importResult.results || []).filter((r) => !r.success).length > 0 && (
+                <div className="border border-red-100 rounded-xl overflow-hidden">
+                  <div className="bg-red-50 px-4 py-2 text-sm font-medium text-red-600">
+                    ລາຍລະອຽດຂໍ້ຜິດພາດ
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400">
+                          <th className="p-3 font-medium">ແຖວ (Row)</th>
+                          <th className="p-3 font-medium">ອີເມວ</th>
+                          <th className="p-3 font-medium">ຂໍ້ຜິດພາດ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 text-gray-600">
+                        {(importResult.results || []).filter((r) => !r.success).map((r, idx) => (
+                          <tr key={idx}>
+                            <td className="p-3">{r.row}</td>
+                            <td className="p-3">{r.email || '-'}</td>
+                            <td className="p-3 text-red-500">{r.error}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setImportResult(null)}
+                  className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-2 rounded-xl text-sm font-medium transition shadow-sm"
+                >
+                  ປິດ (Close)
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

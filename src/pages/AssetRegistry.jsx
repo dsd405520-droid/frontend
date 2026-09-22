@@ -5,12 +5,16 @@ import {
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
+import { useBranch } from '../contexts/BranchContext';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
 // ທະບຽນຊັບສິນບໍລິສັດ (laptop, ຈໍ, ບັດພະນັກງານ, ໂທລະສັບ) — ຄົນລະສ່ວນຈາກ Supply Requests (ວັດສະດຸສິ້ນເປືອງ)
 // ອີງໃສ່ backend module 'assets' (assign/return/status/delete ຄົບແລ້ວ), ຄົນລະ module key ຈາກ 'supplies' ທີ່ໜ້າ AssetManagement.jsx ໃຊ້ຢູ່
 export default function AssetRegistry() {
+  const { selectedBranchId } = useBranch();
   const token = localStorage.getItem('token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
@@ -57,7 +61,8 @@ export default function AssetRegistry() {
   function fetchAssets() {
     setLoadingAssets(true);
     setAssetsError('');
-    fetch(`${API_BASE_URL}/assets`, { headers })
+    const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
+    fetch(`${API_BASE_URL}/assets${branchParam}`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດທະບຽນຊັບສິນໄດ້');
@@ -100,7 +105,7 @@ export default function AssetRegistry() {
     fetchBranches();
     fetchUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   useEffect(() => {
     if (activeTab === 'overdue') {
@@ -222,12 +227,35 @@ export default function AssetRegistry() {
             <p className="text-sm text-gray-500 mt-1">Laptop, ຈໍ, ບັດພະນັກງານ, ໂທລະສັບ — ຄົນລະສ່ວນຈາກການຂໍວັດສະດຸສິ້ນເປືອງ</p>
           </div>
           {canCreate && activeTab === 'registry' && (
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} /> <span>ເພີ່ມຊັບສິນ</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <CsvImportButton
+                endpoint="/assets/bulk-import"
+                refresh={fetchAssets}
+                permitted={canCreate}
+                csvHint="CSV ຊັບສິນ: assetTag, type, branchId — ຈຳເປັນ; purchaseDate (YYYY-MM-DD), warrantyExpiry (YYYY-MM-DD) — ເພີ່ມໄດ້"
+              />
+              <CsvExportButton
+                data={filteredAssets}
+                filename="assets.csv"
+                label="Export CSV"
+                columns={[
+                  { key: 'assetTag', label: 'assetTag' },
+                  { key: 'type', label: 'type' },
+                  { label: 'branch', value: (r) => branchName(r.branchId) },
+                  { label: 'status', value: (r) => statusInfo(r.status).label },
+                  { label: 'assignee', value: (r) => (r.currentAssigneeId ? userName(r.currentAssigneeId) : '') },
+                  { key: 'purchaseDate', label: 'purchaseDate' },
+                  { key: 'warrantyExpiry', label: 'warrantyExpiry' },
+                  { key: '_id', label: 'id' },
+                ]}
+              />
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} /> <span>ເພີ່ມຊັບສິນ</span>
+              </button>
+            </div>
           )}
         </div>
 

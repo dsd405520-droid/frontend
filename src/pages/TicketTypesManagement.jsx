@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Tag, Plus, X, Loader2, AlertCircle, Pencil, Trash2, Clock, ArrowRight, Search, Filter } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'];
 
@@ -339,13 +341,34 @@ export default function TicketTypesManagement() {
             </p>
           </div>
           {canCreate && (
-            <button
-              onClick={openCreateModal}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ສ້າງປະເພດໃໝ່</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <CsvImportButton
+                endpoint="/ticket-types/bulk-import"
+                refresh={fetchData}
+                permitted={canCreate}
+                csvHint="CSV ຖັນ: name, defaultDepartmentId (DX###) — ຈຳເປັນ; defaultPriority, description, isActive (true/false) — ເພີ່ມໄດ້"
+              />
+              <CsvExportButton
+                data={sortedTypes}
+                filename="ticket-types.csv"
+                label="Export CSV"
+                columns={[
+                  { key: 'name', label: 'name' },
+                  { label: 'defaultDepartment', value: (r) => departmentName(r.defaultDepartmentId) },
+                  { key: 'defaultPriority', label: 'defaultPriority' },
+                  { key: 'description', label: 'description' },
+                  { key: 'isActive', label: 'isActive' },
+                  { key: '_id', label: 'id' },
+                ]}
+              />
+              <button
+                onClick={openCreateModal}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ສ້າງປະເພດໃໝ່</span>
+              </button>
+            </div>
           )}
         </div>
 

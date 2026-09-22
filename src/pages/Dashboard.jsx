@@ -7,6 +7,7 @@ import {
   Info
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import { useBranch } from '../contexts/BranchContext';
 
 const STATUS_LABELS = {
   OPEN: 'ເປີດ',
@@ -25,6 +26,7 @@ const PRIORITY_STYLES = {
 };
 
 export default function Dashboard() {
+  const { selectedBranchId } = useBranch();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,7 +39,8 @@ export default function Dashboard() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
-    fetch('http://localhost:3000/api/dashboard', { headers })
+    const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
+    fetch(`http://localhost:3000/api/dashboard${branchParam}`, { headers })
       .then(async res => {
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));
@@ -56,7 +59,7 @@ export default function Dashboard() {
 
     // ຫ້ອງປະຊຸມ ແລະ ຄຳຂໍອຸປະກອນ ບໍ່ໄດ້ຢູ່ໃນ payload ຂອງ /dashboard —
     // ດຶງແຍກຕ່າງຫາກ, ແລະ ບໍ່ໃຫ້ຄ້າງທັງໜ້າຖ້າບໍ່ມີສິດເຂົ້າເຖິງ (403)
-    fetch('http://localhost:3000/api/rooms', { headers })
+    fetch(`http://localhost:3000/api/rooms${branchParam}`, { headers })
       .then(res => (res.ok ? res.json() : Promise.reject()))
       .then(body => setRooms(body?.data ?? body))
       .catch(() => setRooms(null));
@@ -66,7 +69,7 @@ export default function Dashboard() {
       .then(body => setSupplyRequests(body?.data ?? body))
       .catch(() => setSupplyRequests(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedBranchId]);
 
   const myTickets = data?.myTickets;
   const byStatus = myTickets?.byStatus || {};

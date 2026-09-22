@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { Plus, Loader2, X, ChevronDown, Pencil, Trash2, Search, Filter } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 
 const PRIORITY_KEYWORDS = {
   low: ['low', 'ຕ່ຳ'],
@@ -294,13 +296,37 @@ export default function Slamanagement() {
             <p className="text-sm text-gray-500 mt-1">ກຳນົດນະໂຍບາຍເວລາຕອບກັບ ແລະ ແກ້ໄຂບັນຫາ (NestJS + MongoDB)</p>
           </div>
           {canCreate && (
-            <button
-              onClick={openCreateModal}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ເພີ່ມນະໂຍບາຍ SLA</span>
-            </button>
+            <div className="w-full sm:w-auto">
+              <div className="flex items-center gap-2">
+                <CsvImportButton
+                  endpoint="/sla-policies/bulk-import"
+                  refresh={fetchSlas}
+                  permitted={canCreate}
+                  csvHint="CSV ຖັນ: name, ticketTypeId, priority (low/medium/high/urgent), responseTimeMinutes, resolutionTimeMinutes — ຈຳເປັນ; isActive (true/false) — ເພີ່ມໄດ້"
+                />
+                <CsvExportButton
+                  data={filteredSlas}
+                  filename="sla-policies.csv"
+                  label="Export CSV"
+                  columns={[
+                    { key: 'name', label: 'name' },
+                    { label: 'ticketType', value: (r) => ticketTypeNameById(r.ticketTypeId) },
+                    { key: 'priority', label: 'priority' },
+                    { key: 'responseTimeMinutes', label: 'responseTimeMinutes' },
+                    { key: 'resolutionTimeMinutes', label: 'resolutionTimeMinutes' },
+                    { key: 'isActive', label: 'isActive' },
+                    { key: '_id', label: 'id' },
+                  ]}
+                />
+                <button
+                  onClick={openCreateModal}
+                  className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Plus size={18} />
+                  <span>ເພີ່ມນະໂຍບາຍ SLA</span>
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
