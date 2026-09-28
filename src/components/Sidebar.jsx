@@ -207,127 +207,127 @@ export default function Sidebar({ open = false, onClose }) {
           </button>
         </div>
 
-      {/* Branch Selector Header — ເລືອກສາຂາທົ່ວລະບົບ (ກັ່ນຕອງຂໍ້ມູນໃນທຸກໜ້າ) */}
-      <div className="p-4 border-b border-gray-800 relative" ref={branchMenuRef}>
-        <button
-          onClick={() => setBranchMenuOpen((v) => !v)}
-          className="w-full bg-[#1f2937] hover:bg-gray-800 text-white px-3 py-2.5 rounded-xl flex items-center justify-between text-sm font-medium transition border border-gray-700/50"
-        >
-          <span className="truncate">
-            {selectedBranch ? `ສາຂາ: ${selectedBranch.name}` : 'ສາຂາ: ທຸກສາຂາ'}
-          </span>
-          <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${branchMenuOpen ? 'rotate-180' : ''}`} />
-        </button>
+        {/* Branch Selector Header — ເລືອກສາຂາທົ່ວລະບົບ (ກັ່ນຕອງຂໍ້ມູນໃນທຸກໜ້າ) */}
+        <div className="p-4 border-b border-gray-800 relative" ref={branchMenuRef}>
+          <button
+            onClick={() => setBranchMenuOpen((v) => !v)}
+            className="w-full bg-[#1f2937] hover:bg-gray-800 text-white px-3 py-2.5 rounded-xl flex items-center justify-between text-sm font-medium transition border border-gray-700/50"
+          >
+            <span className="truncate">
+              {selectedBranch ? `ສາຂາ: ${selectedBranch.name}` : 'ສາຂາ: ທຸກສາຂາ'}
+            </span>
+            <ChevronDown size={16} className={`text-gray-400 shrink-0 transition-transform ${branchMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
 
-        {branchMenuOpen && (
-          <div className="absolute left-4 right-4 top-full z-40 mt-2 bg-[#1f2937] border border-gray-700 rounded-xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
-            <button
-              onClick={() => { changeBranch(''); setBranchMenuOpen(false); }}
-              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm transition ${!selectedBranchId ? 'text-amber-400' : 'text-gray-300 hover:bg-gray-800'}`}
-            >
-              <span className="truncate">ທຸກສາຂາ</span>
-              {!selectedBranchId && <Check size={16} className="shrink-0" />}
-            </button>
-            {loadingBranches ? (
-              <div className="px-3 py-2.5 text-sm text-gray-500">ກຳລັງໂຫຼດ...</div>
-            ) : (
-              branches.map((b) => (
-                <button
-                  key={b._id}
-                  onClick={() => { changeBranch(b._id); setBranchMenuOpen(false); }}
-                  className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm transition ${selectedBranchId === b._id ? 'text-amber-400' : 'text-gray-300 hover:bg-gray-800'}`}
-                >
-                  <span className="truncate">{b.name}</span>
-                  {selectedBranchId === b._id && <Check size={16} className="shrink-0" />}
-                </button>
-              ))
-            )}
-            {!loadingBranches && branches.length === 0 && (
-              <div className="px-3 py-2.5 text-sm text-gray-500">ຍັງບໍ່ມີສາຂາ</div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Menu List — ຄັດຕອງແຕ່ລະລາຍການດ້ວຍ canView(module) ກ່ອນສະແດງ */}
-      <div className="flex-1 p-4 space-y-6">
-        {MENU_SECTIONS.map((section) => {
-          const visibleItems = section.items.filter((item) => canViewAny(item.module));
-          if (visibleItems.length === 0) return null;
-
-          return (
-            <div key={section.heading}>
-              <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2 font-semibold">{section.heading}</p>
-              <nav className="space-y-1">
-                {visibleItems.map(({ to, label, icon: Icon, badgeKey, badgeColor }) => {
-                  const count = badgeKey ? badgeCounts[badgeKey] : 0;
-                  return (
-                    <Link
-                      key={to}
-                      to={to}
-                      onClick={onClose}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
-                        }`}
-                    >
-                      <Icon size={18} /> <span>{label}</span>
-                      {count > 0 && (
-                        <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeColor || 'bg-amber-500 text-black'}`}>
-                          {count > 99 ? '99+' : count}
-                        </span>
-                      )}
-                    </Link>
-                  );
-                })}
-              </nav>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* User info + Logout */}
-      <div className="p-4 border-t border-gray-800">
-        {user && (
-          <div className="mb-2 px-1 overflow-hidden">
-            <p className="text-sm font-medium text-white truncate">{user.email}</p>
-            <p className="text-[11px] text-gray-400 truncate">{user.role}</p>
-          </div>
-        )}
-        <button
-          onClick={() => setShowLogoutConfirm(true)}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-red-500/10 hover:text-red-400 transition"
-        >
-          <LogOut size={18} />
-          <span>ອອກຈາກລະບົບ</span>
-        </button>
-      </div>
-
-      {/* Portal ໄປທີ່ document.body — aside ມີ transform (drawer) ເຮັດໃຫ້ `fixed` ອ້າງອີງ aside ແທນໜ້າຈໍ */}
-      {showLogoutConfirm && createPortal(
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-4">
-              <LogOut size={22} />
-            </div>
-            <h3 className="font-bold text-gray-800 text-lg mb-2">ອອກຈາກລະບົບ</h3>
-            <p className="text-sm text-gray-500 mb-6">ທ່ານຕ້ອງການອອກຈາກລະບົບແທ້ບໍ?</p>
-            <div className="flex items-center justify-center gap-3">
+          {branchMenuOpen && (
+            <div className="absolute left-4 right-4 top-full z-40 mt-2 bg-[#1f2937] border border-gray-700 rounded-xl shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
               <button
-                onClick={() => setShowLogoutConfirm(false)}
-                className="flex-1 px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition"
+                onClick={() => { changeBranch(''); setBranchMenuOpen(false); }}
+                className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm transition ${!selectedBranchId ? 'text-amber-400' : 'text-gray-300 hover:bg-gray-800'}`}
               >
-                ຍົກເລີກ
+                <span className="truncate">ທຸກສາຂາ</span>
+                {!selectedBranchId && <Check size={16} className="shrink-0" />}
               </button>
-              <button
-                onClick={logout}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
-              >
-                ອອກຈາກລະບົບ
-              </button>
+              {loadingBranches ? (
+                <div className="px-3 py-2.5 text-sm text-gray-500">ກຳລັງໂຫຼດ...</div>
+              ) : (
+                branches.map((b) => (
+                  <button
+                    key={b._id}
+                    onClick={() => { changeBranch(b._id); setBranchMenuOpen(false); }}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm transition ${selectedBranchId === b._id ? 'text-amber-400' : 'text-gray-300 hover:bg-gray-800'}`}
+                  >
+                    <span className="truncate">{b.name}</span>
+                    {selectedBranchId === b._id && <Check size={16} className="shrink-0" />}
+                  </button>
+                ))
+              )}
+              {!loadingBranches && branches.length === 0 && (
+                <div className="px-3 py-2.5 text-sm text-gray-500">ຍັງບໍ່ມີສາຂາ</div>
+              )}
             </div>
-          </div>
+          )}
         </div>
-        , document.body)}
-    </aside>
+
+        {/* Menu List — ຄັດຕອງແຕ່ລະລາຍການດ້ວຍ canView(module) ກ່ອນສະແດງ */}
+        <div className="flex-1 p-4 space-y-6">
+          {MENU_SECTIONS.map((section) => {
+            const visibleItems = section.items.filter((item) => canViewAny(item.module));
+            if (visibleItems.length === 0) return null;
+
+            return (
+              <div key={section.heading}>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-2 font-semibold">{section.heading}</p>
+                <nav className="space-y-1">
+                  {visibleItems.map(({ to, label, icon: Icon, badgeKey, badgeColor }) => {
+                    const count = badgeKey ? badgeCounts[badgeKey] : 0;
+                    return (
+                      <Link
+                        key={to}
+                        to={to}
+                        onClick={onClose}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition ${isActive(to) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 'hover:bg-gray-800/60 text-gray-300'
+                          }`}
+                      >
+                        <Icon size={18} /> <span>{label}</span>
+                        {count > 0 && (
+                          <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-bold ${badgeColor || 'bg-amber-500 text-black'}`}>
+                            {count > 99 ? '99+' : count}
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* User info + Logout */}
+        <div className="p-4 border-t border-gray-800">
+          {user && (
+            <div className="mb-2 px-1 overflow-hidden">
+              <p className="text-sm font-medium text-white truncate">{user.email}</p>
+              <p className="text-[11px] text-gray-400 truncate">{user.role}</p>
+            </div>
+          )}
+          <button
+            onClick={() => setShowLogoutConfirm(true)}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-gray-300 hover:bg-red-500/10 hover:text-red-400 transition"
+          >
+            <LogOut size={18} />
+            <span>ອອກຈາກລະບົບ</span>
+          </button>
+        </div>
+
+        {/* Portal ໄປທີ່ document.body — aside ມີ transform (drawer) ເຮັດໃຫ້ `fixed` ອ້າງອີງ aside ແທນໜ້າຈໍ */}
+        {showLogoutConfirm && createPortal(
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 text-center">
+              <div className="w-12 h-12 mx-auto rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-4">
+                <LogOut size={22} />
+              </div>
+              <h3 className="font-bold text-gray-800 text-lg mb-2">ອອກຈາກລະບົບ</h3>
+              <p className="text-sm text-gray-500 mb-6">ທ່ານຕ້ອງການອອກຈາກລະບົບແທ້ບໍ?</p>
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className="flex-1 px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition"
+                >
+                  ຍົກເລີກ
+                </button>
+                <button
+                  onClick={logout}
+                  className="flex-1 bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition"
+                >
+                  ອອກຈາກລະບົບ
+                </button>
+              </div>
+            </div>
+          </div>
+          , document.body)}
+      </aside>
     </>
   );
 }
