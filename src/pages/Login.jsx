@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, Mail, Loader2, AlertCircle } from 'lucide-react';
+import { Lock, Mail, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { getOrgSettings, applySystemName } from '../utils/orgSettings';
 
 export default function Login() {
@@ -25,6 +25,15 @@ export default function Login() {
   const [setupCode, setSetupCode] = useState('');
   const [setupSubmitting, setSetupSubmitting] = useState(false);
   const [resendingSetup, setResendingSetup] = useState(false);
+
+  // Forgot password flow: null | 'email' | 'reset' | 'done'
+  const [forgotStep, setForgotStep] = useState(null);
+  const [resetCode, setResetCode] = useState('');
+  const [resetMfaCode, setResetMfaCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotInfo, setForgotInfo] = useState('');
 
   // ດຶງຊື່ລະບົບຈາກການຕັ້ງຄ່າອົງກອນ ມາສະແດງໃນໜ້າ Login
   useEffect(() => {
@@ -103,6 +112,79 @@ export default function Login() {
       setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
     } finally {
       setResendingSetup(false);
+    }
+  };
+
+  const openForgot = () => {
+    setError('');
+    setForgotInfo('');
+    setResetCode('');
+    setResetMfaCode('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setForgotStep('email');
+  };
+
+  const closeForgot = () => {
+    setError('');
+    setForgotInfo('');
+    setForgotStep(null);
+  };
+
+  const handleSendResetCode = async (e) => {
+    if (e) e.preventDefault();
+    setError('');
+    setForgotInfo('');
+    setForgotSubmitting(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.msg || 'ສົ່ງລະຫັດບໍ່ສຳເລັດ');
+      setForgotInfo('ຖ້າອີເມວນີ້ມີໃນລະບົບ ພວກເຮົາໄດ້ສົ່ງລະຫັດ 6 ຫຼັກໄປທີ່ອີເມວແລ້ວ (ໝົດອາຍຸໃນ 10 ນາທີ)');
+      setForgotStep('reset');
+    } catch (err) {
+      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setForgotSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (newPassword.length < 8) {
+      setError('ລະຫັດຜ່ານຕ້ອງມີຢ່າງໜ້ອຍ 8 ຕົວອັກສອນ');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('ລະຫັດຜ່ານໃໝ່ທັງສອງຊ່ອງບໍ່ຕົງກັນ');
+      return;
+    }
+    setForgotSubmitting(true);
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          code: resetCode,
+          newPassword,
+          ...(resetMfaCode ? { mfaCode: resetMfaCode } : {}),
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.msg || 'ລະຫັດບໍ່ຖືກຕ້ອງ ຫຼື ໝົດອາຍຸ');
+      setPassword('');
+      setForgotInfo('');
+      setForgotStep('done');
+    } catch (err) {
+      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setForgotSubmitting(false);
     }
   };
 
@@ -233,7 +315,114 @@ export default function Login() {
           </div>
         )}
 
-        {mfaSetupStep ? (
+        {forgotStep ? (
+          <div className="space-y-4">
+            {forgotStep === 'email' && (
+              <form onSubmit={handleSendResetCode} className="space-y-4">
+                <p className="text-sm text-yellow-200/90">ປ້ອນອີເມວຂອງບັນຊີ — ພວກເຮົາຈະສົ່ງລະຫັດຢືນຢັນ 6 ຫຼັກໄປໃຫ້</p>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 text-yellow-400" size={18} />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="jano@example.com"
+                    className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 pl-10 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                  />
+                </div>
+                <button type="submit" disabled={forgotSubmitting || !email} className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50">
+                  {forgotSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>ສົ່ງລະຫັດ</span>}
+                </button>
+                <button type="button" onClick={closeForgot} className="w-full text-yellow-300 text-xs underline">
+                  ກັບໄປໜ້າເຂົ້າສູ່ລະບົບ
+                </button>
+              </form>
+            )}
+
+            {forgotStep === 'reset' && (
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                {forgotInfo && <p className="text-sm text-yellow-200/90">{forgotInfo}</p>}
+                <div>
+                  <label className="block text-xs font-medium text-yellow-200/90 mb-1">ລະຫັດຈາກອີເມວ</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    value={resetCode}
+                    onChange={(e) => setResetCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="123456"
+                    className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-yellow-200/90 mb-1">
+                    ລະຫັດຈາກແອັບ Authenticator (ຖ້າບັນຊີເປີດໃຊ້ MFA ແບບ Authenticator)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    value={resetMfaCode}
+                    onChange={(e) => setResetMfaCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="ບໍ່ບັງຄັບ"
+                    className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-yellow-200/90 mb-1">ລະຫັດຜ່ານໃໝ່</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="ຢ່າງໜ້ອຍ 8 ຕົວອັກສອນ"
+                    className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-yellow-200/90 mb-1">ຢືນຢັນລະຫັດຜ່ານໃໝ່</label>
+                  <input
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={forgotSubmitting || resetCode.length !== 6 || !newPassword}
+                  className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50"
+                >
+                  {forgotSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>ປ່ຽນລະຫັດຜ່ານ</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendResetCode}
+                  disabled={forgotSubmitting}
+                  className="w-full text-yellow-300 text-xs underline disabled:opacity-50"
+                >
+                  ສົ່ງລະຫັດອີກຄັ້ງ
+                </button>
+                <button type="button" onClick={closeForgot} className="w-full text-yellow-300 text-xs underline">
+                  ຍົກເລີກ
+                </button>
+              </form>
+            )}
+
+            {forgotStep === 'done' && (
+              <div className="space-y-4 text-center">
+                <CheckCircle2 className="mx-auto text-emerald-400" size={40} />
+                <p className="text-sm text-yellow-200/90">ປ່ຽນລະຫັດຜ່ານສຳເລັດແລ້ວ — ກະລຸນາເຂົ້າສູ່ລະບົບດ້ວຍລະຫັດຜ່ານໃໝ່</p>
+                <button type="button" onClick={closeForgot} className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50">
+                  ເຂົ້າສູ່ລະບົບ
+                </button>
+              </div>
+            )}
+          </div>
+        ) : mfaSetupStep ? (
           <div className="space-y-4">
             {mfaSetupStep === 'choose' && (
               <>
@@ -342,6 +531,12 @@ export default function Login() {
                   className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 pl-10 text-sm text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
                 />
               </div>
+            </div>
+
+            <div className="text-right -mt-1">
+              <button type="button" onClick={openForgot} className="text-yellow-300 text-xs underline">
+                ລືມລະຫັດຜ່ານ? (Forgot password)
+              </button>
             </div>
 
             <button
