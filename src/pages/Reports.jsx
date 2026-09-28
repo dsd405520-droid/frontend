@@ -11,18 +11,6 @@ const REPORT_TYPE_LABELS = {
   csat: 'ຄວາມພໍໃຈ (CSAT)',
 };
 
-function polarPoint(cx, cy, r, deg) {
-  const rad = (deg * Math.PI) / 180;
-  return { x: cx + r * Math.cos(rad), y: cy - r * Math.sin(rad) };
-}
-
-function arcPath(cx, cy, r, startDeg, endDeg) {
-  const s = polarPoint(cx, cy, r, startDeg);
-  const e = polarPoint(cx, cy, r, endDeg);
-  const large = Math.abs(endDeg - startDeg) > 100 ? 1 : 0;
-  return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`;
-}
-
 function SlaDonut({ percent, loading }) {
   const radius = 58;
   const circumference = 2 * Math.PI * radius;
@@ -47,8 +35,9 @@ function SlaDonut({ percent, loading }) {
           />
         )}
       </svg>
-      <div className="text-2xl font-bold text-gray-800">
-        {hasData ? `${percent}%` : loading ? '-' : 'N/A'}
+      {/* translate="no": Google Translate ຂອງ browser ເຮັດໃຫ້ React ອັບເດດຕົວເລກບໍ່ໄດ້ (ຄ້າງ "-") */}
+      <div translate="no" className="text-2xl font-bold text-gray-800">
+        <span>{hasData ? `${percent}%` : loading ? '-' : 'N/A'}</span>
       </div>
       <div className="flex gap-4 text-xs text-gray-500">
         <span className="flex items-center gap-1.5">
@@ -64,51 +53,47 @@ function SlaDonut({ percent, loading }) {
   );
 }
 
-function CsatGauge({ value }) {
+function CsatDonut({ value, loading }) {
+  const radius = 58;
+  const circumference = 2 * Math.PI * radius;
   const min = 1;
   const max = 5;
-  const valid = typeof value === 'number' && !Number.isNaN(value);
-  const clamped = valid ? Math.max(min, Math.min(max, value)) : 1;
+  const hasData = typeof value === 'number' && !Number.isNaN(value);
+  const clamped = hasData ? Math.max(min, Math.min(max, value)) : 0;
+  const fill = clamped / max; // 4.2 / 5 = 84% ຂອງວົງ
   const pct = (clamped - min) / (max - min);
   const color = pct < 0.35 ? '#dc2626' : pct < 0.65 ? '#f59e0b' : '#16a34a';
-
-  const cx = 120;
-  const cy = 120;
-  const r = 90;
-  const angleDeg = 180 - pct * 180;
-  const tip = polarPoint(cx, cy, r, angleDeg);
-  const tail = polarPoint(cx, cy, r * 0.25, angleDeg + 180);
 
   return (
     <div className="flex flex-col items-center justify-center gap-2">
       <svg viewBox="0 0 240 165" className="w-full max-w-[260px]">
-        <path d={arcPath(cx, cy, r, 180, 120)} stroke="#dc2626" strokeWidth="11" fill="none" strokeLinecap="round" />
-        <path d={arcPath(cx, cy, r, 120, 60)} stroke="#f59e0b" strokeWidth="11" fill="none" strokeLinecap="round" />
-        <path d={arcPath(cx, cy, r, 60, 0)} stroke="#16a34a" strokeWidth="11" fill="none" strokeLinecap="round" />
-        <text x={cx - r} y={cy + 22} textAnchor="middle" fontSize="13" fill="#6b7280">1</text>
-        <text x={cx} y={cy + 22} textAnchor="middle" fontSize="13" fill="#6b7280">3</text>
-        <text x={cx + r} y={cy + 22} textAnchor="middle" fontSize="13" fill="#6b7280">5</text>
-        <text x={cx - r} y={20} textAnchor="middle" fontSize="12" fill="#6b7280">Bad</text>
-        <text x={cx + r} y={20} textAnchor="middle" fontSize="12" fill="#6b7280">Good</text>
-        {valid && (
-          <>
-            <line x1={tail.x} y1={tail.y} x2={tip.x} y2={tip.y} stroke={color} strokeWidth="4" strokeLinecap="round" />
-            <circle cx={cx} cy={cy} r="6" fill={color} />
-          </>
+        <circle cx="120" cy="83" r={radius} fill="none" stroke="#e5e7eb" strokeWidth="18" />
+        {hasData && (
+          <circle
+            cx="120"
+            cy="83"
+            r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth="18"
+            strokeLinecap="round"
+            strokeDasharray={`${fill * circumference} ${circumference}`}
+            transform="rotate(-90 120 83)"
+          />
         )}
       </svg>
-      <div className="text-2xl font-bold text-gray-800">
-        {valid ? value.toFixed(1) : loading ? '-' : 'N/A'}
-        {valid && <span className="text-sm text-gray-400 font-medium"> / 5</span>}
+      <div translate="no" className="text-2xl font-bold text-gray-800">
+        <span>{hasData ? value.toFixed(1) : loading ? '-' : 'N/A'}</span>
+        {hasData && <span className="text-sm text-gray-400 font-medium"> / 5</span>}
       </div>
-      <div className="flex justify-between w-full max-w-[260px] text-xs text-gray-500">
+      <div className="flex gap-4 text-xs text-gray-500">
         <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-red-600 inline-block" />
-          ບໍ່ພໍໃຈ (Bad)
+          <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: hasData ? color : '#16a34a' }} />
+          ຄະແນນເຉລ່ຍ
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-green-600 inline-block" />
-          ພໍໃຈຫຼາຍ (Good)
+          <span className="w-2.5 h-2.5 rounded-full bg-gray-200 inline-block" />
+          ຄະແນນເຕັມ 5
         </span>
       </div>
     </div>
@@ -131,6 +116,7 @@ export default function Reports() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    let cancelled = false;
     setLoading(true);
     setError('');
     const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
@@ -141,18 +127,21 @@ export default function Reports() {
         }
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));
-          throw new Error(result.message || `ດຶງຂໍ້ມູນບໍ່ສຳເລັດ (HTTP ${res.status})`);
+          throw new Error(result.msg || result.message || `ດຶງຂໍ້ມູນບໍ່ສຳເລັດ (HTTP ${res.status})`);
         }
         return res.json();
       })
       .then(body => {
+        if (cancelled) return;
         setData(body?.data ?? body);
         setLoading(false);
       })
       .catch(err => {
+        if (cancelled) return;
         setError(err.message);
         setLoading(false);
       });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
 
@@ -170,7 +159,7 @@ export default function Reports() {
       .then(async res => {
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));
-          throw new Error(result.message || 'ສົ່ງອອກລາຍງານບໍ່ສຳເລັດ');
+          throw new Error(result.msg || result.message || 'ສົ່ງອອກລາຍງານບໍ່ສຳເລັດ');
         }
         return res.blob();
       })
@@ -197,17 +186,17 @@ export default function Reports() {
             <p className="text-sm text-gray-500 mt-1">ສະຖິຕິ ແລະ ປະສິດທິພາບການເຮັດວຽກຂອງລະບົບ (Analytics)</p>
           </div>
           <div className="flex items-center gap-2">
-            <select
-              value={exportType}
-              onChange={(e) => setExportType(e.target.value)}
-              className="border border-gray-300 rounded-xl px-3 py-2 text-sm"
-            >
-              {Object.entries(REPORT_TYPE_LABELS).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
-            </select>
             {canExport && (
               <>
+                <select
+                  value={exportType}
+                  onChange={(e) => setExportType(e.target.value)}
+                  className="border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                >
+                  {Object.entries(REPORT_TYPE_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
                 <select
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value)}
@@ -239,7 +228,7 @@ export default function Reports() {
           <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col">
             <p className="text-sm text-gray-500">ປັນຫາທັງໝົດ (ຕາມພະແນກ)</p>
             <div className="flex-1 flex items-center justify-center">
-              <h3 className="text-5xl font-bold text-gray-800">{loading ? '-' : totalTickets}</h3>
+              <h3 translate="no" className="text-5xl font-bold text-gray-800"><span>{loading ? '-' : totalTickets}</span></h3>
             </div>
           </div>
           <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
@@ -248,7 +237,7 @@ export default function Reports() {
           </div>
           <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm space-y-2">
             <p className="text-sm text-gray-500">ຄະແນນຄວາມພໍໃຈ (CSAT)</p>
-            <CsatGauge value={csatAvg} loading={loading} />
+            <CsatDonut value={csatAvg} loading={loading} />
           </div>
         </div>
 
