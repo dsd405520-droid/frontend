@@ -18,12 +18,14 @@ import AuditLogs from './pages/AuditLogs';
 import Settings from './pages/Settings';
 import AssetManagement from './pages/AssetManagement';
 import UsersManagement from './pages/UsersManagement';
+import UserDetail from './pages/UserDetail';
 import MeetingRooms from './pages/MeetingRooms';
 import RoomStatusReport from './pages/RoomStatusReport';
 import AssetRegistry from './pages/AssetRegistry';
 import InventorySupplies from './pages/InventorySupplies';
 import KnowledgeBase from './pages/KnowledgeBase';
 import TicketTypesManagement from './pages/TicketTypesManagement';
+import TicketDetail from './pages/TicketDetail';
 import TicketChat from './pages/TicketChat';
 
 export default function App() {
@@ -39,6 +41,7 @@ export default function App() {
 
         {/* ການບໍລິການ / Tickets */}
         <Route path="/issues" element={<ProtectedRoute module="tickets"><Issues /></ProtectedRoute>} />
+        <Route path="/issues/:id" element={<ProtectedRoute module="tickets"><TicketDetail /></ProtectedRoute>} />
         <Route path="/issues/:id/chat" element={<ProtectedRoute module="tickets"><TicketChat /></ProtectedRoute>} />
         <Route path="/sla-management" element={<ProtectedRoute module="sla"><Slamanagement /></ProtectedRoute>} />
         <Route path="/ticket-types" element={<ProtectedRoute module="ticket-types"><TicketTypesManagement /></ProtectedRoute>} />
@@ -46,6 +49,7 @@ export default function App() {
 
         {/* ອົງກອນ / Admin-level */}
         <Route path="/users" element={<ProtectedRoute module="users"><UsersManagement /></ProtectedRoute>} />
+        <Route path="/users/:id" element={<ProtectedRoute module="users"><UserDetail /></ProtectedRoute>} />
         <Route path="/roles" element={<ProtectedRoute module="roles"><RolesManagement /></ProtectedRoute>} />
         <Route path="/branches" element={<ProtectedRoute module={["branches", "departments"]}><BranchesManagement /></ProtectedRoute>} />
         {/* ໝາຍເຫດ: AssetManagement.jsx (route /assets) ໃນຄວາມເປັນຈິງເອີ້ນແຕ່ /supply-catalog ແລະ

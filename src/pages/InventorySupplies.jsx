@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Package, Plus, CheckCircle, Clock, XCircle } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import axios from '../services/api';
 
 export default function InventorySupplies() {
+  const [searchParams] = useSearchParams();
   const canRequest = hasPermission('supplies', 'create');
 
   const [requests, setRequests] = useState([]);
@@ -36,10 +38,19 @@ export default function InventorySupplies() {
     }
   };
 
-  useEffect(() => {
+useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, []);
+
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ຂໍອຸປະກອນສິ້ນເປືອງ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   const handleAddItem = () => {
     setItems([...items, { catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);

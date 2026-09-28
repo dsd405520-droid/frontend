@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useSearchParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
 import { useState, useEffect, useRef } from 'react';
@@ -11,6 +12,7 @@ const API_BASE_URL = 'http://localhost:3000/api';
 
 export default function UsersManagement() {
   const { selectedBranchId } = useBranch();
+  const [searchParams] = useSearchParams();
   const canCreate = hasPermission('users', 'create');
   const canUpdate = hasPermission('users', 'update');
   const canDelete = hasPermission('users', 'delete');
@@ -249,6 +251,15 @@ export default function UsersManagement() {
     const found = roles.find(item => (item._id === r || item.id === r));
     return found?.name || r || 'USER';
   };
+
+// Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງຜູ້ໃຊ້ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      handleOpenCreate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   return (
     <MainLayout>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useSearchParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { Shield, Plus, X, Loader2, AlertCircle, Lock } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
@@ -43,6 +44,7 @@ const AVAILABLE_ACTIONS = [
 ];
 
 export default function RolesManagement() {
+  const [searchParams] = useSearchParams();
   // ຕົວຢ່າງການກວດສິດລະດັບ action (ບໍ່ແມ່ນແຄ່ລະດັບໜ້າ) — ຄົນທີ່ເຂົ້າໜ້ານີ້ໄດ້ (read)
   // ອາດຈະບໍ່ມີສິດ create/update/delete ກໍ່ໄດ້, ຈຶ່ງຕ້ອງເຊັກແຍກແຕ່ລະປຸ່ມ
   const canCreate = hasPermission('roles', 'create');
@@ -180,6 +182,15 @@ export default function RolesManagement() {
       }
     }
   };
+
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງບົດບາດ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      handleOpenCreate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   return (
     <MainLayout>
@@ -354,8 +365,9 @@ export default function RolesManagement() {
                         <tr key={mod.key} className="hover:bg-gray-50/50">
                           <td className="p-3 font-medium text-gray-800">{mod.label}</td>
                           {AVAILABLE_ACTIONS.map((action) => {
-                            const checked = isActionChecked(mod.key, action.key);
-                            return (
+const checked = isActionChecked(mod.key, action.key);
+
+  return (
                               <td key={action.key} className="p-3 text-center">
                                 <input
                                   type="checkbox"

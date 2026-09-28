@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Laptop, Plus, X, Loader2, AlertCircle, Search, UserCheck, Undo2,
   Wrench, History, AlertTriangle, Trash2,
@@ -15,6 +16,7 @@ const API_BASE_URL = 'http://localhost:3000/api';
 // ອີງໃສ່ backend module 'assets' (assign/return/status/delete ຄົບແລ້ວ), ຄົນລະ module key ຈາກ 'supplies' ທີ່ໜ້າ AssetManagement.jsx ໃຊ້ຢູ່
 export default function AssetRegistry() {
   const { selectedBranchId } = useBranch();
+  const [searchParams] = useSearchParams();
   const token = localStorage.getItem('token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
@@ -106,6 +108,15 @@ export default function AssetRegistry() {
     fetchUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
+
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງຊັບສິນ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowCreateModal(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   useEffect(() => {
     if (activeTab === 'overdue') {

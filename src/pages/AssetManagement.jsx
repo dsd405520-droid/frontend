@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, AlertTriangle, X, Clock, CheckCircle, XCircle, Search, Filter } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
@@ -7,6 +8,7 @@ import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 
 export default function AssetManagement() {
+  const [searchParams] = useSearchParams();
   const canCreateCatalog = hasPermission('supplies', 'create');
   const canApproveRequests = hasPermission('supplies', 'approve');
 
@@ -42,7 +44,7 @@ export default function AssetManagement() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-  
+
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState({
@@ -214,6 +216,16 @@ export default function AssetManagement() {
   const knownCategories = [...new Set(assets.map(a => a.category).filter(Boolean))].sort();
 
   const activeFilterCount = statusFilter.length + stockFilter.length + categoryFilter.length;
+
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ເພີ່ມລາຍການຊັບສິນ ອັດຕະໂນມັດ + ໄປ tab Catalog
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveTab('catalog');
+      setIsModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   return (
     <MainLayout>
@@ -472,8 +484,9 @@ export default function AssetManagement() {
                 </tr>
 ) : filteredAssets.length > 0 ? (
                 filteredAssets.map((item) => {
-                  const isLowStock = item.stockQty <= item.lowStockThreshold;
-                  return (
+const isLowStock = item.stockQty <= item.lowStockThreshold;
+
+  return (
                     <tr key={item._id} className="hover:bg-gray-50">
                       <td className="p-4 font-semibold text-gray-900">{item._id}</td>
                       <td className="p-4 font-medium text-gray-800">{item.name}</td>

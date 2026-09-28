@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Building2, Layers, Plus, X, Loader2, AlertCircle, Search, Filter } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
@@ -6,6 +7,7 @@ import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 
 export default function BranchesManagement() {
+  const [searchParams] = useSearchParams();
   const canCreateBranch = hasPermission('branches', 'create');
   const canCreateDept = hasPermission('departments', 'create');
 
@@ -36,7 +38,7 @@ export default function BranchesManagement() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-  
+
   // States ສຳລັບ Modal ເພີ່ມສາຂາ
   const [isBranchModalOpen, setIsBranchModalOpen] = useState(false);
   const [submittingBranch, setSubmittingBranch] = useState(false);
@@ -225,6 +227,18 @@ export default function BranchesManagement() {
     const matchesBranch = branchFilter.length === 0 || branchFilter.includes(String(item.branchId));
     return matchesSearch && matchesStatus && matchesBranch;
   });
+
+// Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງສາຂາ ຫຼື ພະແນກ ອັດຕະໂນມັດ (create=branch | create=department)
+  useEffect(() => {
+    const mode = searchParams.get('create');
+    if (mode === 'branch') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsBranchModalOpen(true);
+    } else if (mode === 'department') {
+      setIsDeptModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   return (
     <MainLayout>

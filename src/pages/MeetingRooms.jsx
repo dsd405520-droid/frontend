@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2, Search, X } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
@@ -9,6 +10,7 @@ import { useBranch } from '../contexts/BranchContext';
 
 export default function MeetingRooms() {
   const { selectedBranchId } = useBranch();
+  const [searchParams] = useSearchParams();
   const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
   const canCreateBooking = hasPermission('rooms', 'create');
   const canCreateRoom = hasPermission('rooms', 'create');
@@ -216,6 +218,16 @@ export default function MeetingRooms() {
     fetchRooms();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
+
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ຈອງຫ້ອງປະຊຸມ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCalendarViewMode('week');
+      setIsModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   useEffect(() => {
     if (activeTab === 'my-bookings') {

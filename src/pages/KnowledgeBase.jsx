@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search, BookOpen, Plus, Loader2, X, ThumbsUp, ThumbsDown, Eye, Maximize2, ExternalLink } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
@@ -7,6 +8,7 @@ import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
 
 export default function KnowledgeBase() {
+  const [searchParams] = useSearchParams();
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,6 +67,16 @@ export default function KnowledgeBase() {
     if (url.endsWith('.docx')) renderDocxPreview(url);
     setFullscreenAttachment(url);
   };
+
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ເພີ່ມບົດຄວາມ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEditingId(null);
+      setIsModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   useEffect(() => {
     if (!fullscreenAttachment) return;

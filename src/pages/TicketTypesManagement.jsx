@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Tag, Plus, X, Loader2, AlertCircle, Pencil, Trash2, Clock, ArrowRight, Search, Filter } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
@@ -19,6 +19,7 @@ const EMPTY_SLA_ROW = { priority: 'low', responseTimeMinutes: 30, resolutionTime
 
 export default function TicketTypesManagement() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [types, setTypes] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -329,6 +330,15 @@ export default function TicketTypesManagement() {
       setDeletingId(null);
     }
   };
+
+// Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງປະເພດບັນຫາ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      openCreateModal();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   return (
     <MainLayout>

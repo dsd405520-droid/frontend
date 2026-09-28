@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Megaphone, Plus, X, Loader2, Calendar, Pin, Trash2 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 
 export default function Announcements() {
+  const [searchParams] = useSearchParams();
   const canCreate = hasPermission('announcements', 'create');
   const canUpdate = hasPermission('announcements', 'update'); // pin/unpin ໃຊ້ action 'update' ຕາມ backend
   const canDelete = hasPermission('announcements', 'delete');
@@ -61,6 +63,15 @@ export default function Announcements() {
     fetchAnnouncements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງປະກາດ ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsModalOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, Check, MessageSquare } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
@@ -64,6 +64,7 @@ function TicketProgressBar({ status }) {
 
 export default function Issues() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { selectedBranchId } = useBranch();
   const [issues, setIssues] = useState([]);
   const [ticketTypes, setTicketTypes] = useState([]);
@@ -265,6 +266,15 @@ export default function Issues() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
+
+  // Navbar "ສ້າງໃໝ່" ສົ່ງມາທີ່ /issues?create=1 ໃຫ້ເປີດ Modal ສ້າງ Ticket ອັດຕະໂນມັດ
+  const shouldOpenCreate = searchParams.get('create') === '1';
+  useEffect(() => {
+    if (shouldOpenCreate) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsModalOpen(true);
+    }
+  }, [shouldOpenCreate]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {

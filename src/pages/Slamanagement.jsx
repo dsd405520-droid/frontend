@@ -287,6 +287,15 @@ export default function Slamanagement() {
 
   const clearTicketTypeFilter = () => setSearchParams({});
 
+  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງ SLA ອັດຕະໂນມັດ
+  useEffect(() => {
+    if (searchParams.get('create') === '1') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      openCreateModal();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('create')]);
+
   return (
     <MainLayout>
       <div className="space-y-6">
