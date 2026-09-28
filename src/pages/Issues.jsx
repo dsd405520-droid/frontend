@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, Check, MessageSquare } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
 
 const TICKET_STEPS = [
   { key: 'OPEN', label: 'ແຈ້ງເຂົ້າມາ' },
@@ -164,6 +166,7 @@ export default function Issues() {
   const canCreateTicketType = hasPermission('ticket-types', 'create');
   const canAssign = hasPermission('tickets', 'assign');
   const canUpdateStatus = hasPermission('tickets', 'update');
+  const canCreateTicket = hasPermission('tickets', 'create');
 
   const ALLOWED_TRANSITIONS = {
     OPEN: ['ASSIGNED', 'IN_PROGRESS'],
@@ -195,6 +198,10 @@ export default function Issues() {
     const matched = users.find((u) => (u._id || u.id) === agent);
     return matched ? getUserDisplayName(matched) || 'ບໍ່ລະບຸຊື່' : agent;
   };
+
+  const branchName = (id) => branches.find((b) => b._id === id)?.name || id || '-';
+  const departmentName = (id) => departments.find((d) => d._id === id)?.name || id || '-';
+  const ticketTypeName = (id) => ticketTypes.find((t) => t._id === id)?.name || id || '-';
 
   const extractArrayData = (resData) => {
     if (Array.isArray(resData)) return resData;
@@ -541,13 +548,42 @@ export default function Issues() {
             <h1 className="text-2xl font-bold text-gray-800">ແກ້ໄຂບັນຫາ</h1>
             <p className="text-sm text-gray-500 mt-1">ຈັດການ ແລະ ຕິດຕາມສະຖານະການແຈ້ງບັນຫາຕ່າງໆໃນລະບົບ</p>
           </div>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-          >
-            <Plus size={18} />
-            <span>ສ້າງລາຍການໃໝ່</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <CsvImportButton
+              endpoint="/tickets/bulk-import"
+              refresh={fetchData}
+              permitted={canCreateTicket}
+              csvHint="CSV ຖັນ: title, description, ticketTypeId (TT###), branchId (BX###) — ຈຳເປັນ; departmentId (DX###), priority (low/medium/high/urgent) — ເພີ່ມໄດ້"
+            />
+            <CsvExportButton
+              data={sortedIssues}
+              filename="tickets.csv"
+              label="Export CSV"
+              permitted={hasPermission('tickets', 'read')}
+              columns={[
+                { key: 'title', label: 'title' },
+                { key: 'description', label: 'description' },
+                { key: 'ticketTypeId', label: 'ticketTypeId' },
+                { label: 'ticketType', value: (r) => ticketTypeName(r.ticketTypeId) },
+                { key: 'branchId', label: 'branchId' },
+                { label: 'branch', value: (r) => branchName(r.branchId) },
+                { key: 'departmentId', label: 'departmentId' },
+                { label: 'department', value: (r) => departmentName(r.departmentId) },
+                { key: 'priority', label: 'priority' },
+                { label: 'status', value: (r) => STATUS_LABELS[r.status] || r.status || '' },
+                { label: 'assignedAgent', value: (r) => (typeof r.assignedAgent === 'string' ? r.assignedAgent : '') },
+                { label: 'createdAt', value: (r) => (r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '') },
+                { key: 'ticketNumber', label: 'ticketNumber' },
+              ]}
+            />
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Plus size={18} />
+              <span>ສ້າງລາຍການໃໝ່</span>
+            </button>
+          </div>
         </div>
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">

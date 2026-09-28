@@ -237,17 +237,6 @@ export default function AssetManagement() {
           </div>
           {activeTab === 'catalog' && (
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setLowStockOnly(!lowStockOnly)}
-                className={`px-3 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 border ${
-                  lowStockOnly 
-                    ? 'bg-red-50 text-red-600 border-red-200' 
-                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                <AlertTriangle size={16} />
-                <span>{lowStockOnly ? 'ສະແດງທັງໝົດ' : 'ສະຕັອກໃກ້ໝົດ'}</span>
-              </button>
               {canCreateCatalog && (
                 <CsvImportButton
                   endpoint="/supply-catalog/bulk-import"
@@ -397,6 +386,17 @@ export default function AssetManagement() {
               />
             </div>
             <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+              <button
+                onClick={() => setLowStockOnly(!lowStockOnly)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 border shrink-0 ${
+                  lowStockOnly
+                    ? 'bg-red-50 text-red-600 border-red-200'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <AlertTriangle size={16} />
+                <span>{lowStockOnly ? 'ສະແດງທັງໝົດ' : 'ສະຕັອກໃກ້ໝົດ'}</span>
+              </button>
               <div className="relative" ref={filterRef}>
                 <button
                   onClick={() => setIsFilterOpen(!isFilterOpen)}

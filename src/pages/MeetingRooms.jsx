@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2, Search, X } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2, Search, X, Layers, AlertTriangle } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
@@ -9,7 +9,7 @@ import { getSocket } from '../utils/socket';
 import { useBranch } from '../contexts/BranchContext';
 
 export default function MeetingRooms() {
-  const { selectedBranchId } = useBranch();
+  const { selectedBranchId, branches } = useBranch();
   const [searchParams] = useSearchParams();
   const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
   const canCreateBooking = hasPermission('rooms', 'create');
@@ -22,6 +22,27 @@ export default function MeetingRooms() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Filters: ຊັ້ນ (floor) -> ຈຸດໃນຊັ້ນ (position within the floor)
+  const [floorFilter, setFloorFilter] = useState([]);
+  const [locationFilter, setLocationFilter] = useState([]);
+  const [isFloorOpen, setIsFloorOpen] = useState(false);
+  const [isLocationOpen, setIsLocationOpen] = useState(false);
+  const floorRef = useRef(null);
+  const locationRef = useRef(null);
+
+  // States ສຳລັບ Modal ເພີ່ມຫ້ອງໃໝ່
+  const [isRoomModalOpen, setIsRoomModalOpen] = useState(false);
+  const [roomSubmitting, setRoomSubmitting] = useState(false);
+  const [roomFormError, setRoomFormError] = useState('');
+  const [roomForm, setRoomForm] = useState({
+    name: '',
+    branchId: '',
+    floor: '',
+    location: '',
+    capacity: 10,
+    amenities: '',
+  });
 
   // States ສຳລັບ Calendar View
   const [selectedRoomIds, setSelectedRoomIds] = useState([]); // ຖ້າບໍ່ເລືອກຫ້ອງໃດ (ເປົ່າ) => ສະແດງທຸກຫ້ອງ
@@ -229,6 +250,20 @@ export default function MeetingRooms() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('create')]);
 
+  // ປິດ dropdown ຂອງ Filter (ຊັ້ນ / ຈຸດໃນຊັ້ນ) ເມື່ອກົດນອກພື້ນທີ່
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (floorRef.current && !floorRef.current.contains(e.target)) {
+        setIsFloorOpen(false);
+      }
+      if (locationRef.current && !locationRef.current.contains(e.target)) {
+        setIsLocationOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'my-bookings') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -296,9 +331,10 @@ export default function MeetingRooms() {
       .finally(() => setReviewingId(null));
   };
 
+  // ຖ້າຄຳຮ້ອງຊົ່ວກັນເວລາ ຈະໃສ່ຂໍ້ຄຳແນະນຳໃຫ້ຢ່າງອັດຕະໂນມັດ (ປົດຊັ່ງຫຼືປ່ຽນໄດ້)
   const openRejectModal = (booking) => {
     setBookingToReject(booking);
-    setRejectReason('');
+    setRejectReason(buildRejectSuggestion(booking));
     setRejectError('');
     setRejectModalOpen(true);
   };
@@ -568,14 +604,144 @@ export default function MeetingRooms() {
     }
   };
 
-  // ກັ່ນຕອງຫ້ອງຕາມຄຳຄົ້ນຫາ (ຊື່ / ລະຫັດ / ສະຖານທີ່)
+  // ຈຸດຊັ້ນທີ່ຫ້ອງບໍ່ມີຂໍ້ມູນ (ຂໍ້ມູນເດີມທີ່ບໍ່ໄດ້ກອກ floor ໄວ້)
+  const UNASSIGNED_FLOOR = 'ບໍ່ລະບຸຊັ້ນ';
+
+  // ແຍກ "ຊັ້ນ" ອອກຈາກ "ຈຸດໃນຊັ້ນ" ຈາກ location ທີ່ມີຢູ່:
+  //   ຂໍ້ມູນເດີມ (ບໍ່ມີ field floor) ບ່ອກ "3rd Floor, East Wing"  -> floor = "3rd Floor", spot = "East Wing"
+  //   ຂໍ້ມູນໃໝ່  (ມີ field floor) ບ່ອກ "East Wing"              -> floor = "3rd Floor", spot = "East Wing"
+  // ຮັກລວງຂໍ້ມູນເດີມໄວ້ໃຫ້ກອກໄດ້ ບໍ່ຕ້ອງແກ້ໄຂຂໍ້ມູນທັງໝົດ
+  const splitRoomLocation = (room) => {
+    const explicitFloor = String(room.floor || '').trim();
+    const parts = String(room.location || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (explicitFloor) {
+      // ຖ້າ location ຊ່ວມຊັ້ນໄວ້ເຊັ່ນໜຶ່ງ (ຂໍ້ມູນເດີມ) ໃຫ້ຕັດຊັ້ນອອກ ດຽວຂຶ້ນໄປຖືກວ່າເປັນ "ຈຸດໃນຊັ້ນ"
+      const floorIsRepeated = parts.length > 1 && parts[0].toLowerCase() === explicitFloor.toLowerCase();
+      return {
+        floor: explicitFloor,
+        spot: (floorIsRepeated ? parts.slice(1) : parts).join(', '),
+      };
+    }
+
+    return {
+      floor: parts[0] || UNASSIGNED_FLOOR,
+      spot: parts.slice(1).join(', '),
+    };
+  };
+
+  const roomFloor = (room) => splitRoomLocation(room).floor;
+  const roomSpot = (room) => splitRoomLocation(room).spot;
+
+  // ຈຸດໃນຊັ້ນທີ່ມີຈິງ ສຳລັບຊັ້ນທີ່ເລືອກ (ສະຖານະ Filter ແບບຂຶ້ນລົງ) — ຖ້າຍັງບໍ່ເລືອກຊັ້ນ ໃຫ້ເອົາທຸກຊັ້ນ
+  const spotsForFloors = (floorList) => {
+    const source = floorList.length > 0
+      ? rooms.filter((room) => floorList.includes(roomFloor(room)))
+      : rooms;
+    return new Set(source.map(roomSpot).filter(Boolean));
+  };
+
+  const availableFloors = [...new Set(rooms.map(roomFloor).filter(Boolean))].sort();
+  const availableLocations = [...spotsForFloors(floorFilter)].sort();
+  const activeLocationFilterCount = floorFilter.length + locationFilter.length;
+
+  const openCreateRoomModal = () => {
+    setRoomForm({
+      name: '',
+      branchId: selectedBranchId || '',
+      floor: '',
+      location: '',
+      capacity: 10,
+      amenities: '',
+    });
+    setRoomFormError('');
+    setIsRoomModalOpen(true);
+  };
+
+  const handleRoomInputChange = (e) => {
+    const { name, value } = e.target;
+    setRoomForm((prev) => ({
+      ...prev,
+      [name]: name === 'capacity' ? Number(value) : value,
+    }));
+  };
+
+  // POST /api/rooms — Backend ຈະອອກ _id (R001, R002, ...) ໃຫ້ເອງ ແລະ ປະການ room:changed ຈະ refresh ຫ້ອງທັງໜ້າ
+  const handleCreateRoomSubmit = async (e) => {
+    e.preventDefault();
+    if (!roomForm.branchId) {
+      setRoomFormError('ກະລຸນາເລືອກສາຂາກ່ອນສາຂາທີ່ຈະສ້າງຫ້ອງ');
+      return;
+    }
+    if (!Number.isInteger(roomForm.capacity) || roomForm.capacity < 1) {
+      setRoomFormError('ຄວາມຈຸຕ້ອງເປັນຈຳນວນທີ່ເປັນຈຳນວນລົບ ແລະ ຕ້ອງແກນ 1 ຂຶ້ນໄປ');
+      return;
+    }
+
+    setRoomSubmitting(true);
+    setRoomFormError('');
+    try {
+      const res = await fetch('http://localhost:3000/api/rooms', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          branchId: roomForm.branchId,
+          name: roomForm.name,
+          floor: roomForm.floor || undefined,
+          location: roomForm.location || undefined,
+          capacity: roomForm.capacity,
+          amenities: roomForm.amenities
+            ? roomForm.amenities.split(/[;,]+/).map((a) => a.trim()).filter(Boolean)
+            : undefined,
+        }),
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(result.message || 'ເພີ່ມຫ້ອງບໍ່ສຳເລັດ');
+      setIsRoomModalOpen(false);
+      fetchRooms();
+    } catch (err) {
+      setRoomFormError(err.message || 'ເພີ່ມຫ້ອງບໍ່ສຳເລັດ');
+    } finally {
+      setRoomSubmitting(false);
+    }
+  };
+
+  // ຊົ່ວງ Filter ຊັ້ນ / ຈຸດໃນຊັ້ນ
+  const toggleFloorFilter = (floor) => {
+    const next = floorFilter.includes(floor)
+      ? floorFilter.filter((f) => f !== floor)
+      : [...floorFilter, floor];
+    setFloorFilter(next);
+    // ລ້າງຈຸດໃນຊັ້ນທີ່ບໍ່ມີໃນຊັ້ນທີ່ເລືອກເພື່ອ ບໍ່ໃຫ້ຄົນເລືອກທີ່ບໍ່ມີຄືນວ່າງ
+    const validSpots = spotsForFloors(next);
+    setLocationFilter((prev) => prev.filter((s) => validSpots.has(s)));
+  };
+
+  const toggleLocationFilter = (spot) => {
+    setLocationFilter((prev) => (prev.includes(spot) ? prev.filter((s) => s !== spot) : [...prev, spot]));
+  };
+
+  const clearLocationFilters = () => {
+    setFloorFilter([]);
+    setLocationFilter([]);
+  };
+
+  // ຊົ່ວງ Filter ຫ້ອງ — ຊື່ / ລະຫັດ / ສະຖານທີ່ + ຊັ້ນ + ຈຸດໃນຊັ້ນ
   const filteredRooms = rooms.filter((room) => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return true;
-    const name = (room.name || '').toLowerCase();
-    const code = String(room.roomId || room._id || '').toLowerCase();
-    const location = (room.location || '').toLowerCase();
-    return name.includes(q) || code.includes(q) || location.includes(q);
+    const matchesSearch = !q
+      || [room.name, String(room.roomId || room._id || ''), room.location, room.floor]
+        .filter((f) => typeof f === 'string' && f)
+        .some((f) => f.toLowerCase().includes(q));
+    const matchesFloor = floorFilter.length === 0 || floorFilter.includes(roomFloor(room));
+    const matchesLocation = locationFilter.length === 0 || locationFilter.includes(roomSpot(room));
+    return matchesSearch && matchesFloor && matchesLocation;
   });
 
   // ຫ້ອງທີ່ຈະສະແດງໃນຕາຕະລາງ — ຖ້າບໍ່ເລືອກຫ້ອງໃດ ຈະເອົາຫ້ອງທັງໝົດມາສະແດງ
@@ -594,6 +760,25 @@ export default function MeetingRooms() {
     typeof b.roomId === 'object' ? (b.roomId?._id || b.roomId?.roomId) : b.roomId
   );
 
+  // ກວດຊົ່ວກັນໃຫ້ຜູ້ອະນຸມັດເຫັນກ່ອນກົດ "ອະນຸມັດ" —
+  // Backend (findPendingApprovals) ຄຳນວນໃຫ້ມາແລ້ວ ເພື່ອໃຫ້ຄືກັນກັບ assertNoOverlap ເຊີ່ງ [startAt, endAt)
+  //   conflictWith = ຄຳຮ້ອງ PENDING ອື່ນ ທີ່ຊົ່ວກັນ (ຕ້ອງເລືອກວ່າຈະອະນຸມັດລາຍການໃດ)
+  //   blockedBy    = booking ທີ່ CONFIRMED ແລ້ວ ທີ່ຊົ່ວກັນ (ອະນຸມັດຈະໂດນ 409 ທັນທີ)
+  const conflictWith = (b) => b.conflictWith || [];
+  const blockedBy = (b) => b.blockedBy || [];
+
+  const pendingBlockedCount = pendingApprovals.filter((b) => blockedBy(b).length > 0).length;
+  const pendingConflictCount = pendingApprovals.filter((b) => conflictWith(b).length > 0).length;
+
+  // ຄຳອະຢາງລະອຽດວ່າຊົ່ວກັນກັບໃຜ — ສະຫັງສະຕິຫ້ອງເວລາໃຫ້ຜູ້ອະນຸມັດຕັດສິນໃຈໄດ້ງ່າຢ
+  const conflictDetailText = (b) => {
+    const who = (o) => o.bookedBy?.firstName || o.bookedBy?.email || 'ບໍ່ລະບຸຜູ້ຈອງ';
+    return [
+      ...blockedBy(b).map((o) => `"${o.title || 'ບໍ່ມີຫົວຂໍ້'}" ຢູ່ໃນເວລາທີ່ CONFIRMED ແລ້ວ (${fmtTime(o.startAt)}–${fmtTime(o.endAt)})`),
+      ...conflictWith(b).map((o) => `"${o.title || 'ບໍ່ມີຫົວຂໍ້'}" ຂອງ ${who(o)} (${fmtTime(o.startAt)}–${fmtTime(o.endAt)})`),
+    ].join('  •  ');
+  };
+
   // ຊື່ຫ້ອງຂອງ booking ນັ້ນ — ໃຊ້ສະແດງໃສ່ກ່ອງ booking ໃນຕາຕະລາງລວມ (ເພາະບໍ່ມີສ່ວນແຍກຕໍ່ຫ້ອງແລ້ວ)
   const bookingRoomLabel = (b) => {
     const id = String(bookingRoomId(b));
@@ -606,6 +791,29 @@ export default function MeetingRooms() {
   const fmtTime = (d) => {
     const date = new Date(d);
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  };
+
+  // ຂໍ້ຄຳແນະນຳສຳລັບເຫດຜົນການປະຕິເສດ ໃຫ້ຜູ້ອະນຸມັດມີຂໍ້ຄຳໃຊ້ໄດ້ທັນທີ
+  // ຄືນຄືນຂໍ້ວ່າງຫຼາຍຖ້າຄຳຮ້ອງບໍ່ມີການຊົ່ວກັນ (ປົດຊັ່ງໃຫ້ຜູ້ອະນຸມັດຂຽນເອງ)
+  //   blockedBy    = ເວລານີ້ຖືກຈອງແລ້ວ (CONFIRMED) — ອະນຸມັດບໍ່ໄດ້ຢູ່ແລ້ວ
+  //   conflictWith = ມີຄຳຮ້ອງ PENDING ອື່ນ ແຂ່ງເວລາດຽວກັນ
+  const buildRejectSuggestion = (b) => {
+    if (!b) return '';
+    const slot = `${fmtTime(b.startAt)}–${fmtTime(b.endAt)}`;
+    const roomName = b.roomId?.name || 'ຫ້ອງທີ່ຈອງ';
+
+    if (blockedBy(b).length > 0) {
+      const clash = blockedBy(b)[0];
+      const what = clash.title ? `"${clash.title}"` : 'ການຈອງອື່ນ';
+      return `ຫ້ອງ${roomName} ມີ${what} ຈອງໄວ້ແລ້ວໃນເວລາ ${slot} ຈຶ່ງບໍ່ສາມາຖອະນຸມັດ ກະລຸນາເລື່ອນເວລາ ຫຼື ເລືອກຫ້ອງອື່ນ`;
+    }
+
+    if (conflictWith(b).length > 0) {
+      const n = conflictWith(b).length;
+      return `ຫ້ອງ${roomName} ມີຄຳຮ້ອງອື່ນ ${n} ລາຍການໃຊ້ເວລາ ${slot} ຊົ່ວກັນ ຈຶ່ງບໍ່ສາມາຖອະນຸມັດ ກະລຸນາເລື່ອນເວລາ ຫຼື ເລືອກຫ້ອງອື່ນ`;
+    }
+
+    return '';
   };
 
   // ກວດວ່າ booking ນີ້ເປັນຂອງຫ້ອງທີ່ກຳລັງສະແດງຢູ່ໃນຕາຕະລາງ (calendarRooms) ບໍ່
@@ -846,28 +1054,115 @@ export default function MeetingRooms() {
         {/* TAB 1: ROOMS LIST & WEEKLY CALENDAR GRID */}
         {activeTab === 'rooms' && (
           <div className="space-y-8">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ຄົ້ນຫາຊື່ຫ້ອງ, ລະຫັດ ຫຼື ສະຖານທີ່..."
-                className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  aria-label="ລ້າງການຄົ້ນຫາ"
-                >
-                  <X size={18} />
-                </button>
-              )}
+            <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+              <div className="relative w-full md:w-80">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ຄົ້ນຫາຊື່ຫ້ອງ, ລະຫັດ ຫຼື ສະຖານທີ່..."
+                  className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    aria-label="ລ້າງການຄົ້ນຫາ"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+                {/* FILTER: ຊັ້ນ */}
+                <div className="relative" ref={floorRef}>
+                  <button
+                    onClick={() => { setIsFloorOpen(!isFloorOpen); setIsLocationOpen(false); }}
+                    className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition"
+                  >
+                    <Layers size={16} />
+                    <span>ຊັ້ນ</span>
+                    {floorFilter.length > 0 && <span className="text-amber-600">({floorFilter.length})</span>}
+                  </button>
+
+                  {isFloorOpen && (
+                    <div className="absolute right-0 mt-2 w-56 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-2">
+                      <div className="max-h-60 overflow-y-auto">
+                        {availableFloors.map((f) => (
+                          <label key={f} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={floorFilter.includes(f)}
+                              onChange={() => toggleFloorFilter(f)}
+                              className="rounded"
+                            />
+                            <span className="truncate">{f}</span>
+                          </label>
+                        ))}
+                        {availableFloors.length === 0 && (
+                          <span className="block px-2 py-1.5 text-sm text-gray-400">ຍັງບໍ່ມີຂໍ້ມູນຫ້ອງ</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* FILTER: ຈຸດໃນຊັ້ນ (ຂຶ້ນຕາມຊັ້ນທີ່ເລືອກ) */}
+                <div className="relative" ref={locationRef}>
+                  <button
+                    onClick={() => { setIsLocationOpen(!isLocationOpen); setIsFloorOpen(false); }}
+                    disabled={availableLocations.length === 0}
+                    className="border border-gray-200 hover:bg-gray-50 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 flex items-center gap-2 transition disabled:opacity-40 disabled:hover:bg-white"
+                  >
+                    <MapPin size={16} />
+                    <span>ຈຸດໃນຊັ້ນ</span>
+                    {locationFilter.length > 0 && <span className="text-amber-600">({locationFilter.length})</span>}
+                  </button>
+
+                  {isLocationOpen && (
+                    <div className="absolute right-0 mt-2 w-56 max-w-[calc(100vw-2rem)] bg-white border border-gray-200 rounded-xl shadow-lg z-20 p-2">
+                      <div className="max-h-60 overflow-y-auto">
+                        {availableLocations.map((loc) => (
+                          <label key={loc} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-sm text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={locationFilter.includes(loc)}
+                              onChange={() => toggleLocationFilter(loc)}
+                              className="rounded"
+                            />
+                            <span className="truncate">{loc}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {activeLocationFilterCount > 0 && (
+                  <button
+                    onClick={clearLocationFilters}
+                    className="px-3 py-2 text-xs text-amber-600 hover:text-amber-700 transition"
+                  >
+                    ລ້າງ ({activeLocationFilterCount})
+                  </button>
+                )}
+
+                {canCreateRoom && (
+                  <button
+                    onClick={openCreateRoomModal}
+                    className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm shrink-0"
+                  >
+                    <Plus size={16} />
+                    <span>ເພີ່ມຫ້ອງ</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <p className="text-xs text-gray-400 -mt-4">
-              ຄລິກທີ່ບັດຫ້ອງເພື່ອເພີ່ມ/ຖອດອອກຈາກຕາຕະລາງ — ຖ້າຍັງບໍ່ເລືອກຫ້ອງໃດ, ຕາຕະລາງຈະສະແດງທຸກຫ້ອງ
+              ຄລິກທີ່ບັດຫ້ອງເພື່ອເພີ່ມ/ຖອດອອກຈາກຕາຕະລາງ — ຖ້າຢັງບໍ່ເລືອກຫ້ອງໃດ, ຕາຕະລາງຈະສະແດງທຸກຫ້ອງ
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -902,8 +1197,12 @@ export default function MeetingRooms() {
 
                         <div className="text-sm text-gray-600 space-y-1.5 pt-2 border-t border-gray-100">
                           <p className="flex items-center gap-2">
+                            <Layers size={16} className="text-gray-400" />
+                            <span>ຊັ້ນ: {roomFloor(room)}</span>
+                          </p>
+                          <p className="flex items-center gap-2">
                             <MapPin size={16} className="text-gray-400" />
-                            <span>ສະຖານທີ່: {room.location || 'ຊັ້ນ 2, ອາຄານຫຼັກ'}</span>
+                            <span>ຈຸດໃນຊັ້ນ: {roomSpot(room) || '-'}</span>
                           </p>
                           <p className="flex items-center gap-2">
                             <DoorClosed size={16} className="text-gray-400" />
@@ -928,7 +1227,11 @@ export default function MeetingRooms() {
                 })
               ) : (
                 <div className="col-span-full py-12 text-center text-sm text-gray-400 bg-white rounded-xl border border-gray-200">
-                  {searchQuery.trim() ? 'ບໍ່ພົບຫ້ອງທີ່ກົງກັບການຄົ້ນຫາ' : 'ຍັງບໍ່ມີຂໍ້ມູນຫ້ອງປະຊຸມ'}
+                  {activeLocationFilterCount > 0
+                    ? 'ບໍ່ພົບຫ້ອງທີ່ກົງກັບຕົວກອນກອນຊັ້ນ/ຈຸດໃນຊັ້ນ — ລອງລ້າງຕົວກອນກອນ'
+                    : searchQuery.trim()
+                      ? 'ບໍ່ພົບຫ້ອງທີ່ກົງກັບການຄົ້ນຫາ'
+                      : 'ຍັງບໍ່ມີຂໍ້ມູນຫ້ອງປະຊຸມ'}
                 </div>
               )}
             </div>
@@ -1207,7 +1510,7 @@ export default function MeetingRooms() {
         {activeTab === 'admin' && canApproveBookings && (
           <div className="space-y-6">
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
-              <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
                 <div className="font-bold text-gray-800">ຄຳຮ້ອງຂໍຈອງທີ່ລໍຖ້າອະນຸມັດ</div>
                 {pendingApprovals.length > 0 && (
                   <span className="text-xs bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full font-medium">
@@ -1215,6 +1518,20 @@ export default function MeetingRooms() {
                   </span>
                 )}
               </div>
+
+              {(pendingBlockedCount > 0 || pendingConflictCount > 0) && !loadingPending && (
+                <div className="px-4 py-3 bg-red-50 border-b border-red-100 flex items-start gap-2 text-sm text-red-700">
+                  <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                  <span>
+                    {pendingBlockedCount > 0 && (
+                      <>ມອງ {pendingBlockedCount} ຄຳຮ້ອງຊົ່ວກັນຫ້ອງທີ່ຖືກຈອງແລ້ວ — ກົດອະນຸມັດຈະບໍ່ຜ່ານ ຕ້ອງແກ້ໄຂຫຼືໃຫ້ຜູ້ຂໍປ່ຽນເວລາ. </>
+                    )}
+                    {pendingConflictCount > 0 && (
+                      <>ມອງ {pendingConflictCount} ຄຳຮ້ອງຊົ່ວກັນເວລາໃນຫ້ອງເດີວກັນ — ກະລຸນາອະນຸມັດແລ້ວປະຕິເສດອື່ນ ຫຼື ໃຫ້ຜູ້ຂໍປ່ຽນເວລາກ່ອນ.</>
+                    )}
+                  </span>
+                </div>
+              )}
               {loadingPending ? (
                 <div className="py-10 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</div>
               ) : pendingApprovalsError ? (
@@ -1226,19 +1543,43 @@ export default function MeetingRooms() {
                   {pendingApprovals.map((b) => {
                     const roomName = b.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ';
                     const requesterName = [b.bookedBy?.firstName, b.bookedBy?.lastName].filter(Boolean).join(' ') || b.bookedBy?.email || 'ບໍ່ລະບຸຜູ້ຈອງ';
+                    const isBlocked = blockedBy(b).length > 0;
+                    const isConflicting = conflictWith(b).length > 0;
+                    const showConflict = isBlocked || isConflicting;
                     return (
-                      <div key={b._id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div
+                        key={b._id}
+                        className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${showConflict ? 'bg-red-50/40 border-l-4 border-l-red-400' : ''}`}
+                      >
                         <div className="space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-gray-800">ຫ້ອງ: {roomName}</span>
                             {b.title && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">{b.title}</span>}
                             {b.seriesId && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium">ຈອງແບບຊ້ຳ</span>}
+                            {isBlocked && (
+                              <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
+                                <AlertTriangle size={12} />
+                                ເວລານີ້ຖືກຈອງແລ້ວ — ອະນຸມັດບໍ່ໄດ້
+                              </span>
+                            )}
+                            {isConflicting && (
+                              <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
+                                <AlertTriangle size={12} />
+                                ຊົ່ວກັນອີກ {conflictWith(b).length} ຄຳຮ້ອງ
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-gray-500">ຜູ້ຂໍຈອງ: {requesterName}</p>
                           <p className="text-xs text-gray-500 flex items-center gap-1.5">
                             <Clock size={14} />
                             <span>ເລີ່ມ: {new Date(b.startAt).toLocaleString()} — ສິ້ນສຸດ: {new Date(b.endAt).toLocaleString()}</span>
                           </p>
+                          {showConflict && (
+                            <p className="text-xs text-red-600 flex items-start gap-1.5">
+                              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                              <span>ຊົ່ວກັບ: {conflictDetailText(b)}</span>
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -1278,7 +1619,7 @@ export default function MeetingRooms() {
                       endpoint="/rooms/bulk-import"
                       refresh={() => fetchRooms(true)}
                       permitted={canCreateRoom}
-                      csvHint="CSV ຫ້ອງ: branchId, name, capacity — ຈຳເປັນ; location, amenities (ແບ່ງດ້ວຍ , ຫຼື ;), status (AVAILABLE/MAINTENANCE), isActive (true/false) — ເພີ່ມໄດ້"
+                      csvHint="CSV ຫ້ອງ: branchId, name, capacity — ຈຳເປັນ; floor, location, amenities (ແບ່ງດ້ວຍ , ຫຼື ;), status (AVAILABLE/MAINTENANCE), isActive (true/false) — ເພີ່ມໄດ້"
                     />
                   )}
                   <CsvExportButton
@@ -1289,7 +1630,8 @@ export default function MeetingRooms() {
                       { key: '_id', label: 'id' },
                       { key: 'name', label: 'name' },
                       { label: 'branchId', value: (r) => (r.branchId?._id || r.branchId || '') },
-                      { key: 'location', label: 'location' },
+                      { label: 'floor', value: (r) => roomFloor(r) },
+                      { label: 'location', value: (r) => roomSpot(r) },
                       { key: 'capacity', label: 'capacity' },
                       { label: 'amenities', value: (r) => (r.amenities || []).join('; ') },
                       { label: 'status', value: (r) => r.status || 'AVAILABLE' },
@@ -1307,7 +1649,9 @@ export default function MeetingRooms() {
                     <div key={roomId} className="p-4 flex items-center justify-between gap-4">
                       <div>
                         <div className="font-semibold text-gray-800">{room.name} <span className="text-xs text-gray-400">({roomId})</span></div>
-                        <div className="text-xs text-gray-500">{room.location} — ຄວາມຈຸ {room.capacity} ຄົນ</div>
+                        <div className="text-xs text-gray-500">
+                          {roomFloor(room)}{roomSpot(room) ? ` — ${roomSpot(room)}` : ''} — ຄວາມຈຸ {room.capacity} ຄົນ
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         {/* ສະຖານະປັດຈຸບັນ (3 ຄ່າ: ວ່າງ / ກຳລັງໃຊ້ງານ / ປິດບຳລຸງ) — ຄົນລະສ່ວນຈາກປຸ່ມຄຳສັ່ງດ້ານລຸ່ມ ເພື່ອບໍ່ໃຫ້ສັບສົນ */}
@@ -1395,6 +1739,130 @@ export default function MeetingRooms() {
                   ບໍ່ມີຂໍ້ມູນການໃຊ້ງານໃນຊ່ວງເວລານີ້ — ລອງເລືອກຊ່ວງວັນທີ ແລ້ວກົດ "ດຶງລາຍງານ"
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CREATE ROOM */}
+        {isRoomModalOpen && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h3 className="text-lg font-bold text-gray-800">ເພີ່ມຫ້ອງປະຊຸມໃໝ່</h3>
+                <button
+                  onClick={() => setIsRoomModalOpen(false)}
+                  className="text-gray-400 hover:text-gray-600 transition"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateRoomSubmit} className="p-6 space-y-4">
+                {roomFormError && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">
+                    {roomFormError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">ຊື່ຫ້ອງ (Name)</label>
+                  <input
+                    type="text"
+                    name="name"
+                    required
+                    value={roomForm.name}
+                    onChange={handleRoomInputChange}
+                    placeholder="ເຊັ່ນ: ຫ້ອງປະຊຸມໃຫຼ່ 1"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">ສາຂາ (Branch)</label>
+                  <select
+                    name="branchId"
+                    required
+                    value={roomForm.branchId}
+                    onChange={handleRoomInputChange}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">-- ເລືອກສາຂາ --</option>
+                    {branches.map((b) => (
+                      <option key={b._id} value={b._id}>{b.name} ({b._id})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">ຊັ້ນ (Floor)</label>
+                    <input
+                      type="text"
+                      name="floor"
+                      value={roomForm.floor}
+                      onChange={handleRoomInputChange}
+                      placeholder="ເຊັ່ນ: ຊັ້ນ 2"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">ຈຸດໃນຊັ້ນ (Location)</label>
+                    <input
+                      type="text"
+                      name="location"
+                      value={roomForm.location}
+                      onChange={handleRoomInputChange}
+                      placeholder="ເຊັ່ນ: ປີກຂວາ / ຫຼັກ B"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">ຄວາມຈຸ (Capacity)</label>
+                  <input
+                    type="number"
+                    name="capacity"
+                    min="1"
+                    required
+                    value={roomForm.capacity}
+                    onChange={handleRoomInputChange}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    ອຸປະກອນຕິດຕັ້ງ (Amenities) — ແບ່ງດ້ວຍ , ຫຼື ;
+                  </label>
+                  <input
+                    type="text"
+                    name="amenities"
+                    value={roomForm.amenities}
+                    onChange={handleRoomInputChange}
+                    placeholder="ເຊັ່ນ: ໂປັເກັດ, ກະດານຂຽວ, ກລ້ອງປະຊຸມ"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => setIsRoomModalOpen(false)}
+                    className="px-4 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 transition"
+                  >
+                    ຍົກເລີກ
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={roomSubmitting}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition shadow-sm disabled:opacity-50"
+                  >
+                    {roomSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ບັນທຶກຂໍ້ມູນ'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
@@ -1692,6 +2160,25 @@ export default function MeetingRooms() {
                 <p className="text-sm text-gray-500">
                   ຫ້ອງ: <span className="font-medium text-gray-700">{bookingToReject.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ'}</span>
                 </p>
+              )}
+
+              {bookingToReject && buildRejectSuggestion(bookingToReject) && (
+                <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 space-y-2">
+                  <div className="flex items-start gap-2 text-xs text-amber-800">
+                    <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">
+                      ເວລານີ້ມີການຈອງແລ້ວ ຫຼື ຊົ່ວກັນຄຳຮ້ອງອື່ນ —
+                      ຄັດລອກເຫດຜົນການປະຕິເສດໃຫ້ພ້ອມແລ້ວ ສາມາດແກ້ໄຂໄດ້
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRejectReason(buildRejectSuggestion(bookingToReject))}
+                    className="text-xs font-medium text-amber-800 underline hover:text-amber-900"
+                  >
+                    ໃສ່ຂໍ້ຄຳແນະນຳໃຫ້ອີກ
+                  </button>
+                </div>
               )}
 
               <div>
