@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
@@ -300,7 +301,8 @@ export default function Sidebar({ open = false, onClose }) {
         </button>
       </div>
 
-      {showLogoutConfirm && (
+      {/* Portal ໄປທີ່ document.body — aside ມີ transform (drawer) ເຮັດໃຫ້ `fixed` ອ້າງອີງ aside ແທນໜ້າຈໍ */}
+      {showLogoutConfirm && createPortal(
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 text-center">
             <div className="w-12 h-12 mx-auto rounded-full bg-red-50 text-red-500 flex items-center justify-center mb-4">
@@ -324,7 +326,7 @@ export default function Sidebar({ open = false, onClose }) {
             </div>
           </div>
         </div>
-      )}
+        , document.body)}
     </aside>
     </>
   );
