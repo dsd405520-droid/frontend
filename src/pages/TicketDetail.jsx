@@ -17,6 +17,61 @@ function unwrap(payload) {
   return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
 }
 
+function TicketProgressBar({ status }) {
+  const currentIndex = STATUS_STEP_INDEX[status] ?? 0;
+  const isWaiting = status === 'WAITING_ON_USER';
+  const progressPercent = ((currentIndex) / (TICKET_STEPS.length - 1)) * 100;
+  return (
+    <div className="relative mt-6">
+      <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+          style={{ width: `${Math.min(progressPercent, 100)}%` }}
+        />
+        {TICKET_STEPS.map((step, idx) => {
+          const isDone = idx < currentIndex;
+          const isCurrent = idx === currentIndex;
+          const isLast = idx === TICKET_STEPS.length - 1;
+          const leftPercent = (idx / (TICKET_STEPS.length - 1)) * 100;
+          return (
+            <div
+              key={step.key}
+              className="absolute top-1/2 -translate-y-1/2 transform transition-all duration-300"
+              style={{ left: `${leftPercent}%` }}
+            >
+              <div
+                className={`w-5 h-5 rounded-full border-3 flex items-center justify-center shrink-0 transition-all duration-300 ${
+                  isDone
+                    ? 'bg-emerald-500 border-emerald-500 text-white'
+                    : isCurrent
+                    ? isWaiting
+                      ? 'bg-amber-100 border-amber-500 text-amber-600 animate-pulse ring-2 ring-amber-200'
+                      : 'bg-blue-500 border-blue-500 text-white ring-2 ring-blue-200'
+                    : 'bg-white border-gray-200 text-gray-300'
+                }`}
+              >
+                {isDone ? <Check size={14} /> : <span className="text-[10px] font-bold">{idx + 1}</span>}
+              </div>
+              <span
+                className={`absolute top-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] leading-tight transition-colors ${
+                  isCurrent ? 'font-semibold text-gray-800' : 'text-gray-400'
+                }`}
+              >
+                {step.label}
+              </span>
+              {isCurrent && isWaiting && (
+                <span className="absolute top-18 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] text-amber-600 font-medium">
+                  ລໍຖ້າຜູ້ໃຊ້
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleString(undefined, {

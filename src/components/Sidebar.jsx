@@ -29,6 +29,7 @@ import { canView, logout, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 import { getOrgSettings, applySystemName, DEFAULT_SYSTEM_NAME } from '../utils/orgSettings';
 import { useBranch } from '../contexts/BranchContext';
+import { getSocket } from '../utils/socket';
 
 // ກວດ module ດຽວ ຫຼື array (any-of) — ໃຊ້ກັບ /branches ທີ່ອີງໃສ່ທັງ 'branches' ແລະ 'departments'
 function canViewAny(moduleOrArray) {
@@ -164,6 +165,20 @@ export default function Sidebar({ open = false, onClose }) {
       clearInterval(interval);
     };
   }, [selectedBranchId]);
+
+  // ກົນ badge ທັນທີ — ຖ້າມີ notification ໃໝ່ ປັດ unreadCount ແທນ ການລໍຖ້າ 60 ວິນາທີ
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return undefined;
+
+    const onNew = (payload) => {
+      if (typeof payload?.unreadCount !== 'number') return;
+      setBadgeCounts((prev) => ({ ...prev, notifications: payload.unreadCount }));
+    };
+
+    socket.on('notification:new', onNew);
+    return () => socket.off('notification:new', onNew);
+  }, []);
 
   // ດຶງຊື່ລະບົບຈາກການຕັ້ງຄ່າອົງກອນ ເພື່ອສະແດງໃນ header ຂ້າງຊ້າຍ + ແຖບຊື່ພາຍ (browser tab)
   useEffect(() => {

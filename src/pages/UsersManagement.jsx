@@ -50,7 +50,7 @@ export default function UsersManagement() {
     phone: '',
     role: '',
     branchId: '', // ປ່ຽນຈາກ branchID ເປັນ branchId ໃຫ້ົງກັບ Backend
-    department: '',
+    departmentId: '', // ຊື່ field ຕ້ອງເປັນ departmentId ໃຫ້ຕົງກັບ Backend (schema + DTO ໃຊ້ departmentId)
   });
 
   const toggleRoleFilter = (id) => {
@@ -142,7 +142,7 @@ export default function UsersManagement() {
       phone: '',
       role: '',
       branchId: '',
-      department: '',
+      departmentId: '',
     });
     setError('');
     setIsModalOpen(true);
@@ -184,7 +184,7 @@ export default function UsersManagement() {
       phone: user.phone || '',
       role: user.role?._id || user.role?.id || user.role || '',
       branchId: user.branchId?._id || user.branchId?.id || user.branchId || user.branchID?._id || user.branchID?.id || user.branchID || user.branch?._id || user.branch?.id || user.branch || '',
-      department: user.department?._id || user.department?.id || user.department || '',
+      departmentId: user.departmentId?._id || user.departmentId?.id || user.departmentId || '',
     });
     setError('');
     setIsModalOpen(true);
@@ -284,7 +284,7 @@ export default function UsersManagement() {
                   { key: 'phone', label: 'phone' },
                   { label: 'role', value: (user) => getRoleName(user.role) },
                   { label: 'branch', value: (user) => getBranchName(user.branchId || user.branchID || user.branch) },
-                  { label: 'department', value: (user) => getDepartmentName(user.department) },
+                  { label: 'department', value: (user) => getDepartmentName(user.departmentId) },
                   { key: 'isActive', label: 'isActive' },
                   { key: '_id', label: 'id' },
                 ]}
@@ -442,7 +442,7 @@ export default function UsersManagement() {
                       </div>
                       <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
                         <Layers size={14} className="text-gray-400" />
-                        {getDepartmentName(user.department)}
+                        {getDepartmentName(user.departmentId)}
                       </div>
                     </td>
                     <td className="p-4">
@@ -617,8 +617,8 @@ export default function UsersManagement() {
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ພະແນກ (Department)</label>
                   <select
-                    value={formData.department}
-                    onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                    value={formData.departmentId}
+                    onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
                     className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 bg-white"
                   >
                     <option value="">-- ເລືອກພະແນກ --</option>

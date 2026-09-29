@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { canView, hasPermission } from '../utils/permissions';
 import api from '../services/api';
+import { getSocket } from '../utils/socket';
 
 function unwrap(payload) {
   return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
@@ -233,6 +234,9 @@ export default function Navbar({ onMenuClick }) {
   const [notifs, setNotifs] = useState([]);
   const [notifsLoading, setNotifsLoading] = useState(false);
   const notifRef = useRef(null);
+  // socket listener effect ມີ empty deps ຈຶ່ງໃຊ້ ref ເພື່ອໃຫ້ເຫັນຄ່າ notifOpen ປັດຈຸບັນ
+  const notifOpenRef = useRef(false);
+  useEffect(() => { notifOpenRef.current = notifOpen; }, [notifOpen]);
 
   const loadNotifications = async () => {
     setNotifsLoading(true);
@@ -275,6 +279,26 @@ export default function Navbar({ onMenuClick }) {
     loadUnread();
     timer = setInterval(loadUnread, 60000);
     return () => { cancelled = true; clearInterval(timer); };
+  }, []);
+
+  // ກົນໄດ້ທັນທີ: backend ສົ່ງ unreadCount ມາ�້ອມ notification ໃໝ່ ຈຶ່ງບໍ່ຕ້ອງຮໍາ ຈາກ /dashboard
+  // (poll 60 ວິນາທີຍັງຢູ່ເພື່ອເປັນ fallback ຖ້າ socket ຫຼຸດ)
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return undefined;
+
+    const onNew = (payload) => {
+      if (typeof payload?.unreadCount === 'number') {
+        setUnreadCount(payload.unreadCount);
+      }
+      // ຖ້າ dropdown ກຳລັງເປີດ ກໍໂຫຼດລາຍການໃໝ່ທັນທີ
+      if (notifOpenRef.current && payload?.notification) {
+        setNotifs((prev) => [payload.notification, ...prev].slice(0, 6));
+      }
+    };
+
+    socket.on('notification:new', onNew);
+    return () => socket.off('notification:new', onNew);
   }, []);
 
   // ໂຫຼດລາຍການແຈ້ງເຕືອນລ່າສຸດຕອນເປີດ dropdown ແລະຕອນໂຫຼດແຖບໃໝ່
