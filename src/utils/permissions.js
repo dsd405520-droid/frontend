@@ -1,3 +1,5 @@
+import { disconnectSocket } from './socket';
+
 export function getCurrentUser() {
     try {
         return JSON.parse(localStorage.getItem('user')) || null;
@@ -7,6 +9,9 @@ export function getCurrentUser() {
 }
 
 export function logout() {
+    // ປິດ socket ກ່ອນລ້າງ token: socket ຈຳ token ຄັ້ງທີ່ສ້າງ ຖ້າບໍ່ disconnect
+    // ຜູ້ໃຊ້ຄົນຕໍ່ໄປ login ໃໝ່ຈະໄດ້ room ຂອງ user ເດີມ
+    disconnectSocket();
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     window.location.href = '/login';

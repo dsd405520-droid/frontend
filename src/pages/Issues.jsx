@@ -5,6 +5,7 @@ import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import { getSocket } from '../utils/socket';
 
 const PRIORITY_LABELS = {
   low: 'ຕ່ຳ',
@@ -32,41 +33,107 @@ const STATUS_STEP_INDEX = {
 function TicketProgressBar({ status }) {
   const currentIndex = STATUS_STEP_INDEX[status] ?? 0;
   const isWaiting = status === 'WAITING_ON_USER';
+  const progressPercent = ((currentIndex) / (TICKET_STEPS.length - 1)) * 100;
 
   return (
-    <div className="flex items-start">
-      {TICKET_STEPS.map((step, idx) => {
-        const isDone = idx < currentIndex;
-        const isCurrent = idx === currentIndex;
-        const isLast = idx === TICKET_STEPS.length - 1;
-        return (
-          <React.Fragment key={step.key}>
-            <div className="flex flex-col items-center text-center w-20">
+    <div className="relative mt-2">
+      <div className="relative h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+          style={{ width: `${Math.min(progressPercent, 100)}%` }}
+        />
+        {TICKET_STEPS.map((step, idx) => {
+          const isDone = idx < currentIndex;
+          const isCurrent = idx === currentIndex;
+          const leftPercent = (idx / (TICKET_STEPS.length - 1)) * 100;
+          return (
+            <div
+              key={step.key}
+              className="absolute top-1/2 -translate-y-1/2 transform transition-all duration-300"
+              style={{ left: `${leftPercent}%` }}
+            >
               <div
-                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isDone
-                  ? 'bg-emerald-500 text-white'
-                  : isCurrent
+                className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-all duration-300 ${
+                  isDone
+                    ? 'bg-emerald-500 border-emerald-500 text-white'
+                    : isCurrent
                     ? isWaiting
-                      ? 'bg-amber-100 text-amber-600 ring-4 ring-amber-100 animate-pulse'
-                      : 'bg-blue-500 text-white ring-4 ring-blue-100'
-                    : 'bg-gray-100 text-gray-300'
-                  }`}
+                      ? 'bg-amber-100 border-amber-500 text-amber-600 animate-pulse ring-1 ring-amber-200'
+                      : 'bg-blue-500 border-blue-500 text-white ring-1 ring-blue-200'
+                    : 'bg-white border-gray-200 text-gray-300'
+                }`}
               >
-                {isDone ? <Check size={18} /> : <span className="text-xs font-bold">{idx + 1}</span>}
+                {isDone ? <Check size={10} /> : <span className="text-[8px] font-bold">{idx + 1}</span>}
               </div>
-              <span className={`text-[11px] mt-1.5 leading-tight ${isCurrent ? 'font-semibold text-gray-800' : 'text-gray-400'}`}>
+              <span
+                className={`absolute top-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] leading-tight transition-colors ${
+                  isCurrent ? 'font-semibold text-gray-800' : 'text-gray-400'
+                }`}
+              >
                 {step.label}
               </span>
               {isCurrent && isWaiting && (
-                <span className="text-[10px] text-amber-600 font-medium mt-0.5">ລໍຖ້າຜູ້ໃຊ້</span>
+                <span className="absolute top-13 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] text-amber-600 font-medium">
+                  ລໍຖ້າຜູ້ໃຊ້
+                </span>
               )}
             </div>
-            {!isLast && (
-              <div className={`flex-1 h-0.5 mt-4 ${idx < currentIndex ? 'bg-emerald-500' : 'bg-gray-100'}`} />
-            )}
-          </React.Fragment>
-        );
-      })}
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ແຖບຄວາມຄືແນນເວລາ SLA ສຳລັບແຖວໃນລາຍການ — ສະແດງວ່າໃຊ້ໄວເທົ່າແລ້ວ ແລະ ເຫຼືອກາຍ.
+ * ບໍ່ສະແດງໃນກໍລະກະທີ່: RESOLVED ແລະ CLOSED (ຕາມທໍາລອາ ປິດແລ້ວບໍ່ຕ້ອງເຫັນ).
+ */
+function SlaTimeBar({ item, now }) {
+  const sla = item.sla;
+  if (item.status === 'RESOLVED' || item.status === 'CLOSED') return null;
+  if (!sla || !sla.resolutionDueAt) return null;
+
+  const due = new Date(sla.resolutionDueAt).getTime();
+  const started = item.createdAt ? new Date(item.createdAt).getTime() : null;
+  if (!started || due <= started) return null;
+
+  const pausedMs = (sla.pausedIntervals || []).reduce((sum, p) => {
+    if (p.pausedAt && p.resumedAt) {
+      return sum + (new Date(p.resumedAt).getTime() - new Date(p.pausedAt).getTime());
+    }
+    return sum;
+  }, 0);
+
+  const elapsed = now - started - pausedMs;
+  const total = due - started;
+  const percent = Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)));
+  const remainingMs = due - now - pausedMs;
+
+  let barColor = 'bg-emerald-500';
+  let textColor = 'text-emerald-600';
+  let label = `${percent}% ຂອງ SLA`;
+
+  if (item.status === 'WAITING_ON_USER') {
+    barColor = 'bg-blue-400';
+    textColor = 'text-blue-600';
+    label = 'ຢຸດຊົ່ວຄາວ';
+  } else if (sla.breached || remainingMs <= 0) {
+    barColor = 'bg-red-500';
+    textColor = 'text-red-600';
+    label = 'ເກີນ SLA ແລ້ວ';
+  } else if (remainingMs < 30 * 60 * 1000) {
+    barColor = 'bg-yellow-400';
+    textColor = 'text-yellow-600';
+    label = `${percent}% ໃກ້ຄົບກຳນົດ`;
+  }
+
+  return (
+    <div className="mt-1.5" title={label}>
+      <div className="h-1 w-full rounded-full bg-gray-100 overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percent}%` }} />
+      </div>
+      <span className={`text-[10px] mt-0.5 block ${textColor}`}>{label}</span>
     </div>
   );
 }
@@ -76,6 +143,8 @@ export default function Issues() {
   const [searchParams] = useSearchParams();
   const { selectedBranchId } = useBranch();
   const [issues, setIssues] = useState([]);
+  // ໂມງລະບາຍເພື່ອໃຫ້ແຖບ SLA ເຄື່ອນຕາມເວລາໄດ້ (ບໍ່ຕ້ອງ refetch)
+  const [now, setNow] = useState(() => Date.now());
   const [ticketTypes, setTicketTypes] = useState([]);
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -224,13 +293,33 @@ const canImportTickets = hasPermission('tickets', 'import');
     return [];
   };
 
-  const fetchData = async () => {
-    setLoading(true);
+  const authHeaders = () => ({
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  });
+
+  // ດຶງແຜ່ນ ticket ຢ່າງດຽວ — ໃຊ້ເວລາ socket ແຈ້ງຂໍ້ມູນ.
+  // reference data (types/branches/departments/users) ບໍ່ປ່ຽນເວັນໃນ ticket event ຈຶ່ງບໍ່ຕ້ອງດຶງຄືນ.
+  const refreshTickets = async (silent = true) => {
+    if (!silent) setLoading(true);
     try {
-      const headers = {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      };
+      const ticketsUrl = selectedBranchId
+        ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
+        : 'http://localhost:3000/api/tickets';
+      const res = await fetch(ticketsUrl, { headers: authHeaders() });
+      if (res.ok) setIssues(extractArrayData(await res.json()));
+    } catch (error) {
+      console.error('Error refreshing tickets:', error);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  // silent = true ຈະບໍ່ສະແດງ loading — ໃຊ້ເວລາ refetch ຈາກ socket ເພື່ອບໍ່ໃຫ້ໜ້າກະພັບ
+  const fetchData = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const headers = authHeaders();
 
       const ticketsUrl = selectedBranchId
         ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
@@ -352,6 +441,35 @@ const canImportTickets = hasPermission('tickets', 'import');
   useEffect(() => {
     priorityRef.current = formData.priority;
   }, [formData.priority]);
+
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(tick);
+  }, []);
+
+  // ອັບໂຕມລາຍການທັນທີ — ເມື່ອ ticket ຖືກສ້າງ/ແກ້ໄຂ/ປ່ຽນສະຖານະ ຝັ່ງລູ້ ຝັ່ງສະຖານະ
+  // ພວກເຮົາ refetch ຜ່ານ API ຕົນເທິງ (ປົກລະໃຫ້ແຕ່ລະ user ເຫັນແຕ່ຂອງຕົນເທິງ) ບໍ່ແມ່ນ
+  // ດຶງຂໍ້ມູນ ticket ຜ່ານ socket
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return undefined;
+
+    let debounce = null;
+    const onChanged = () => {
+      if (debounce) clearTimeout(debounce);
+      // ການ import ຫຼາຍ ຫຼື ການແກ້ໄຂແຫ່ມຫຼາຍ ຈະສົ່ງ event ຫຼາຍໆ ຄ່າ — ລວມເປັນຄັ້ງເດີວ
+      debounce = setTimeout(() => {
+        refreshTickets(true);
+      }, 400);
+    };
+
+    socket.on('ticket:changed', onChanged);
+    return () => {
+      socket.off('ticket:changed', onChanged);
+      if (debounce) clearTimeout(debounce);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId]);
 
   useEffect(() => {
     if (!formData.ticketTypeId) {
@@ -799,7 +917,10 @@ const canImportTickets = hasPermission('tickets', 'import');
                           ></span>
                         </td>
                         <td className="p-4 font-semibold text-gray-900">{item.ticketNumber || item._id}</td>
-                        <td className="p-4">{item.title}</td>
+                        <td className="p-4">
+                          <div className="font-medium text-gray-800">{item.title}</div>
+                          <SlaTimeBar item={item} now={now} />
+                        </td>
                         <td className="p-4 uppercase">
                           <span className={`px-2 py-1 rounded-md text-xs font-medium ${item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
                             item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
