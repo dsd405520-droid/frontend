@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, Check, MessageSquare } from 'lucide-react';
+import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, MessageSquare } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import { getSocket } from '../utils/socket';
+import TicketProgressBar, { TICKET_STEPS } from '../components/TicketProgressBar';
 
 const PRIORITY_LABELS = {
   low: 'ຕ່ຳ',
@@ -12,64 +14,6 @@ const PRIORITY_LABELS = {
   high: 'ສູງ',
   urgent: 'ດ່ວນ',
 };
-
-const TICKET_STEPS = [
-  { key: 'OPEN', label: 'ແຈ້ງເຂົ້າມາ' },
-  { key: 'ASSIGNED', label: 'ມອບໝາຍແລ້ວ' },
-  { key: 'IN_PROGRESS', label: 'ກຳລັງແກ້ໄຂ' },
-  { key: 'RESOLVED', label: 'ແກ້ໄຂແລ້ວ' },
-  { key: 'CLOSED', label: 'ປິດແລ້ວ' },
-];
-const STATUS_STEP_INDEX = {
-  OPEN: 0,
-  ASSIGNED: 1,
-  IN_PROGRESS: 2,
-  WAITING_ON_USER: 2,
-  RESOLVED: 3,
-  CLOSED: 4,
-};
-
-function TicketProgressBar({ status }) {
-  const currentIndex = STATUS_STEP_INDEX[status] ?? 0;
-  const isWaiting = status === 'WAITING_ON_USER';
-
-  return (
-    <div className="flex items-start">
-      {TICKET_STEPS.map((step, idx) => {
-        const isDone = idx < currentIndex;
-        const isCurrent = idx === currentIndex;
-        const isLast = idx === TICKET_STEPS.length - 1;
-        return (
-          <React.Fragment key={step.key}>
-            <div className="flex flex-col items-center text-center w-20">
-              <div
-                className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isDone
-                  ? 'bg-emerald-500 text-white'
-                  : isCurrent
-                    ? isWaiting
-                      ? 'bg-amber-100 text-amber-600 ring-4 ring-amber-100 animate-pulse'
-                      : 'bg-blue-500 text-white ring-4 ring-blue-100'
-                    : 'bg-gray-100 text-gray-300'
-                  }`}
-              >
-                {isDone ? <Check size={18} /> : <span className="text-xs font-bold">{idx + 1}</span>}
-              </div>
-              <span className={`text-[11px] mt-1.5 leading-tight ${isCurrent ? 'font-semibold text-gray-800' : 'text-gray-400'}`}>
-                {step.label}
-              </span>
-              {isCurrent && isWaiting && (
-                <span className="text-[10px] text-amber-600 font-medium mt-0.5">ລໍຖ້າຜູ້ໃຊ້</span>
-              )}
-            </div>
-            {!isLast && (
-              <div className={`flex-1 h-0.5 mt-4 ${idx < currentIndex ? 'bg-emerald-500' : 'bg-gray-100'}`} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </div>
-  );
-}
 
 export default function Issues() {
   const navigate = useNavigate();
@@ -179,7 +123,7 @@ export default function Issues() {
   const canAssign = hasPermission('tickets', 'assign');
   const canUpdateStatus = hasPermission('tickets', 'update');
   const canCreateTicket = hasPermission('tickets', 'create');
-const canImportTickets = hasPermission('tickets', 'import');
+  const canImportTickets = hasPermission('tickets', 'import');
 
   const ALLOWED_TRANSITIONS = {
     OPEN: ['ASSIGNED', 'IN_PROGRESS'],
@@ -498,6 +442,50 @@ const canImportTickets = hasPermission('tickets', 'import');
     }
   };
 
+  const refreshTickets = async () => {
+    try {
+      const url = selectedBranchId
+        ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
+        : 'http://localhost:3000/api/tickets';
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) setIssues(extractArrayData(await res.json()));
+    } catch (error) {
+      console.error('Error refreshing tickets:', error);
+    }
+  };
+
+  const openTicketIdRef = useRef(null);
+  useEffect(() => {
+    openTicketIdRef.current = isDetailModalOpen ? selectedTicket?._id : null;
+  }, [selectedTicket, isDetailModalOpen]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    let timer = null;
+    let openTicketChanged = false;
+
+    const onTicketChanged = (payload) => {
+      if (payload?.id && payload.id === openTicketIdRef.current) openTicketChanged = true;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        refreshTickets();
+        if (openTicketChanged && openTicketIdRef.current) {
+          openTicketChanged = false;
+          refreshTicketInDetail(openTicketIdRef.current);
+        }
+      }, 300);
+    };
+
+    socket.on('ticket:changed', onTicketChanged);
+    return () => {
+      clearTimeout(timer);
+      socket.off('ticket:changed', onTicketChanged);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId]);
+
   const handleAssign = async () => {
     if (!selectedTicket) return;
     const agentId = assignMode === 'self' ? (currentUser?._id || currentUser?.id) : selectedAssignee?._id;
@@ -654,13 +642,13 @@ const canImportTickets = hasPermission('tickets', 'import');
               ]}
             />
             {canCreateTicket && (
-            <button
-              onClick={openCreateModal}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ສ້າງລາຍການໃໝ່</span>
-            </button>
+              <button
+                onClick={openCreateModal}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ສ້າງລາຍການໃໝ່</span>
+              </button>
             )}
           </div>
         </div>
@@ -773,7 +761,7 @@ const canImportTickets = hasPermission('tickets', 'import');
                   <th className="p-4 font-medium">ສ້າງເມື່ອ</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 text-gray-600">
+              <tbody className="text-gray-600">
                 {loading ? (
                   <tr>
                     <td colSpan="7" className="py-12 text-center text-gray-400">
@@ -786,40 +774,52 @@ const canImportTickets = hasPermission('tickets', 'import');
                 ) : sortedIssues.length > 0 ? (
                   sortedIssues.map((item) => {
                     const slaIndicator = getSlaIndicator(item);
+                    const showProgress = item.status !== 'CLOSED';
                     return (
-                      <tr
-                        key={item._id || item.id}
-                        onClick={() => openDetailModal(item)}
-                        className="hover:bg-gray-50 cursor-pointer"
-                      >
-                        <td className="p-4">
-                          <span
-                            className={`w-3 h-3 rounded-full inline-block ${slaIndicator.color}`}
-                            title={slaIndicator.label}
-                          ></span>
-                        </td>
-                        <td className="p-4 font-semibold text-gray-900">{item.ticketNumber || item._id}</td>
-                        <td className="p-4">{item.title}</td>
-                        <td className="p-4 uppercase">
-                          <span className={`px-2 py-1 rounded-md text-xs font-medium ${item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
-                            item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
-                              item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                            }`}>
-                            {item.priority}
-                          </span>
-                        </td>
-                        <td className="p-4">
-                          <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600">
-                            {STATUS_LABELS[item.status] || item.status || 'OPEN'}
-                          </span>
-                        </td>
-                        <td className="p-4">
-                          {getAgentDisplayName(item.assignedAgent)}
-                        </td>
-                        <td className="p-4 text-xs text-gray-400">
-                          {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '-'}
-                        </td>
-                      </tr>
+                      <React.Fragment key={item._id || item.id}>
+                        <tr
+                          onClick={() => openDetailModal(item)}
+                          className={`hover:bg-gray-50 cursor-pointer ${showProgress ? 'has-[+tr:hover]:bg-gray-50' : 'border-b border-gray-100 last:border-b-0'}`}
+                        >
+                          <td className="p-4">
+                            <span
+                              className={`w-3 h-3 rounded-full inline-block ${slaIndicator.color}`}
+                              title={slaIndicator.label}
+                            ></span>
+                          </td>
+                          <td className="p-4 font-semibold text-gray-900">{item.ticketNumber || item._id}</td>
+                          <td className="p-4">{item.title}</td>
+                          <td className="p-4 uppercase">
+                            <span className={`px-2 py-1 rounded-md text-xs font-medium ${item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                              item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                                item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+                              }`}>
+                              {item.priority}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600">
+                              {STATUS_LABELS[item.status] || item.status || 'OPEN'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            {getAgentDisplayName(item.assignedAgent)}
+                          </td>
+                          <td className="p-4 text-xs text-gray-400">
+                            {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '-'}
+                          </td>
+                        </tr>
+                        {showProgress && (
+                          <tr
+                            onClick={() => openDetailModal(item)}
+                            className="hover:bg-gray-50 [tr:hover+&]:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                          >
+                            <td colSpan="7" className="px-4 pb-3 pt-0">
+                              <TicketProgressBar status={item.status} compact />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })
                 ) : (
