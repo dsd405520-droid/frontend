@@ -2,22 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, Clock, Loader2, MessageSquare, Paperclip, UserRound } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import TicketProgressBar from '../components/TicketProgressBar';
 
-const TICKET_STEPS = [
-  { key: 'OPEN', label: 'ແຈ້ງເຂົ້າມາ' },
-  { key: 'ASSIGNED', label: 'ມອບໝາຍແລ້ວ' },
-  { key: 'IN_PROGRESS', label: 'ກຳລັງແກ້ໄຂ' },
-  { key: 'RESOLVED', label: 'ແກ້ໄຂແລ້ວ' },
-  { key: 'CLOSED', label: 'ປິດແລ້ວ' },
-];
-const STATUS_STEP_INDEX = {
-  OPEN: 0,
-  ASSIGNED: 1,
-  IN_PROGRESS: 2,
-  WAITING_ON_USER: 2,
-  RESOLVED: 3,
-  CLOSED: 4,
-};
 const STATUS_LABELS = {
   OPEN: 'ເປີດ (ລໍຖ້າຮັບ)',
   ASSIGNED: 'ມອບໝາຍແລ້ວ',
@@ -29,61 +15,6 @@ const STATUS_LABELS = {
 
 function unwrap(payload) {
   return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
-}
-
-function TicketProgressBar({ status }) {
-  const currentIndex = STATUS_STEP_INDEX[status] ?? 0;
-  const isWaiting = status === 'WAITING_ON_USER';
-  const progressPercent = ((currentIndex) / (TICKET_STEPS.length - 1)) * 100;
-  return (
-    <div className="relative mt-6">
-      <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-          style={{ width: `${Math.min(progressPercent, 100)}%` }}
-        />
-        {TICKET_STEPS.map((step, idx) => {
-          const isDone = idx < currentIndex;
-          const isCurrent = idx === currentIndex;
-          const isLast = idx === TICKET_STEPS.length - 1;
-          const leftPercent = (idx / (TICKET_STEPS.length - 1)) * 100;
-          return (
-            <div
-              key={step.key}
-              className="absolute top-1/2 -translate-y-1/2 transform transition-all duration-300"
-              style={{ left: `${leftPercent}%` }}
-            >
-              <div
-                className={`w-5 h-5 rounded-full border-3 flex items-center justify-center shrink-0 transition-all duration-300 ${
-                  isDone
-                    ? 'bg-emerald-500 border-emerald-500 text-white'
-                    : isCurrent
-                    ? isWaiting
-                      ? 'bg-amber-100 border-amber-500 text-amber-600 animate-pulse ring-2 ring-amber-200'
-                      : 'bg-blue-500 border-blue-500 text-white ring-2 ring-blue-200'
-                    : 'bg-white border-gray-200 text-gray-300'
-                }`}
-              >
-                {isDone ? <Check size={14} /> : <span className="text-[10px] font-bold">{idx + 1}</span>}
-              </div>
-              <span
-                className={`absolute top-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] leading-tight transition-colors ${
-                  isCurrent ? 'font-semibold text-gray-800' : 'text-gray-400'
-                }`}
-              >
-                {step.label}
-              </span>
-              {isCurrent && isWaiting && (
-                <span className="absolute top-18 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] text-amber-600 font-medium">
-                  ລໍຖ້າຜູ້ໃຊ້
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function formatDate(dateStr) {
@@ -131,6 +62,35 @@ export default function TicketDetail() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  useEffect(() => {
+    const markTicketNotificationsRead = async () => {
+      try {
+        const res = await fetch('http://localhost:3000/api/notifications/my?unreadOnly=true', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const list = unwrap(await res.json());
+        const ids = (Array.isArray(list) ? list : [])
+          .filter((n) => n.refModel === 'Ticket' && n.refId === id)
+          .map((n) => n._id);
+        if (ids.length === 0) return;
+        await Promise.all(
+          ids.map((nid) =>
+            fetch(`http://localhost:3000/api/notifications/${nid}/read`, {
+              method: 'PATCH',
+              headers: { 'Authorization': `Bearer ${token}` },
+            })
+          )
+        );
+        window.dispatchEvent(new Event('notifications:changed'));
+      } catch (err) {
+        console.error('Error marking ticket notifications read:', err);
+      }
+    };
+    markTicketNotificationsRead();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

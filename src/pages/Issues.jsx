@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, Check, MessageSquare } from 'lucide-react';
+import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, MessageSquare, AlertTriangle } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import { getSocket } from '../utils/socket';
+import TicketProgressBar, { TICKET_STEPS } from '../components/TicketProgressBar';
 
 const PRIORITY_LABELS = {
   low: 'ຕ່ຳ',
@@ -14,137 +15,11 @@ const PRIORITY_LABELS = {
   urgent: 'ດ່ວນ',
 };
 
-const TICKET_STEPS = [
-  { key: 'OPEN', label: 'ແຈ້ງເຂົ້າມາ' },
-  { key: 'ASSIGNED', label: 'ມອບໝາຍແລ້ວ' },
-  { key: 'IN_PROGRESS', label: 'ກຳລັງແກ້ໄຂ' },
-  { key: 'RESOLVED', label: 'ແກ້ໄຂແລ້ວ' },
-  { key: 'CLOSED', label: 'ປິດແລ້ວ' },
-];
-const STATUS_STEP_INDEX = {
-  OPEN: 0,
-  ASSIGNED: 1,
-  IN_PROGRESS: 2,
-  WAITING_ON_USER: 2,
-  RESOLVED: 3,
-  CLOSED: 4,
-};
-
-function TicketProgressBar({ status }) {
-  const currentIndex = STATUS_STEP_INDEX[status] ?? 0;
-  const isWaiting = status === 'WAITING_ON_USER';
-  const progressPercent = ((currentIndex) / (TICKET_STEPS.length - 1)) * 100;
-
-  return (
-    <div className="relative mt-2">
-      <div className="relative h-1.5 bg-gray-100 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-emerald-500 rounded-full transition-all duration-500"
-          style={{ width: `${Math.min(progressPercent, 100)}%` }}
-        />
-        {TICKET_STEPS.map((step, idx) => {
-          const isDone = idx < currentIndex;
-          const isCurrent = idx === currentIndex;
-          const leftPercent = (idx / (TICKET_STEPS.length - 1)) * 100;
-          return (
-            <div
-              key={step.key}
-              className="absolute top-1/2 -translate-y-1/2 transform transition-all duration-300"
-              style={{ left: `${leftPercent}%` }}
-            >
-              <div
-                className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-all duration-300 ${
-                  isDone
-                    ? 'bg-emerald-500 border-emerald-500 text-white'
-                    : isCurrent
-                    ? isWaiting
-                      ? 'bg-amber-100 border-amber-500 text-amber-600 animate-pulse ring-1 ring-amber-200'
-                      : 'bg-blue-500 border-blue-500 text-white ring-1 ring-blue-200'
-                    : 'bg-white border-gray-200 text-gray-300'
-                }`}
-              >
-                {isDone ? <Check size={10} /> : <span className="text-[8px] font-bold">{idx + 1}</span>}
-              </div>
-              <span
-                className={`absolute top-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] leading-tight transition-colors ${
-                  isCurrent ? 'font-semibold text-gray-800' : 'text-gray-400'
-                }`}
-              >
-                {step.label}
-              </span>
-              {isCurrent && isWaiting && (
-                <span className="absolute top-13 left-1/2 -translate-x-1/2 whitespace-nowrap text-[8px] text-amber-600 font-medium">
-                  ລໍຖ້າຜູ້ໃຊ້
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/**
- * ແຖບຄວາມຄືແນນເວລາ SLA ສຳລັບແຖວໃນລາຍການ — ສະແດງວ່າໃຊ້ໄວເທົ່າແລ້ວ ແລະ ເຫຼືອກາຍ.
- * ບໍ່ສະແດງໃນກໍລະກະທີ່: RESOLVED ແລະ CLOSED (ຕາມທໍາລອາ ປິດແລ້ວບໍ່ຕ້ອງເຫັນ).
- */
-function SlaTimeBar({ item, now }) {
-  const sla = item.sla;
-  if (item.status === 'RESOLVED' || item.status === 'CLOSED') return null;
-  if (!sla || !sla.resolutionDueAt) return null;
-
-  const due = new Date(sla.resolutionDueAt).getTime();
-  const started = item.createdAt ? new Date(item.createdAt).getTime() : null;
-  if (!started || due <= started) return null;
-
-  const pausedMs = (sla.pausedIntervals || []).reduce((sum, p) => {
-    if (p.pausedAt && p.resumedAt) {
-      return sum + (new Date(p.resumedAt).getTime() - new Date(p.pausedAt).getTime());
-    }
-    return sum;
-  }, 0);
-
-  const elapsed = now - started - pausedMs;
-  const total = due - started;
-  const percent = Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)));
-  const remainingMs = due - now - pausedMs;
-
-  let barColor = 'bg-emerald-500';
-  let textColor = 'text-emerald-600';
-  let label = `${percent}% ຂອງ SLA`;
-
-  if (item.status === 'WAITING_ON_USER') {
-    barColor = 'bg-blue-400';
-    textColor = 'text-blue-600';
-    label = 'ຢຸດຊົ່ວຄາວ';
-  } else if (sla.breached || remainingMs <= 0) {
-    barColor = 'bg-red-500';
-    textColor = 'text-red-600';
-    label = 'ເກີນ SLA ແລ້ວ';
-  } else if (remainingMs < 30 * 60 * 1000) {
-    barColor = 'bg-yellow-400';
-    textColor = 'text-yellow-600';
-    label = `${percent}% ໃກ້ຄົບກຳນົດ`;
-  }
-
-  return (
-    <div className="mt-1.5" title={label}>
-      <div className="h-1 w-full rounded-full bg-gray-100 overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${percent}%` }} />
-      </div>
-      <span className={`text-[10px] mt-0.5 block ${textColor}`}>{label}</span>
-    </div>
-  );
-}
-
 export default function Issues() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { selectedBranchId } = useBranch();
   const [issues, setIssues] = useState([]);
-  // ໂມງລະບາຍເພື່ອໃຫ້ແຖບ SLA ເຄື່ອນຕາມເວລາໄດ້ (ບໍ່ຕ້ອງ refetch)
-  const [now, setNow] = useState(() => Date.now());
   const [ticketTypes, setTicketTypes] = useState([]);
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -218,6 +93,7 @@ export default function Issues() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
+  const [unreadByTicket, setUnreadByTicket] = useState({});
 
   // ຮັບ/ມອບໝາຍບັນຫາ
   const [isAssignPanelOpen, setIsAssignPanelOpen] = useState(false);
@@ -225,11 +101,22 @@ export default function Issues() {
   const [assignSearchQuery, setAssignSearchQuery] = useState('');
   const [selectedAssignee, setSelectedAssignee] = useState(null);
   const [assignSubmitting, setAssignSubmitting] = useState(false);
+  // ລາຍຊື່ຜູ້ທີ່ມອບໝາຍໄດ້ (ຈາກເຊີບເວີ: ສະເພາະ AGENT ໃນພະແນກ/ສາຂາຂອງ ticket) ພ້ອມຈຳນວນວຽກຄ້າງ
+  const [assignCandidates, setAssignCandidates] = useState([]);
+  const [assignCandidatesLoading, setAssignCandidatesLoading] = useState(false);
+  const [assignCandidatesError, setAssignCandidatesError] = useState('');
 
   // ປ່ຽນສະຖານະ
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [pendingStatusNote, setPendingStatusNote] = useState('');
   const [pendingStatusTarget, setPendingStatusTarget] = useState(null);
+
+  // re-render ທຸກ 30 ວິນາທີ ເພື່ອໃຫ້ ticket ທີ່ເກີນ SLA ເລີ່ມກະພິບເອງ ໂດຍບໍ່ຕ້ອງ refresh
+  const [, setSlaTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setSlaTick((n) => n + 1), 30 * 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const token = localStorage.getItem('token');
 
@@ -248,7 +135,7 @@ export default function Issues() {
   const canAssign = hasPermission('tickets', 'assign');
   const canUpdateStatus = hasPermission('tickets', 'update');
   const canCreateTicket = hasPermission('tickets', 'create');
-const canImportTickets = hasPermission('tickets', 'import');
+  const canImportTickets = hasPermission('tickets', 'import');
 
   const ALLOWED_TRANSITIONS = {
     OPEN: ['ASSIGNED', 'IN_PROGRESS'],
@@ -270,6 +157,14 @@ const canImportTickets = hasPermission('tickets', 'import');
 
   const getUserDisplayName = (u) =>
     [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || '';
+
+  // ລະດັບຄວາມຫວ່າງຂອງ agent ຕາມຈຳນວນ ticket ທີ່ຍັງຄ້າງ (ປັບຄ່າໄດ້ທີ່ນີ້)
+  const BUSY_THRESHOLD = 5;
+  const getWorkloadInfo = (count) => {
+    if (count === 0) return { label: 'ວ່າງ', cls: 'bg-emerald-50 text-emerald-700' };
+    if (count < BUSY_THRESHOLD) return { label: 'ມີວຽກ', cls: 'bg-amber-50 text-amber-700' };
+    return { label: 'ຫຍຸ້ງ', cls: 'bg-red-50 text-red-700' };
+  };
 
   const getAgentDisplayName = (agent) => {
     if (!agent) return 'ຍັງບໍ່ມີຜູ້ຮັບຜິດຊອບ';
@@ -293,33 +188,13 @@ const canImportTickets = hasPermission('tickets', 'import');
     return [];
   };
 
-  const authHeaders = () => ({
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json'
-  });
-
-  // ດຶງແຜ່ນ ticket ຢ່າງດຽວ — ໃຊ້ເວລາ socket ແຈ້ງຂໍ້ມູນ.
-  // reference data (types/branches/departments/users) ບໍ່ປ່ຽນເວັນໃນ ticket event ຈຶ່ງບໍ່ຕ້ອງດຶງຄືນ.
-  const refreshTickets = async (silent = true) => {
-    if (!silent) setLoading(true);
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      const ticketsUrl = selectedBranchId
-        ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
-        : 'http://localhost:3000/api/tickets';
-      const res = await fetch(ticketsUrl, { headers: authHeaders() });
-      if (res.ok) setIssues(extractArrayData(await res.json()));
-    } catch (error) {
-      console.error('Error refreshing tickets:', error);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  };
-
-  // silent = true ຈະບໍ່ສະແດງ loading — ໃຊ້ເວລາ refetch ຈາກ socket ເພື່ອບໍ່ໃຫ້ໜ້າກະພັບ
-  const fetchData = async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const headers = authHeaders();
+      const headers = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
 
       const ticketsUrl = selectedBranchId
         ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
@@ -443,35 +318,6 @@ const canImportTickets = hasPermission('tickets', 'import');
   }, [formData.priority]);
 
   useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(tick);
-  }, []);
-
-  // ອັບໂຕມລາຍການທັນທີ — ເມື່ອ ticket ຖືກສ້າງ/ແກ້ໄຂ/ປ່ຽນສະຖານະ ຝັ່ງລູ້ ຝັ່ງສະຖານະ
-  // ພວກເຮົາ refetch ຜ່ານ API ຕົນເທິງ (ປົກລະໃຫ້ແຕ່ລະ user ເຫັນແຕ່ຂອງຕົນເທິງ) ບໍ່ແມ່ນ
-  // ດຶງຂໍ້ມູນ ticket ຜ່ານ socket
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return undefined;
-
-    let debounce = null;
-    const onChanged = () => {
-      if (debounce) clearTimeout(debounce);
-      // ການ import ຫຼາຍ ຫຼື ການແກ້ໄຂແຫ່ມຫຼາຍ ຈະສົ່ງ event ຫຼາຍໆ ຄ່າ — ລວມເປັນຄັ້ງເດີວ
-      debounce = setTimeout(() => {
-        refreshTickets(true);
-      }, 400);
-    };
-
-    socket.on('ticket:changed', onChanged);
-    return () => {
-      socket.off('ticket:changed', onChanged);
-      if (debounce) clearTimeout(debounce);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranchId]);
-
-  useEffect(() => {
     if (!formData.ticketTypeId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAvailablePriorities(null);
@@ -588,6 +434,15 @@ const canImportTickets = hasPermission('tickets', 'import');
   };
 
   const openDetailModal = (item) => {
+    const unreadIds = unreadByTicket[item._id];
+    if (unreadIds && unreadIds.length > 0) {
+      setUnreadByTicket((prev) => {
+        const next = { ...prev };
+        delete next[item._id];
+        return next;
+      });
+      markNotificationsRead(unreadIds);
+    }
     setSelectedTicket(item);
     setIsDetailModalOpen(true);
     setIsAssignPanelOpen(false);
@@ -616,9 +471,134 @@ const canImportTickets = hasPermission('tickets', 'import');
     }
   };
 
+  const markNotificationsRead = async (ids) => {
+    try {
+      await Promise.all(
+        ids.map((nid) =>
+          fetch(`http://localhost:3000/api/notifications/${nid}/read`, {
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` },
+          })
+        )
+      );
+      window.dispatchEvent(new Event('notifications:changed'));
+    } catch (error) {
+      console.error('Error marking notifications read:', error);
+    }
+  };
+
+  const refreshUnread = async () => {
+    try {
+      const res = await fetch('http://localhost:3000/api/notifications/my?unreadOnly=true', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const map = {};
+      extractArrayData(await res.json()).forEach((n) => {
+        if (n.refModel !== 'Ticket') return;
+        if (!map[n.refId]) map[n.refId] = [];
+        map[n.refId].push(n._id);
+      });
+      const openId = openTicketIdRef.current;
+      if (openId && map[openId]) {
+        markNotificationsRead(map[openId]);
+        delete map[openId];
+      }
+      setUnreadByTicket(map);
+    } catch (error) {
+      console.error('Error loading unread notifications:', error);
+    }
+  };
+
+  useEffect(() => {
+    refreshUnread();
+    window.addEventListener('notifications:changed', refreshUnread);
+    return () => window.removeEventListener('notifications:changed', refreshUnread);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refreshTickets = async () => {
+    try {
+      const url = selectedBranchId
+        ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
+        : 'http://localhost:3000/api/tickets';
+      const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) setIssues(extractArrayData(await res.json()));
+    } catch (error) {
+      console.error('Error refreshing tickets:', error);
+    }
+  };
+
+  const openTicketIdRef = useRef(null);
+  useEffect(() => {
+    openTicketIdRef.current = isDetailModalOpen ? selectedTicket?._id : null;
+  }, [selectedTicket, isDetailModalOpen]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    let timer = null;
+    let openTicketChanged = false;
+
+    const onTicketChanged = (payload) => {
+      if (payload?.id && payload.id === openTicketIdRef.current) openTicketChanged = true;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        refreshTickets();
+        refreshUnread();
+        if (openTicketChanged && openTicketIdRef.current) {
+          openTicketChanged = false;
+          refreshTicketInDetail(openTicketIdRef.current);
+        }
+      }, 300);
+    };
+
+    socket.on('ticket:changed', onTicketChanged);
+    return () => {
+      clearTimeout(timer);
+      socket.off('ticket:changed', onTicketChanged);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId]);
+
+  const loadAssignCandidates = async (ticketId) => {
+    setAssignCandidatesLoading(true);
+    setAssignCandidatesError('');
+    try {
+      const res = await fetch(`http://localhost:3000/api/tickets/${ticketId}/assignable-agents`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setAssignCandidates(extractArrayData(body));
+      } else {
+        setAssignCandidates([]);
+        setAssignCandidatesError(body?.msg || body?.message || 'ບໍ່ສາມາດໂຫຼດລາຍຊື່ຜູ້ຮັບຜິດຊອບໄດ້');
+      }
+    } catch (err) {
+      console.error('Error loading assignable agents:', err);
+      setAssignCandidates([]);
+      setAssignCandidatesError('ບໍ່ສາມາດເຊື່ອມຕໍ່ກັບເຊີບເວີໄດ້');
+    } finally {
+      setAssignCandidatesLoading(false);
+    }
+  };
+
+  // ໂຫຼດລາຍຊື່ໃໝ່ທຸກເທື່ອທີ່ເປີດແຜງມອບໝາຍ ເພື່ອໃຫ້ຈຳນວນວຽກຄ້າງເປັນປັດຈຸບັນສະເໝີ
+  useEffect(() => {
+    if (isAssignPanelOpen && selectedTicket?._id) {
+      loadAssignCandidates(selectedTicket._id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAssignPanelOpen, selectedTicket?._id]);
+
+  const currentUserId = currentUser?._id || currentUser?.id;
+  const selfCandidate = assignCandidates.find((c) => c._id === currentUserId);
+
   const handleAssign = async () => {
     if (!selectedTicket) return;
-    const agentId = assignMode === 'self' ? (currentUser?._id || currentUser?.id) : selectedAssignee?._id;
+    const agentId = assignMode === 'self' ? currentUserId : selectedAssignee?._id;
     if (!agentId) {
       alert('ກະລຸນາເລືອກຜູ້ຮັບຜິດຊອບກ່ອນ');
       return;
@@ -638,7 +618,7 @@ const canImportTickets = hasPermission('tickets', 'import');
         setIsAssignPanelOpen(false);
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.message || 'ບໍ່ສາມາດມອບໝາຍໄດ້');
+        alert(err.msg || err.message || 'ບໍ່ສາມາດມອບໝາຍໄດ້');
       }
     } catch (err) {
       console.error('Error assigning ticket:', err);
@@ -685,7 +665,7 @@ const canImportTickets = hasPermission('tickets', 'import');
     submitStatusChange(status);
   };
 
-  const filteredUsersForAssign = users.filter(u =>
+  const filteredUsersForAssign = assignCandidates.filter(u =>
     getUserDisplayName(u).toLowerCase().includes(assignSearchQuery.toLowerCase())
   );
 
@@ -718,16 +698,18 @@ const canImportTickets = hasPermission('tickets', 'import');
     if (item.status === 'WAITING_ON_USER') {
       return { color: 'bg-blue-400', label: 'ຢຸດຊົ່ວຄາວ' };
     }
+    const isFixed = item.status === 'RESOLVED' || item.status === 'CLOSED';
+    // ເກີນ SLA ແລ້ວ ແລະ ຍັງບໍ່ແກ້ໄຂ → ກະພິບເຕືອນ; ແກ້ໄຂແລ້ວ → ກັບເປັນຈຸດແດງທຳມະດາ
     if (sla.breached) {
-      return { color: 'bg-red-500', label: 'ເກີນ SLA ແລ້ວ' };
+      return { color: 'bg-red-500', label: 'ເກີນ SLA ແລ້ວ', beacon: !isFixed };
     }
-    if (item.status === 'RESOLVED' || item.status === 'CLOSED') {
+    if (isFixed) {
       return { color: 'bg-green-500', label: 'ແກ້ໄຂແລ້ວ' };
     }
     // eslint-disable-next-line react-hooks/purity
     const remainingMs = new Date(sla.resolutionDueAt).getTime() - Date.now();
     if (remainingMs <= 0) {
-      return { color: 'bg-red-500', label: 'ເກີນ SLA ແລ້ວ' };
+      return { color: 'bg-red-500', label: 'ເກີນ SLA ແລ້ວ', beacon: true };
     }
     if (remainingMs < 30 * 60 * 1000) {
       return { color: 'bg-yellow-400', label: 'ໃກ້ຄົບກຳນົດ SLA' };
@@ -772,13 +754,13 @@ const canImportTickets = hasPermission('tickets', 'import');
               ]}
             />
             {canCreateTicket && (
-            <button
-              onClick={openCreateModal}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-            >
-              <Plus size={18} />
-              <span>ສ້າງລາຍການໃໝ່</span>
-            </button>
+              <button
+                onClick={openCreateModal}
+                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Plus size={18} />
+                <span>ສ້າງລາຍການໃໝ່</span>
+              </button>
             )}
           </div>
         </div>
@@ -891,7 +873,7 @@ const canImportTickets = hasPermission('tickets', 'import');
                   <th className="p-4 font-medium">ສ້າງເມື່ອ</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 text-gray-600">
+              <tbody className="text-gray-600">
                 {loading ? (
                   <tr>
                     <td colSpan="7" className="py-12 text-center text-gray-400">
@@ -904,43 +886,72 @@ const canImportTickets = hasPermission('tickets', 'import');
                 ) : sortedIssues.length > 0 ? (
                   sortedIssues.map((item) => {
                     const slaIndicator = getSlaIndicator(item);
+                    const showProgress = item.status !== 'CLOSED';
+                    const isNew = !!unreadByTicket[item._id];
                     return (
-                      <tr
-                        key={item._id || item.id}
-                        onClick={() => openDetailModal(item)}
-                        className="hover:bg-gray-50 cursor-pointer"
-                      >
-                        <td className="p-4">
-                          <span
-                            className={`w-3 h-3 rounded-full inline-block ${slaIndicator.color}`}
-                            title={slaIndicator.label}
-                          ></span>
-                        </td>
-                        <td className="p-4 font-semibold text-gray-900">{item.ticketNumber || item._id}</td>
-                        <td className="p-4">
-                          <div className="font-medium text-gray-800">{item.title}</div>
-                          <SlaTimeBar item={item} now={now} />
-                        </td>
-                        <td className="p-4 uppercase">
-                          <span className={`px-2 py-1 rounded-md text-xs font-medium ${item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
-                            item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
-                              item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
-                            }`}>
-                            {item.priority}
-                          </span>
-                        </td>
-                        <td className="p-4">
-                          <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600">
-                            {STATUS_LABELS[item.status] || item.status || 'OPEN'}
-                          </span>
-                        </td>
-                        <td className="p-4">
-                          {getAgentDisplayName(item.assignedAgent)}
-                        </td>
-                        <td className="p-4 text-xs text-gray-400">
-                          {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '-'}
-                        </td>
-                      </tr>
+                      <React.Fragment key={item._id || item.id}>
+                        <tr
+                          onClick={() => openDetailModal(item)}
+                          className={`cursor-pointer ${isNew ? 'bg-amber-50' : 'hover:bg-gray-50'} ${showProgress ? (isNew ? '' : 'has-[+tr:hover]:bg-gray-50') : 'border-b border-gray-100 last:border-b-0'}`}
+                        >
+                          <td className={`p-4 ${isNew ? 'shadow-[inset_4px_0_0_0_#f59e0b]' : ''}`}>
+                            {slaIndicator.beacon ? (
+                              <span
+                                className="relative inline-flex items-center justify-center w-5 h-5 align-middle"
+                                title={slaIndicator.label}
+                                role="img"
+                                aria-label={slaIndicator.label}
+                              >
+                                <span className="absolute inline-flex w-full h-full rounded-full bg-red-500 opacity-75 animate-ping motion-reduce:animate-none"></span>
+                                <span className="relative inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-600 text-white shadow-[0_0_8px_2px_rgba(239,68,68,0.6)] animate-pulse motion-reduce:animate-none">
+                                  <AlertTriangle size={12} strokeWidth={2.5} />
+                                </span>
+                              </span>
+                            ) : (
+                              <span
+                                className={`w-3 h-3 rounded-full inline-block ${slaIndicator.color}`}
+                                title={slaIndicator.label}
+                              ></span>
+                            )}
+                          </td>
+                          <td className="p-4 font-semibold text-gray-900">{item.ticketNumber || item._id}</td>
+                          <td className="p-4">
+                            {item.title}
+                            {isNew && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[10px] font-bold align-middle">ໃໝ່</span>
+                            )}
+                          </td>
+                          <td className="p-4 uppercase">
+                            <span className={`px-2 py-1 rounded-md text-xs font-medium ${item.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                              item.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                                item.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'
+                              }`}>
+                              {item.priority}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className="px-2 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-600">
+                              {STATUS_LABELS[item.status] || item.status || 'OPEN'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            {getAgentDisplayName(item.assignedAgent)}
+                          </td>
+                          <td className="p-4 text-xs text-gray-400">
+                            {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : '-'}
+                          </td>
+                        </tr>
+                        {showProgress && (
+                          <tr
+                            onClick={() => openDetailModal(item)}
+                            className={`cursor-pointer border-b border-gray-100 last:border-b-0 ${isNew ? 'bg-amber-50' : 'hover:bg-gray-50 [tr:hover+&]:bg-gray-50'}`}
+                          >
+                            <td colSpan="7" className={`px-4 pb-3 pt-0 ${isNew ? 'shadow-[inset_4px_0_0_0_#f59e0b]' : ''}`}>
+                              <TicketProgressBar status={item.status} compact />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })
                 ) : (
@@ -1266,6 +1277,16 @@ const canImportTickets = hasPermission('tickets', 'import');
                           {currentUser?.departmentId?.name && (
                             <p className="text-xs text-gray-500">ພະແນກ: {currentUser.departmentId.name}</p>
                           )}
+                          {!assignCandidatesLoading && !assignCandidatesError && currentUser && !selfCandidate && (
+                            <p className="text-xs text-red-600 mt-2">
+                              ທ່ານຮັບບັນຫານີ້ເອງບໍ່ໄດ້ — ຕ້ອງເປັນ AGENT ໃນພະແນກ/ສາຂາດຽວກັນກັບ ticket ເທົ່ານັ້ນ
+                            </p>
+                          )}
+                          {selfCandidate && (
+                            <p className="text-xs text-gray-500 mt-2">
+                              ວຽກຄ້າງປັດຈຸບັນ: <span className="font-semibold text-gray-700">{selfCandidate.activeTickets}</span> ບັນຫາ
+                            </p>
+                          )}
                         </div>
                       ) : (
                         <div>
@@ -1276,19 +1297,41 @@ const canImportTickets = hasPermission('tickets', 'import');
                             placeholder="ຄົ້ນຫາຊື່ພະນັກງານ..."
                             className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-2"
                           />
-                          <div className="max-h-32 overflow-y-auto divide-y divide-gray-50 border border-gray-100 rounded-lg">
-                            {filteredUsersForAssign.slice(0, 20).map(u => (
-                              <div
-                                key={u._id || u.id}
-                                onClick={() => setSelectedAssignee(u)}
-                                className={`px-3 py-2 text-sm cursor-pointer hover:bg-amber-50 ${(selectedAssignee?._id || selectedAssignee?.id) === (u._id || u.id) ? 'bg-amber-50 text-amber-800 font-medium' : 'text-gray-700'
-                                  }`}
-                              >
-                                {getUserDisplayName(u)}
+                          <div className="max-h-48 overflow-y-auto divide-y divide-gray-50 border border-gray-100 rounded-lg">
+                            {assignCandidatesLoading && (
+                              <div className="px-3 py-3 text-xs text-gray-400 text-center flex items-center justify-center gap-1.5">
+                                <Loader2 className="animate-spin" size={12} /> ກຳລັງໂຫຼດ...
                               </div>
-                            ))}
-                            {filteredUsersForAssign.length === 0 && (
-                              <div className="px-3 py-3 text-xs text-gray-400 text-center">ບໍ່ພົບ</div>
+                            )}
+                            {!assignCandidatesLoading && assignCandidatesError && (
+                              <div className="px-3 py-3 text-xs text-red-600 text-center">{assignCandidatesError}</div>
+                            )}
+                            {!assignCandidatesLoading && !assignCandidatesError && filteredUsersForAssign.map(u => {
+                              const workload = getWorkloadInfo(u.activeTickets);
+                              const isSelected = selectedAssignee?._id === u._id;
+                              return (
+                                <div
+                                  key={u._id}
+                                  onClick={() => !u.isCurrentAssignee && setSelectedAssignee(u)}
+                                  className={`px-3 py-2 text-sm flex items-center justify-between gap-2 ${u.isCurrentAssignee ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-amber-50'} ${isSelected ? 'bg-amber-50 text-amber-800 font-medium' : 'text-gray-700'}`}
+                                >
+                                  <div className="min-w-0">
+                                    <div className="truncate">{getUserDisplayName(u)}</div>
+                                    <div className="text-[11px] text-gray-400 truncate">
+                                      {u.employeeCode}{u.isCurrentAssignee ? ' · ຜູ້ຮັບຜິດຊອບປັດຈຸບັນ' : ''}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0 text-xs">
+                                    <span className="text-gray-500">ຄ້າງ {u.activeTickets}</span>
+                                    <span className={`px-2 py-0.5 rounded-full font-medium ${workload.cls}`}>{workload.label}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {!assignCandidatesLoading && !assignCandidatesError && filteredUsersForAssign.length === 0 && (
+                              <div className="px-3 py-3 text-xs text-gray-400 text-center">
+                                {assignCandidates.length === 0 ? 'ບໍ່ມີ AGENT ໃນພະແນກນີ້ທີ່ມອບໝາຍໄດ້' : 'ບໍ່ພົບ'}
+                              </div>
                             )}
                           </div>
                         </div>
@@ -1303,7 +1346,10 @@ const canImportTickets = hasPermission('tickets', 'import');
                         </button>
                         <button
                           onClick={handleAssign}
-                          disabled={assignSubmitting}
+                          disabled={
+                            assignSubmitting ||
+                            (assignMode === 'self' ? !selfCandidate : !selectedAssignee)
+                          }
                           className="px-3 py-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-1.5"
                         >
                           {assignSubmitting && <Loader2 className="animate-spin" size={14} />}
