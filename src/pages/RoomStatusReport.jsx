@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X, Search, Filter } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CsvExportButton from '../components/CsvExportButton';
+import { hasPermission } from '../utils/permissions';
 import { useBranch } from '../contexts/BranchContext';
 
 // ໜ້າລາຍງານສະຖານະຫ້ອງປະຊຸມ "ຕົວຈິງ" — ບໍ່ແມ່ນແຄ່ອີງ booking (ຄາດເດົາ) ແຕ່ໃຫ້ຄົນທີ່ຢູ່ໃນຫ້ອງແທ້ໆ
@@ -200,6 +201,7 @@ export default function RoomStatusReport() {
             data={filteredRooms}
             filename="room-status.csv"
             label="Export CSV"
+            permitted={hasPermission('rooms', 'read')}
             columns={[
               { key: 'name', label: 'name' },
               { key: '_id', label: 'id' },

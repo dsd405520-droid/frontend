@@ -337,6 +337,7 @@ export default function BranchesManagement() {
                 data={filteredBranches}
                 filename="branches.csv"
                 label="Export ສາຂາ"
+                permitted={hasPermission('branches', 'read')}
                 columns={[
                   { key: 'name', label: 'name' },
                   { key: '_id', label: 'id' },
@@ -426,6 +427,7 @@ export default function BranchesManagement() {
                 data={filteredDepartments}
                 filename="departments.csv"
                 label="Export ພະແນກ"
+                permitted={hasPermission('departments', 'read')}
                 columns={[
                   { key: 'name', label: 'name' },
                   { key: '_id', label: 'id' },

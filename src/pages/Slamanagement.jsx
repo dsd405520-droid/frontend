@@ -317,6 +317,7 @@ export default function Slamanagement() {
                   data={filteredSlas}
                   filename="sla-policies.csv"
                   label="Export CSV"
+                  permitted={hasPermission('sla', 'read')}
                   columns={[
                     { key: 'name', label: 'name' },
                     { label: 'ticketType', value: (r) => ticketTypeNameById(r.ticketTypeId) },

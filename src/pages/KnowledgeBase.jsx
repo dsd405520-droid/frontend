@@ -411,6 +411,7 @@ export default function KnowledgeBase() {
                 data={displayedArticles}
                 filename="kb-articles.csv"
                 label="Export CSV"
+                permitted={hasPermission('kb', 'read')}
                 columns={[
                   { key: 'title', label: 'title' },
                   { key: 'category', label: 'category' },

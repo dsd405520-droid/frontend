@@ -212,6 +212,7 @@ export default function RolesManagement() {
                 data={roles}
                 filename="roles.csv"
                 label="Export CSV"
+                permitted={hasPermission('roles', 'read')}
                 columns={[
                   { key: 'name', label: 'name' },
                   { key: '_id', label: 'id' },

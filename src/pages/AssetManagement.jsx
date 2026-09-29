@@ -249,6 +249,7 @@ export default function AssetManagement() {
                 data={filteredAssets}
                 filename="supply-catalog.csv"
                 label="Export CSV"
+                permitted={hasPermission('supplies', 'read')}
                 columns={[
                   { key: '_id', label: 'id' },
                   { key: 'name', label: 'name' },

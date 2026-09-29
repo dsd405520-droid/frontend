@@ -275,6 +275,7 @@ export default function UsersManagement() {
                 data={filteredUsers}
                 filename="users.csv"
                 label="Export CSV"
+                permitted={hasPermission('users', 'read')}
                 columns={[
                   { key: 'employeeCode', label: 'employeeCode' },
                   { key: 'firstName', label: 'firstName' },

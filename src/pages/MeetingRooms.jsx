@@ -995,6 +995,7 @@ export default function MeetingRooms() {
               data={calendarBookings}
               filename="room-bookings.csv"
               label="Export ການຈອງ"
+              permitted={hasPermission('rooms', 'read')}
               columns={[
                 { key: 'title', label: 'title' },
                 { label: 'room', value: (b) => (b.roomId?.name || b.roomId?._id || b.roomId || '') },
@@ -1626,6 +1627,7 @@ export default function MeetingRooms() {
                     data={rooms}
                     filename="rooms.csv"
                     label="Export ຫ້ອງ"
+                    permitted={hasPermission('rooms', 'read')}
                     columns={[
                       { key: '_id', label: 'id' },
                       { key: 'name', label: 'name' },

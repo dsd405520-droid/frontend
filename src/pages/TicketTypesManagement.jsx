@@ -362,6 +362,7 @@ export default function TicketTypesManagement() {
                 data={sortedTypes}
                 filename="ticket-types.csv"
                 label="Export CSV"
+                permitted={hasPermission('ticket-types', 'read')}
                 columns={[
                   { key: 'name', label: 'name' },
                   { label: 'defaultDepartment', value: (r) => departmentName(r.defaultDepartmentId) },

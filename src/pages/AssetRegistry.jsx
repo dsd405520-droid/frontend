@@ -249,6 +249,7 @@ export default function AssetRegistry() {
                 data={filteredAssets}
                 filename="assets.csv"
                 label="Export CSV"
+                permitted={hasPermission('assets', 'read')}
                 columns={[
                   { key: 'assetTag', label: 'assetTag' },
                   { key: 'type', label: 'type' },

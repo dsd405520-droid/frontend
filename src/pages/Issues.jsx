@@ -6,6 +6,13 @@ import { useBranch } from '../contexts/BranchContext';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 
+const PRIORITY_LABELS = {
+  low: 'ຕ່ຳ',
+  medium: 'ປານກາງ',
+  high: 'ສູງ',
+  urgent: 'ດ່ວນ',
+};
+
 const TICKET_STEPS = [
   { key: 'OPEN', label: 'ແຈ້ງເຂົ້າມາ' },
   { key: 'ASSIGNED', label: 'ມອບໝາຍແລ້ວ' },
@@ -131,6 +138,11 @@ export default function Issues() {
   const [suggestLoading, setSuggestLoading] = useState(false);
 
   const [availablePriorities, setAvailablePriorities] = useState(null); // null = not checked yet
+  const [slaNotice, setSlaNotice] = useState('');
+  const [formError, setFormError] = useState('');
+
+  // ລະດັບຄວາມສຳຄັງປັດຈຸບັນ ໃຊ້ອ່ານໃນ fetch SLA ຂອງ ticket type ໃໝ່ (ກັນບໍ່ re-fetch ທຸກເທື່ອທີ່ priority ປ່ຽນ)
+  const priorityRef = useRef('medium');
 
   // State ສຳລັບ Modal ລາຍລະອຽດ Ticket
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -274,12 +286,26 @@ export default function Issues() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
 
+  const openCreateModal = () => {
+    setIsModalOpen(true);
+    setFormError('');
+    setSlaNotice('');
+  };
+
+  const closeCreateModal = () => {
+    setIsModalOpen(false);
+    setFormError('');
+    setSlaNotice('');
+  };
+
   // Navbar "ສ້າງໃໝ່" ສົ່ງມາທີ່ /issues?create=1 ໃຫ້ເປີດ Modal ສ້າງ Ticket ອັດຕະໂນມັດ
   const shouldOpenCreate = searchParams.get('create') === '1';
   useEffect(() => {
     if (shouldOpenCreate) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsModalOpen(true);
+      setFormError('');
+      setSlaNotice('');
     }
   }, [shouldOpenCreate]);
 
@@ -323,21 +349,50 @@ export default function Issues() {
   }, [formData.title, isModalOpen]);
 
   useEffect(() => {
+    priorityRef.current = formData.priority;
+  }, [formData.priority]);
+
+  useEffect(() => {
     if (!formData.ticketTypeId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAvailablePriorities(null);
+      setSlaNotice('');
       return;
     }
+    let cancelled = false;
     fetch(`http://localhost:3000/api/sla-policies/ticket-type/${formData.ticketTypeId}/available-priorities`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.ok ? res.json() : null)
-      .then(data => data && setAvailablePriorities(data.data || []))
+      .then(data => {
+        if (cancelled) return;
+        const levels = Array.isArray(data?.data) ? data.data : [];
+        setAvailablePriorities(levels);
+
+        // ລະດັບທີ່ຄາດຢູ່ (default ຂອງ ticket type ຫຼື medium ຈາກ state ເດີມ) ອາດເປັນບໍ່ມີ SLA — ປ່ຽນໄປໃຊ້ລະດັບທີ່ມີ SLA ແທນ ແລ້ວແຈ້ງລາຍງານ
+        const chosen = priorityRef.current;
+        if (levels.length > 0 && !levels.includes(chosen)) {
+          const fallback = levels[0];
+          setFormData(prev => ({ ...prev, priority: fallback }));
+          setSlaNotice(
+            `ລະດັບຄວາມສຳຄັງ "${PRIORITY_LABELS[chosen] || chosen}" ບໍ່ມີ SLA ສຳລັບຫົວຂໍ້ບັນຫານີ້ — ປ່ຽນເປັນ "${PRIORITY_LABELS[fallback] || fallback}" ໃຫ້ອັດຕະໂນມັດ (ລະດັບທີ່ມີ SLA: ${levels.map(l => PRIORITY_LABELS[l] || l).join(', ')})`
+          );
+        }
+      })
       .catch(err => console.error('Error fetching available priorities:', err));
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.ticketTypeId]);
+
+  // ຄຳນະນຶກ: ລະດັບທີ່ເລືອກຢູ່ໃນຟອມຕ້ອງມີ SLA ຈຶ່ງຈະສ້າງລາຍການໄດ້
+  const hasTicketType = !!formData.ticketTypeId;
+  const slaChecked = hasTicketType && availablePriorities !== null;
+  const noSlaForType = slaChecked && availablePriorities.length === 0;
+  const priorityHasNoSla = slaChecked && !noSlaForType && !availablePriorities.includes(formData.priority);
   const handleSelectTicketType = (type) => {
     setSelectedTypeName(type.name);
+    setSlaNotice('');
+    setFormError('');
     setFormData(prev => ({
       ...prev,
       ticketTypeId: type._id || type.id,
@@ -355,6 +410,24 @@ export default function Issues() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // ກວດສອບກ່ອນສ້າງ — ຢ່າງໜ້ອຍໃຫ້ບານຫົວຂໍ້ບັນຫາ ຫຼື ລະດັບຄວາມສຳຄັງທີ່ບໍ່ມີ SLA ຜ່ານໄປ API
+    if (!formData.ticketTypeId) {
+      setFormError('ກະລຸນາເລືອກຫົວຂໍ້ບັນຫາ (ປະເພດບັນຫາ) ກ່ອນ');
+      return;
+    }
+    if (noSlaForType) {
+      setFormError('ຫົວຂໍ້ບັນຫານີ້ຍັງບໍ່ມີ SLA ໃດໆ — ກະລຸນາໃຫ້ຜູ້ດູແລກຕັ້ງ SLA ກ່ອນ ຫຼື ເລືອກຫົວຂໍ້ບັນຫາອື່ນ');
+      return;
+    }
+    if (priorityHasNoSla) {
+      setFormError(
+        `ລະດັບຄວາມສຳຄັງ "${PRIORITY_LABELS[formData.priority] || formData.priority}" ບໍ່ມີ SLA ສຳລັບຫົວຂໍ້ບັນຫານີ້ — ກະລຸນາເລືອກໃນລະດັບທີ່ມີ SLA: ${availablePriorities.map(l => PRIORITY_LABELS[l] || l).join(', ')}`
+      );
+      return;
+    }
+
+    setFormError('');
     setSubmitting(true);
 
     try {
@@ -379,14 +452,17 @@ export default function Issues() {
         });
         setSelectedTypeName('');
         setSuggestedArticles([]);
+        setSlaNotice('');
+        setAvailablePriorities(null);
         fetchData();
       } else {
-        const errData = await response.json();
-        alert(errData.message || 'ເກີດຂໍ້ຜິດພາດໃນການສ້າງລາຍການ');
+        const errData = await response.json().catch(() => ({}));
+        // ຄ່າຂອງເຊີບເວີໃຊ້ `msg` (http-exception.filter) ແຕ່ `message` ເປັນ fallback
+        setFormError(errData?.msg || errData?.message || 'ເກີດຂໍ້ຜິດພາດໃນການສ້າງລາຍການ');
       }
     } catch (err) {
       console.error('Error creating ticket:', err);
-      alert('ບໍ່ສາມາດເຊື່ອມຕໍ່ກັບເຊີບເວີໄດ້');
+      setFormError('ບໍ່ສາມາດເຊື່ອມຕໍ່ກັບເຊີບເວີໄດ້');
     } finally {
       setSubmitting(false);
     }
@@ -577,7 +653,7 @@ export default function Issues() {
               ]}
             />
             <button
-              onClick={() => setIsModalOpen(true)}
+              onClick={openCreateModal}
               className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
             >
               <Plus size={18} />
@@ -762,7 +838,7 @@ export default function Issues() {
           <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-xl animate-in fade-in zoom-in duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <h3 className="font-bold text-gray-800 text-lg">ສ້າງລາຍການແຈ້ງບັນຫາໃໝ່</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition">
+              <button onClick={closeCreateModal} className="text-gray-400 hover:text-gray-600 transition">
                 <X size={20} />
               </button>
             </div>
@@ -871,15 +947,32 @@ export default function Issues() {
                   <label className="block text-xs font-medium text-gray-700 mb-1">ລະດັບຄວາມສຳຄັນ</label>
                   <select
                     value={formData.priority}
-                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 bg-white"
+                    onChange={(e) => {
+                      setFormData({ ...formData, priority: e.target.value });
+                      setSlaNotice('');
+                      setFormError('');
+                    }}
+                    className={`w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 bg-white ${priorityHasNoSla || noSlaForType ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20' : 'border-gray-200 focus:border-amber-500'}`}
                   >
-                    {['low', 'medium', 'high', 'urgent'].map(p => (
-                      <option key={p} value={p} disabled={availablePriorities !== null && !availablePriorities.includes(p)}>
-                        {p.charAt(0).toUpperCase() + p.slice(1)}{availablePriorities !== null && !availablePriorities.includes(p) ? ' (ບໍ່ມີ SLA)' : ''}
-                      </option>
-                    ))}
+                    {['low', 'medium', 'high', 'urgent'].map(p => {
+                      const hasSla = !slaChecked || availablePriorities.includes(p);
+                      return (
+                        <option key={p} value={p} disabled={slaChecked && !hasSla}>
+                          {PRIORITY_LABELS[p] || p.charAt(0).toUpperCase() + p.slice(1)}{slaChecked && !hasSla ? ' (ບໍ່ມີ SLA)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
+                  {noSlaForType && (
+                    <p className="text-xs text-red-600 mt-1.5">
+                      ຫົວຂໍ້ບັນຫານີ້ບໍ່ມີ SLA ໃດໆ — ຕ້ອງໃຫ້ຜູ້ດູແລກຕັ້ງ SLA ກ່ອນ ຈຶ່ງຈະສ້າງລາຍການໄດ້
+                    </p>
+                  )}
+                  {slaNotice && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5 mt-1.5">
+                      {slaNotice}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ສາຂາ (Branch)</label>
@@ -912,18 +1005,26 @@ export default function Issues() {
                 </select>
               </div>
 
+              {formError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-3 py-2.5 flex items-start gap-2">
+                  <X size={14} className="mt-0.5 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={closeCreateModal}
                   className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition"
                 >
                   ຍົກເລີກ
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm disabled:opacity-50"
+                  disabled={submitting || noSlaForType || priorityHasNoSla}
+                  title={noSlaForType || priorityHasNoSla ? 'ຕ້ອງເລືອກລະດັບຄວາມສຳຄັງທີ່ມີ SLA ກ່ອນ' : undefined}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting && <Loader2 className="animate-spin" size={16} />}
                   <span>ສ້າງລາຍການ</span>
