@@ -179,6 +179,7 @@ export default function Issues() {
   const canAssign = hasPermission('tickets', 'assign');
   const canUpdateStatus = hasPermission('tickets', 'update');
   const canCreateTicket = hasPermission('tickets', 'create');
+const canImportTickets = hasPermission('tickets', 'import');
 
   const ALLOWED_TRANSITIONS = {
     OPEN: ['ASSIGNED', 'IN_PROGRESS'],
@@ -628,7 +629,7 @@ export default function Issues() {
             <CsvImportButton
               endpoint="/tickets/bulk-import"
               refresh={fetchData}
-              permitted={canCreateTicket}
+              permitted={canImportTickets}
               csvHint="CSV ຖັນ: title, description, ticketTypeId (TT###), branchId (BX###) — ຈຳເປັນ; departmentId (DX###), priority (low/medium/high/urgent) — ເພີ່ມໄດ້"
             />
             <CsvExportButton
@@ -652,6 +653,7 @@ export default function Issues() {
                 { key: 'ticketNumber', label: 'ticketNumber' },
               ]}
             />
+            {canCreateTicket && (
             <button
               onClick={openCreateModal}
               className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
@@ -659,6 +661,7 @@ export default function Issues() {
               <Plus size={18} />
               <span>ສ້າງລາຍການໃໝ່</span>
             </button>
+            )}
           </div>
         </div>
 

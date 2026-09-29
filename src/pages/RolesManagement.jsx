@@ -41,6 +41,8 @@ const AVAILABLE_ACTIONS = [
   { key: 'fulfill', label: 'ຮັບເຄື່ອງ (Fulfill)' },
   { key: 'publish', label: 'ເຜີຍແຜ່ (Publish)' },
   { key: 'export', label: 'ສົ່ງອອກ (Export)' },
+  { key: 'manage', label: 'ຈັດການ (Manage)' },
+  { key: 'import', label: 'ນຳເຂົ້າ (Import)' },
 ];
 
 export default function RolesManagement() {

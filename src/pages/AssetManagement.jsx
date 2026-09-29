@@ -9,7 +9,8 @@ import CsvExportButton from '../components/CsvExportButton';
 
 export default function AssetManagement() {
   const [searchParams] = useSearchParams();
-  const canCreateCatalog = hasPermission('supplies', 'create');
+  const canCreateCatalog = hasPermission('supplies', 'manage');
+  const canImportCatalog = hasPermission('supplies', 'import');
   const canApproveRequests = hasPermission('supplies', 'approve');
 
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'pending'
@@ -237,11 +238,11 @@ export default function AssetManagement() {
           </div>
           {activeTab === 'catalog' && (
             <div className="flex items-center gap-3">
-              {canCreateCatalog && (
+              {canImportCatalog && (
                 <CsvImportButton
                   endpoint="/supply-catalog/bulk-import"
                   refresh={fetchCatalog}
-                  permitted={canCreateCatalog}
+                  permitted={canImportCatalog}
                   csvHint="CSV ຖັນ: name, category, unit — ຈຳເປັນ; stockQty, lowStockThreshold, isActive (true/false) — ເພີ່ມໄດ້"
                 />
               )}

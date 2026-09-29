@@ -12,8 +12,12 @@ export default function MeetingRooms() {
   const { selectedBranchId, branches } = useBranch();
   const [searchParams] = useSearchParams();
   const canApproveBookings = hasPermission('rooms', 'approve'); // ຄວບຄຸມການເຫັນ tab 'ຈັດການຫ້ອງ (Admin)'
+  const canManageRooms = hasPermission('rooms', 'manage');
+  const canUpdateRooms = hasPermission('rooms', 'update');
+  const canImportBookings = hasPermission('rooms', 'import');
   const canCreateBooking = hasPermission('rooms', 'create');
-  const canCreateRoom = hasPermission('rooms', 'create');
+  // tab 'admin' ມອກາມແທບຫຼາກ 'ອະນຸມັດ' ແລະ 'ລາຍການນຳໃຊ້ຫ້ອງ (Utilization)' ຈຶ່ງຕ້ອງມີ rooms.manage
+  const canSeeAdminTab = canApproveBookings || canManageRooms;
 
   const [activeTab, setActiveTab] = useState('rooms'); // 'rooms' | 'my-bookings' | 'admin'
 
@@ -292,8 +296,8 @@ export default function MeetingRooms() {
         fetchMyBookings();
       }
       if (activeTabRef.current === 'admin') {
-        fetchPendingApprovals();
-        fetchUtilization();
+        if (canApproveBookings) fetchPendingApprovals();
+        if (canManageRooms) fetchUtilization();
       }
     };
 
@@ -915,6 +919,11 @@ export default function MeetingRooms() {
 
   // ກົດເລືອກຈຸດເລີ່ມ ແລ້ວກົດອີກເທື່ອເພື່ອເລືອກຈຸດສິ້ນສຸດ — ແທນທີ່ຈະພິມວັນ/ເວລາເອງ
   const handlePickerClick = (dayIndex, time) => {
+    if (!canCreateBooking) {
+      setBookingMessage({ type: 'error', text: 'ທ່ານບໍ່ມີສິດຈອງຫ້ອງ' });
+      return;
+    }
+
     const isPickingEnd = pickStart && pickStart.dayIndex === dayIndex &&
       slotHours.indexOf(parseInt(time, 10)) > slotHours.indexOf(parseInt(pickStart.time, 10));
 
@@ -983,11 +992,11 @@ export default function MeetingRooms() {
             <p className="text-sm text-gray-500 mt-1">ຈັດການ, ກວດສອບສະຖານະ ແລະ ຈອງຫ້ອງປະຊຸມອອນໄລນ໌</p>
           </div>
           <div className="flex items-center gap-2">
-            {canCreateBooking && (
+            {canImportBookings && (
               <CsvImportButton
                 endpoint="/room-bookings/bulk-import"
                 refresh={() => { fetchCalendarBookings(); fetchMyBookings(); }}
-                permitted={canCreateBooking}
+                permitted={canImportBookings}
                 csvHint="CSV ການຈອງ: title, roomId, startAt, endAt (ISO datetime) — ຈຳເປັນ"
               />
             )}
@@ -1036,9 +1045,9 @@ export default function MeetingRooms() {
           >
             ການຈອງຂອງຂ້ອຍ (My Bookings)
           </button>
-          {canApproveBookings && (
+          {canSeeAdminTab && (
             <button
-              onClick={() => { setActiveTab('admin'); fetchUtilization(); fetchPendingApprovals(); }}
+              onClick={() => { setActiveTab('admin'); if (canManageRooms) fetchUtilization(); if (canApproveBookings) fetchPendingApprovals(); }}
               className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'admin' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
             >
               ຈັດການຫ້ອງ (Admin)
@@ -1150,7 +1159,7 @@ export default function MeetingRooms() {
                   </button>
                 )}
 
-                {canCreateRoom && (
+                {canManageRooms && (
                   <button
                     onClick={openCreateRoomModal}
                     className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm shrink-0"
@@ -1508,8 +1517,9 @@ export default function MeetingRooms() {
         )}
 
         {/* TAB 3: ADMIN — Pending approvals + Maintenance toggle + Org-wide utilization report */}
-        {activeTab === 'admin' && canApproveBookings && (
+        {activeTab === 'admin' && canSeeAdminTab && (
           <div className="space-y-6">
+            {canApproveBookings && (
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
                 <div className="font-bold text-gray-800">ຄຳຮ້ອງຂໍຈອງທີ່ລໍຖ້າອະນຸມັດ</div>
@@ -1608,18 +1618,20 @@ export default function MeetingRooms() {
                 </div>
               )}
             </div>
+            )}
 
+            {canManageRooms && (
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="font-bold text-gray-800">
                   ຈັດການສະຖານະຫ້ອງ (ວ່າງ / ກຳລັງໃຊ້ງານ / ປິດບຳລຸງ)
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {canCreateRoom && (
+                  {canImportBookings && (
                     <CsvImportButton
                       endpoint="/rooms/bulk-import"
                       refresh={() => fetchRooms(true)}
-                      permitted={canCreateRoom}
+                      permitted={canImportBookings}
                       csvHint="CSV ຫ້ອງ: branchId, name, capacity — ຈຳເປັນ; floor, location, amenities (ແບ່ງດ້ວຍ , ຫຼື ;), status (AVAILABLE/MAINTENANCE), isActive (true/false) — ເພີ່ມໄດ້"
                     />
                   )}
@@ -1662,6 +1674,7 @@ export default function MeetingRooms() {
                           }`}>
                           ສະຖານະປັດຈຸບັນ: {roomStatusLabel(liveStatus)}
                         </span>
+                        {canUpdateRooms && (
                         <button
                           onClick={() => toggleRoomStatus(room)}
                           disabled={statusUpdatingRoomId === roomId}
@@ -1674,6 +1687,7 @@ export default function MeetingRooms() {
                             ? 'ກຳລັງອັບເດດ...'
                             : isMaintenance ? 'ກົດເພື່ອເປີດໃຊ້ຄືນ →' : 'ກົດເພື່ອປິດບຳລຸງ →'}
                         </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -1683,7 +1697,9 @@ export default function MeetingRooms() {
                 )}
               </div>
             </div>
+            )}
 
+            {canManageRooms && (
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="font-bold text-gray-800">ລາຍງານການໃຊ້ງານຫ້ອງ (Utilization Report)</div>
@@ -1742,6 +1758,7 @@ export default function MeetingRooms() {
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
 
