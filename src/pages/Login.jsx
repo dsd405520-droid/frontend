@@ -5,7 +5,6 @@ import { getOrgSettings, applySystemName } from '../utils/orgSettings';
 import { API_BASE_URL } from '../config';
 
 export default function Login() {
-  const [systemName, setSystemName] = useState('Agricultural Promotion Bank CO.,LTD');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -45,7 +44,6 @@ export default function Login() {
     let cancelled = false;
     getOrgSettings().then((settings) => {
       if (cancelled) return;
-      setSystemName(settings.systemName);
       applySystemName(settings.systemName);
     });
     return () => { cancelled = true; };

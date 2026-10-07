@@ -1,26 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
-  Laptop, Plus, X, Loader2, AlertCircle, Search, UserCheck, Undo2,
+  Plus, X, AlertCircle, Search, UserCheck, Undo2,
   Wrench, History, AlertTriangle, Trash2, Barcode,
 } from 'lucide-react';
-                <BarcodeComponent
-                  value={`${window.location.origin}/assets/${barcodeModalAsset._id}`}
-                  format="CODE128"
-                  width={2.0}
-                  height={70}
-                  fontSize={14}
-                  displayValue={true}
-                  margin={10}
-                />
+import { hasPermission } from '../utils/permissions';
+import MainLayout from '../layouts/MainLayout';
+import CsvImportButton from '../components/CsvImportButton';
+import CsvExportButton from '../components/CsvExportButton';
+import BarcodeComponent from 'react-barcode';
+import { API_BASE_URL } from '../config';
+
 export default function AssetRegistry() {
-  const { selectedBranchId } = useBranch();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const token = localStorage.getItem('token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
   const canCreate = hasPermission('assets', 'create');
+  const canRead = hasPermission('assets', 'read');
   const canUpdate = hasPermission('assets', 'update');
   const canDelete = hasPermission('assets', 'delete');
   const canAssign = hasPermission('assets', 'assign');
@@ -55,7 +53,6 @@ export default function AssetRegistry() {
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState('');
 
-  const [historyModalAsset, setHistoryModalAsset] = useState(null);
   const [barcodeModalAsset, setBarcodeModalAsset] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
@@ -66,7 +63,7 @@ export default function AssetRegistry() {
   function fetchAssets() {
     setLoadingAssets(true);
     setAssetsError('');
-    const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
+    const branchParam = branchFilter ? `?branchId=${encodeURIComponent(branchFilter)}` : '';
     fetch(`${API_BASE_URL}/assets${branchParam}`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
@@ -88,7 +85,7 @@ export default function AssetRegistry() {
     fetch(`${API_BASE_URL}/users`, { headers })
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((body) => setUsers(unwrap(body) || []))
-      .catch(() => setUsers([])); // ອາດບໍ່ມີສິດ users:read — ບໍ່ໃຫ້ຄ້າງທັງໜ້າ
+      .catch(() => setUsers([]));
   }
 
   function fetchDepartments() {
@@ -118,9 +115,8 @@ export default function AssetRegistry() {
     fetchUsers();
     fetchDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBranchId]);
+  }, [branchFilter]);
 
-  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງຊັບສິນ ອັດຕະໂນມັດ
   useEffect(() => {
     if (searchParams.get('create') === '1') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -142,7 +138,6 @@ export default function AssetRegistry() {
     const u = users.find((u) => u._id === id);
     return u ? `${u.firstName} ${u.lastName} (${u.employeeCode})` : id;
   };
-  // backend ສົ່ງ departmentId ແບບ object (populated) ຫຼື string ກໍໄດ້ — ດຶງ id ୁອອເຟຟກ
   const userDeptId = (u) => u?.departmentId?._id || u?.departmentId?.id || u?.departmentId || '';
 
   const statusInfo = (status) => {
@@ -164,7 +159,6 @@ export default function AssetRegistry() {
     return true;
   });
 
-  // ---- Create ----
   const submitCreate = (e) => {
     e.preventDefault();
     setCreateSubmitting(true);
@@ -189,7 +183,6 @@ export default function AssetRegistry() {
       .finally(() => setCreateSubmitting(false));
   };
 
-  // ---- Assign ----
   const openAssignModal = (asset) => {
     setAssignModalAsset(asset);
     setAssignUserId('');
@@ -221,7 +214,6 @@ export default function AssetRegistry() {
       .finally(() => setAssignSubmitting(false));
   };
 
-  // ---- Return / Status / Delete ----
   function callAction(id, path, method, body, confirmMsg) {
     if (confirmMsg && !confirm(confirmMsg)) return;
     setBusyId(id);
@@ -251,19 +243,21 @@ export default function AssetRegistry() {
             <h1 className="text-2xl font-bold text-gray-800">ທະບຽນຊັບສິນບໍລິສັດ</h1>
             <p className="text-sm text-gray-500 mt-1">Laptop, ຈໍ, ບັດພະນັກງານ, ໂທລະສັບ — ຄົນລະສ່ວນຈາກການຂໍວັດສະດຸສິ້ນເປືອງ</p>
           </div>
-          {canCreate && activeTab === 'registry' && (
+          {(canCreate || canRead) && activeTab === 'registry' && (
             <div className="flex items-center gap-2">
-              <CsvImportButton
-                endpoint="/assets/bulk-import"
-                refresh={fetchAssets}
-                permitted={canCreate}
-                csvHint="CSV ຊັບສິນ: assetTag, type, branchId — ຈຳເປັນ; purchaseDate (YYYY-MM-DD), warrantyExpiry (YYYY-MM-DD) — ເພີ່ມໄດ້"
-              />
+              {canCreate && (
+                <CsvImportButton
+                  endpoint="/assets/bulk-import"
+                  refresh={fetchAssets}
+                  permitted={canCreate}
+                  csvHint="CSV ຊັບສິນ: assetTag, type, branchId — ຈຳເປັນ; purchaseDate (YYYY-MM-DD), warrantyExpiry (YYYY-MM-DD) — ເພີ່ມໄດ້"
+                />
+              )}
               <CsvExportButton
                 data={filteredAssets}
                 filename="assets.csv"
                 label="Export CSV"
-                permitted={hasPermission('assets', 'read')}
+                permitted={canRead}
                 columns={[
                   { key: 'assetTag', label: 'assetTag' },
                   { key: 'type', label: 'type' },
@@ -275,12 +269,14 @@ export default function AssetRegistry() {
                   { key: '_id', label: 'id' },
                 ]}
               />
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
-              >
-                <Plus size={18} /> <span>ເພີ່ມຊັບສິນ</span>
-              </button>
+              {canCreate && (
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+                >
+                  <Plus size={18} /> <span>ເພີ່ມຊັບສິນ</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -303,11 +299,11 @@ export default function AssetRegistry() {
           </button>
         </div>
 
-        {/* ແຖບ 1: ທະບຽນຊັບສິນ */}
         {activeTab === 'registry' && (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[200px]">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
                   placeholder="ຄົ້ນຫາ ASSET TAG ຫຼືປະເພດ..."
@@ -329,88 +325,92 @@ export default function AssetRegistry() {
               </select>
             </div>
 
-              {assetsError && <div className="p-4 text-sm text-red-600 flex items-center gap-2"><AlertCircle size={16} />{assetsError}</div>}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-gray-50 text-gray-500">
-                      <tr>
-                        <th className="p-3 font-medium">Asset Tag</th>
-                        <th className="p-3 font-medium">?????</th>
-                        <th className="p-3 font-medium">????????????</th>
-                        <th className="p-3 font-medium">????????????</th>
-                        <th className="p-3 font-medium">?????????????????</th>
-                        <th className="p-3 font-medium text-center">?????????????</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      <th className="p-3 font-medium">ຜູ້ຖືກມອບໝາຍ</th>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredAssets.map((a) => {
-                      const info = statusInfo(a.status);
-                      return (
-                        <tr key={a._id} className="hover:bg-gray-50">
-                          <td className="p-3">
-                            <button
-                              type="button"
-                              onClick={() => navigate(`/assets/${a._id}`)}
-                              className="font-semibold text-gray-800 hover:text-amber-600 hover:underline"
-                              title="ເປີດໜ້າລາຍລະອຽດຊັບສິນ"
-                            >
-                              {a.assetTag}
+            {assetsError && <div className="p-4 text-sm text-red-600 flex items-center gap-2"><AlertCircle size={16} />{assetsError}</div>}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr>
+                    <th className="p-3 font-medium">Asset Tag</th>
+                    <th className="p-3 font-medium">ສາຂາ</th>
+                    <th className="p-3 font-medium">ສະຖານະ</th>
+                    <th className="p-3 font-medium">ຜູ້ຖືກມອບໝາຍ</th>
+                    <th className="p-3 font-medium">ວັນໝົດປະກັນ</th>
+                    <th className="p-3 font-medium text-center">ຈັດການ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {loadingAssets && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</td>
+                    </tr>
+                  )}
+                  {!loadingAssets && filteredAssets.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-sm text-gray-500">ບໍ່ພົບຊັບສິນທີ່ຄ້າຍຄື</td>
+                    </tr>
+                  )}
+                  {filteredAssets.map((a) => {
+                    const info = statusInfo(a.status);
+                    return (
+                      <tr key={a._id} className="hover:bg-gray-50">
+                        <td className="p-3">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/assets/${a._id}`)}
+                            className="font-semibold text-gray-800 hover:text-amber-600 hover:underline"
+                            title="ເປີດໜ້າລາຍລະອຽດຊັບສິນ"
+                          >
+                            {a.assetTag}
+                          </button>
+                        </td>
+                        <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
+                        <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
+                        <td className="p-3 text-gray-500">{a.currentAssigneeId ? userName(a.currentAssigneeId) : '—'}</td>
+                        <td className="p-3 text-gray-500">{a.warrantyExpiry ? new Date(a.warrantyExpiry).toLocaleDateString() : '—'}</td>
+                        <td className="p-3">
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            <button onClick={() => navigate(`/assets/${a._id}?tab=maintenance`)} className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100" title="ປະຫວັດການສ້ອມແປງ">
+                              <History size={15} />
                             </button>
-                          </td>
-                          <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
-                          <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
-                          <td className="p-3 text-gray-500">{a.currentAssigneeId ? userName(a.currentAssigneeId) : '—'}</td>
-                          <td className="p-3 text-gray-500">{a.warrantyExpiry ? new Date(a.warrantyExpiry).toLocaleDateString() : '—'}</td>
-                          <td className="p-3">
-                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                <button onClick={() => navigate(`/assets/${a._id}?tab=maintenance`)} className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100" title="????????????????">
-                                  <History size={15} />
+                            <button onClick={() => setBarcodeModalAsset(a)} className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100" title="ສະແດງ Barcode">
+                              <Barcode size={15} />
+                            </button>
+                            {canAssign && a.status !== 'RETIRED' && a.status !== 'ASSIGNED' && (
+                              <button onClick={() => openAssignModal(a)} disabled={busyId === a._id} className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50" title="ມອບໝາຍໃຫ້ພະນັກງານ">
+                                <UserCheck size={15} />
                               </button>
-                              {canAssign && a.status !== 'RETIRED' && a.status !== 'ASSIGNED' && (
-                                <button onClick={() => openAssignModal(a)} disabled={busyId === a._id} className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50" title="ມອບໝາຍໃຫ້ພະນັກງານ">
-                                  <UserCheck size={15} />
-                                </button>
-                              )}
-                              {canAssign && a.status === 'ASSIGNED' && (
-                                <button onClick={() => handleReturn(a)} disabled={busyId === a._id} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50" title="ຮັບຄືນ">
-                                  <Undo2 size={15} />
-                                </button>
-                              )}
-                              {canUpdate && a.status !== 'RETIRED' && a.status !== 'UNDER_REPAIR' && (
-                                <button onClick={() => handleSetStatus(a, 'UNDER_REPAIR')} disabled={busyId === a._id} className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50" title="ສົ່ງສ້ອມແປງ">
-                                  <Wrench size={15} />
-                                </button>
-                              )}
-                              {canUpdate && a.status === 'UNDER_REPAIR' && (
-                                <button onClick={() => handleSetStatus(a, 'AVAILABLE')} disabled={busyId === a._id} className="text-xs px-2 py-1 rounded-lg bg-green-50 text-green-700 hover:bg-green-100" title="ສ້ອມແປງແລ້ວ">
-                                  ✓ ແລ້ວ
-                                </button>
-                              )}
-                                }
-                                )}
-                              )}
-                              {canDelete && (
-                                <button onClick={() => handleDelete(a)} disabled={busyId === a._id} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="ລຶບຖາວອນ">
-                                  <Trash2 size={15} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {filteredAssets.length === 0 && (
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                            )}
+                            {canAssign && a.status === 'ASSIGNED' && (
+                              <button onClick={() => handleReturn(a)} disabled={busyId === a._id} className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50" title="ຮັບຄືນ">
+                                <Undo2 size={15} />
+                              </button>
+                            )}
+                            {canUpdate && a.status !== 'RETIRED' && a.status !== 'UNDER_REPAIR' && (
+                              <button onClick={() => handleSetStatus(a, 'UNDER_REPAIR')} disabled={busyId === a._id} className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50" title="ສົ່ງສ້ອມແປງ">
+                                <Wrench size={15} />
+                              </button>
+                            )}
+                            {canUpdate && a.status === 'UNDER_REPAIR' && (
+                              <button onClick={() => handleSetStatus(a, 'AVAILABLE')} disabled={busyId === a._id} className="text-xs px-2 py-1 rounded-lg bg-green-50 text-green-700 hover:bg-green-100" title="ສ້ອມແປງແລ້ວ">
+                                ✓ ແລ້ວ
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button onClick={() => handleDelete(a)} disabled={busyId === a._id} className="p-1.5 rounded-lg text-red-500 hover:bg-red-50" title="ລຶບຊັບສິນ">
+                                <Trash2 size={15} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
-        {/* ແຖບ 2: ລາຍງານຄ້າງສົ່ງຄືນ — ຊັບສິນທີ່ຍັງ "ASSIGNED" ຢູ່ ແຕ່ພະນັກງານຄົນນັ້ນອອກ/ຖືກປິດການໃຊ້ງານແລ້ວ (isActive: false) */}
         {activeTab === 'overdue' && (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-gray-100">
@@ -419,7 +419,9 @@ export default function AssetRegistry() {
             </div>
             {overdueError && <div className="p-4 text-sm text-red-600">{overdueError}</div>}
             {loadingOverdue ? (
-            ) : overdue.length === 0 ? (
+              <div className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</div>
+            ) : overdue.length === 0 && !overdueError ? (
+              <div className="p-6 text-center text-sm text-gray-500">ບໍ່ມີຊັບສິນຄ້າງສົ່ງຄືນ</div>
             ) : (
               <div className="divide-y divide-gray-100">
                 {overdue.map((o) => (
@@ -451,7 +453,6 @@ export default function AssetRegistry() {
           </div>
         )}
 
-        {/* Modal: ເພີ່ມຊັບສິນໃໝ່ */}
         {showCreateModal && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
             <form onSubmit={submitCreate} className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-3">
@@ -492,7 +493,6 @@ export default function AssetRegistry() {
           </div>
         )}
 
-        {/* Modal: ມອບໝາຍ */}
         {assignModalAsset && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
             <form onSubmit={submitAssign} className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-3">
@@ -532,47 +532,37 @@ export default function AssetRegistry() {
           </div>
         )}
 
-        {/* Modal: ປະຫວັດການມອບໝາຍ */}
-        {historyModalAsset && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-3 max-h-[80vh] overflow-y-auto">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-gray-800">ປະຫວັດ — {historyModalAsset.assetTag}</h2>
-              {(historyModalAsset.assignmentHistory || []).length === 0 ? (
-                <div className="space-y-2">
-                  {[...historyModalAsset.assignmentHistory].reverse().map((h, i) => (
-                    <div key={i} className="border border-gray-100 rounded-xl p-3 text-sm">
-                      <div className="font-medium text-gray-800">{userName(h.assigneeId)}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        {new Date(h.assignedAt).toLocaleString()} — {h.returnedAt ? new Date(h.returnedAt).toLocaleString() : <span className="text-blue-600 font-medium">ຍັງຖືຢູ່</span>}
-                      </div>
-                      {h.note && <div className="text-xs text-gray-500 mt-1 italic">"{h.note}"</div>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {/* Modal: Barcode ??????????? ຊັບສິນ — ສະແກນເພື່ອເປີດໜ້າລາຍລະອຽດ /assets/:id */}
         {barcodeModalAsset && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-xs space-y-3 text-center">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-xs space-y-4 text-center">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-bold text-gray-800">Barcode</h2>
+                <button type="button" onClick={() => setBarcodeModalAsset(null)} className="text-gray-400 hover:text-gray-600">
+                  <X size={18} />
+                </button>
               </div>
               <div className="font-semibold text-gray-800">{barcodeModalAsset.assetTag}</div>
-              <div className="flex justify-center">
+              <div className="flex flex-col items-center justify-center">
                 <BarcodeComponent
                   value={`${window.location.origin}/assets/${barcodeModalAsset._id}`}
                   format="CODE128"
-                  width={2.0}
-                  height={70}
-                  fontSize={14}
+                  width={1.8}
+                  height={40}
+                  fontSize={13}
                   displayValue={true}
-                  margin={10}
+                  margin={8}
                 />
-                <button type="button" onClick={() => { setBarcodeModalAsset(null); navigate(`/assets/${barcodeModalAsset._id}`); }} className="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium">
+              </div>
+              <div className="pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => { 
+                    const id = barcodeModalAsset._id;
+                    setBarcodeModalAsset(null); 
+                    navigate(`/assets/${id}`); 
+                  }} 
+                  className="w-full px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition"
+                >
                   ເປີດໜ້າລາຍລະອຽດ
                 </button>
               </div>

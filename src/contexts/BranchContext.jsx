@@ -70,6 +70,7 @@ export function BranchProvider({ children }) {
   return <BranchContext.Provider value={value}>{children}</BranchContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useBranch() {
   const ctx = useContext(BranchContext);
   if (!ctx) throw new Error('useBranch must be used within a BranchProvider');
