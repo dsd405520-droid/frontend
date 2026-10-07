@@ -4,6 +4,8 @@ import { Tag, Plus, X, Loader2, AlertCircle, Pencil, Trash2, Clock, ArrowRight, 
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import { hasPermission } from '../utils/permissions';
+import { API_BASE_URL } from '../config';
 
 const PRIORITIES = ['low', 'medium', 'high', 'urgent'];
 
@@ -96,7 +98,7 @@ export default function TicketTypesManagement() {
     setIsDetailModalOpen(true);
     setRelatedSlas([]);
     setLoadingSlas(true);
-    fetch('http://localhost:3000/api/sla-policies', { headers })
+    fetch(`${API_BASE_URL}/sla-policies`, { headers })
       .then(res => (res.ok ? res.json() : Promise.reject()))
       .then(body => {
         const all = extractArray(body);
@@ -120,17 +122,7 @@ export default function TicketTypesManagement() {
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
   const headers = { 'Authorization': `Bearer ${token}` };
 
-  const hasPermission = (module, action) => {
-    if (!token) return false;
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      const perms = payload.permissions || [];
-      const entry = perms.find(p => p.module === module);
-      return !!entry?.actions?.includes(action);
-    } catch {
-      return false;
-    }
-  };
+  // ກວດສິດສິດຈາກ utils/permissions (ຕົວດຽວກັບທຸກໜ້າ) — ລວມການໃຫ້ bypass ADMIN/SUPER_ADMIN ດ້ວຍ
   const canCreate = hasPermission('ticket-types', 'create');
   const canUpdate = hasPermission('ticket-types', 'update');
   const canDelete = hasPermission('ticket-types', 'delete');
@@ -141,8 +133,8 @@ export default function TicketTypesManagement() {
     setLoading(true);
     setLoadError('');
     Promise.all([
-      fetch('http://localhost:3000/api/ticket-types', { headers }),
-      fetch('http://localhost:3000/api/departments', { headers }),
+      fetch(`${API_BASE_URL}/ticket-types`, { headers }),
+      fetch(`${API_BASE_URL}/departments`, { headers }),
     ])
       .then(async ([typesRes, deptRes]) => {
         if (typesRes.status === 403) {
@@ -257,8 +249,8 @@ export default function TicketTypesManagement() {
     setFormError('');
 
     const url = editingId
-      ? `http://localhost:3000/api/ticket-types/${editingId}`
-      : 'http://localhost:3000/api/ticket-types';
+      ? `${API_BASE_URL}/ticket-types/${editingId}`
+      : `${API_BASE_URL}/ticket-types`;
     const method = editingId ? 'PATCH' : 'POST';
 
     try {
@@ -280,7 +272,7 @@ export default function TicketTypesManagement() {
         if (newTypeId) {
           const slaResults = await Promise.all(
             slaRows.map((row) =>
-              fetch('http://localhost:3000/api/sla-policies', {
+              fetch(`${API_BASE_URL}/sla-policies`, {
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -315,7 +307,7 @@ export default function TicketTypesManagement() {
     if (!window.confirm(`ຕ້ອງການລຶບປະເພດ "${t.name}" ແທ້ບໍ? ຖ້າຍັງມີບັນຫາທີ່ໃຊ້ປະເພດນີ້ຢູ່ ອາດຈະລຶບບໍ່ໄດ້.`)) return;
     setDeletingId(t._id);
     try {
-      const res = await fetch(`http://localhost:3000/api/ticket-types/${t._id}`, {
+      const res = await fetch(`${API_BASE_URL}/ticket-types/${t._id}`, {
         method: 'DELETE',
         headers,
       });

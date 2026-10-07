@@ -4,6 +4,7 @@ import MainLayout from '../layouts/MainLayout';
 import CsvExportButton from '../components/CsvExportButton';
 import { hasPermission } from '../utils/permissions';
 import { useBranch } from '../contexts/BranchContext';
+import { API_BASE_URL } from '../config';
 
 // ໜ້າລາຍງານສະຖານະຫ້ອງປະຊຸມ "ຕົວຈິງ" — ບໍ່ແມ່ນແຄ່ອີງ booking (ຄາດເດົາ) ແຕ່ໃຫ້ຄົນທີ່ຢູ່ໃນຫ້ອງແທ້ໆ
 // ຢືນຢັນເອງ (check-in / check-out), ບັນທຶກລາຍຊື່ຄົນເຂົ້າຮ່ວມ, ແລະ ຕໍ່ເວລາໄດ້ຖ້າໃກ້ໝົດ (ຜ່ານ endpoint reschedule ທີ່ມີແລ້ວ)
@@ -57,7 +58,7 @@ export default function RoomStatusReport() {
     setLoadingRooms(true);
     setRoomsError('');
     const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
-    fetch(`http://localhost:3000/api/rooms${branchParam}`, { headers })
+    fetch(`${API_BASE_URL}/rooms${branchParam}`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດຂໍ້ມູນຫ້ອງໄດ້');
@@ -70,7 +71,7 @@ export default function RoomStatusReport() {
   function fetchMyBookings() {
     setLoadingBookings(true);
     setBookingsError('');
-    fetch('http://localhost:3000/api/room-bookings/my', { headers })
+    fetch(`${API_BASE_URL}/room-bookings/my`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດການຈອງຂອງທ່ານໄດ້');
@@ -126,7 +127,7 @@ export default function RoomStatusReport() {
 
   function callAction(path, method, body, onDone) {
     setBusyId(path);
-    fetch(`http://localhost:3000/api/room-bookings${path}`, {
+    fetch(`${API_BASE_URL}/room-bookings${path}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -169,7 +170,7 @@ export default function RoomStatusReport() {
     }
     setExtendSubmitting(true);
     setExtendError('');
-    fetch(`http://localhost:3000/api/room-bookings/${extendModalBooking._id}/reschedule`, {
+    fetch(`${API_BASE_URL}/room-bookings/${extendModalBooking._id}/reschedule`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({ startAt: extendModalBooking.startAt, endAt: newEndAt.toISOString() }),

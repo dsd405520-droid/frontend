@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, Clock, Loader2, MessageSquare, Paperclip, UserRound } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import TicketProgressBar from '../components/TicketProgressBar';
+import { API_BASE_URL, API_ORIGIN } from '../config';
 
 const STATUS_LABELS = {
   OPEN: 'ເປີດ (ລໍຖ້າຮັບ)',
@@ -41,7 +42,7 @@ export default function TicketDetail() {
   useEffect(() => {
     let cancelled = false;
     window.scrollTo(0, 0);
-    fetch(`http://localhost:3000/api/tickets/${id}`, {
+    fetch(`${API_BASE_URL}/tickets/${id}`, {
       headers: { 'Authorization': `Bearer ${token}` },
     })
       .then((res) => {
@@ -68,7 +69,7 @@ export default function TicketDetail() {
   useEffect(() => {
     const markTicketNotificationsRead = async () => {
       try {
-        const res = await fetch('http://localhost:3000/api/notifications/my?unreadOnly=true', {
+        const res = await fetch(`${API_BASE_URL}/notifications/my?unreadOnly=true`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
         if (!res.ok) return;
@@ -79,7 +80,7 @@ export default function TicketDetail() {
         if (ids.length === 0) return;
         await Promise.all(
           ids.map((nid) =>
-            fetch(`http://localhost:3000/api/notifications/${nid}/read`, {
+            fetch(`${API_BASE_URL}/notifications/${nid}/read`, {
               method: 'PATCH',
               headers: { 'Authorization': `Bearer ${token}` },
             })
@@ -212,7 +213,7 @@ export default function TicketDetail() {
                   {ticket.attachments.map((att, idx) => (
                     <a
                       key={idx}
-                      href={`http://localhost:3000${att.url}`}
+                      href={`${API_ORIGIN}${att.url}`}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 transition"

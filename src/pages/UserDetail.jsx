@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Building2, Calendar, CheckCircle2, Hash, Layers, Loader2, Mail, Phone, Shield, UserRound } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import { API_BASE_URL } from '../config';
 
-const API_BASE_URL = 'http://localhost:3000/api';
 
 function unwrap(payload) {
   return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;

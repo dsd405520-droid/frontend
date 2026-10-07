@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Bell, CheckCheck, Loader2, MailOpen } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import { API_BASE_URL } from '../config';
 
 export default function Notifications() {
   const [notifs, setNotifs] = useState([]);
@@ -18,7 +19,7 @@ export default function Notifications() {
     setLoading(true);
     try {
       // ປ່ຽນມາໃຊ້ Endpoint /notifications/my ໃຫ້ກົງກັບ Backend Controller
-      const res = await fetch('http://localhost:3000/api/notifications/my', {
+      const res = await fetch(`${API_BASE_URL}/notifications/my`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -43,7 +44,7 @@ export default function Notifications() {
 
   const handleMarkAsRead = async (id) => {
     try {
-      const res = await fetch(`http://localhost:3000/api/notifications/${id}/read`, {
+      const res = await fetch(`${API_BASE_URL}/notifications/${id}/read`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -60,7 +61,7 @@ export default function Notifications() {
 
   const handleMarkAllAsRead = async () => {
     try {
-      const res = await fetch('http://localhost:3000/api/notifications/read-all', {
+      const res = await fetch(`${API_BASE_URL}/notifications/read-all`, {
         method: 'PATCH',
         headers: {
           'Authorization': `Bearer ${token}`,

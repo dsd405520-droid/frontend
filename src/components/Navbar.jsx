@@ -5,9 +5,27 @@ import {
   ChevronDown, Tag, Clock, Users, Shield, Building2, Layers, Package, Laptop,
   Calendar, Briefcase, Megaphone,
 } from 'lucide-react';
-import { canView, hasPermission } from '../utils/permissions';
+import { canView, hasPermission, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 import { getSocket } from '../utils/socket';
+
+// ສີແຖບບອກສະຖານະ (role) ຂອງຜູ້ໃຊ້ — ອີງຕາມລະດັບຄວາມສ່ຽງ: ສິດຍິ່ງສູງ ສີຍິ່ງແຮງ/ເຕືອນ,
+// ສິດພື້ນຖານໃຊ້ສີສະຫງົບ. Role ໃດທີ່ບໍ່ຢູ່ໃນລາຍການນີ້ (ສ້າງເອງໃໝ່ຜ່ານໜ້າ "ສິດ ແລະ ບົດບາດ")
+// ຈະຕົກໄປໃຊ້ຄ່າ fallback ສີເທົາ ບໍ່ເຮັດໃຫ້ລະບົບພັງ
+const ROLE_BADGE_STYLES = {
+  SUPER_ADMIN: { label: 'ຜູ້ບໍລິຫານສູງສຸດ', dot: 'bg-red-500', className: 'bg-red-50 text-red-700 border-red-200' },
+  BRANCH_ADMIN: { label: 'ຜູ້ບໍລິຫານສາຂາ', dot: 'bg-orange-500', className: 'bg-orange-50 text-orange-700 border-orange-200' },
+  DEPT_MANAGER: { label: 'ຫົວໜ້າພະແນກ', dot: 'bg-blue-500', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  AGENT: { label: 'ເຈົ້າໜ້າທີ່', dot: 'bg-teal-500', className: 'bg-teal-50 text-teal-700 border-teal-200' },
+  EMPLOYEE: { label: 'ພະນັກງານ', dot: 'bg-gray-400', className: 'bg-gray-50 text-gray-600 border-gray-200' },
+};
+const ROLE_BADGE_FALLBACK = { dot: 'bg-gray-400', className: 'bg-gray-50 text-gray-600 border-gray-200' };
+
+function getRoleBadge(role) {
+  if (!role) return null;
+  const preset = ROLE_BADGE_STYLES[role];
+  return preset || { ...ROLE_BADGE_FALLBACK, label: role };
+}
 
 function unwrap(payload) {
   return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
@@ -225,6 +243,9 @@ const SEARCH_SOURCES = [
 
 export default function Navbar({ onMenuClick }) {
   const navigate = useNavigate();
+
+  // ແຖບສີບອກສະຖານະ (role) ຂອງຜູ້ໃຊ້ທີ່ login ຢູ່ — ອ່ານຄັ້ງດຽວຕອນ mount, ບໍ່ປ່ຽນລະຫວ່າງ session
+  const roleBadge = getRoleBadge(getCurrentUser()?.role);
 
   // ຈຳນວນແຈ້ງເຕືອນທີ່ຍັງບໍ່ໄດ້ອ່ານ — ດຶງຈາກ /dashboard ຄືກັບ Sidebar
   const [unreadCount, setUnreadCount] = useState(0);
@@ -479,6 +500,15 @@ export default function Navbar({ onMenuClick }) {
 
       {/* Right Actions */}
       <div className="flex items-center gap-1 sm:gap-4">
+        {roleBadge && (
+          <span
+            className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${roleBadge.className}`}
+            title={`ເຂົ້າໃຊ້ງານໃນຖານະ: ${roleBadge.label}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${roleBadge.dot}`}></span>
+            {roleBadge.label}
+          </span>
+        )}
         <div className="relative" ref={notifRef}>
           <button
             onClick={toggleNotifications}

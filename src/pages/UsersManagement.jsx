@@ -6,9 +6,9 @@ import { useState, useEffect, useRef } from 'react';
 import { Users, Plus, X, Loader2, AlertCircle, Building2, Layers, Search, Filter, Upload } from 'lucide-react';
 import CsvExportButton from '../components/CsvExportButton';
 import { useBranch } from '../contexts/BranchContext';
+import { API_BASE_URL } from '../config';
 
 
-const API_BASE_URL = 'http://localhost:3000/api';
 
 export default function UsersManagement() {
   const { selectedBranchId } = useBranch();

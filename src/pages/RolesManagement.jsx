@@ -6,8 +6,8 @@ import { Shield, Plus, X, Loader2, AlertCircle, Lock } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import { API_BASE_URL } from '../config';
 
-const API_BASE_URL = 'http://localhost:3000/api';
 
 const AVAILABLE_MODULES = [
   { key: 'users', label: 'ຈັດການຜູ້ໃຊ້ (Users)' },

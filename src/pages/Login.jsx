@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Lock, Mail, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { getOrgSettings, applySystemName } from '../utils/orgSettings';
+import { API_BASE_URL } from '../config';
 
 export default function Login() {
   const [systemName, setSystemName] = useState('Agricultural Promotion Bank CO.,LTD');
@@ -10,6 +11,10 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  // path ທີ່ຜູ້ໃຊ້ຖືກສົ່ງມາ login (ເຊັ່ນສະແກນ QR ເຂົ້າ /assets/:id) — ຖ້າບໍ່ມີກັບໄປໜ້າຫຼັກ
+  const from = location.state?.from;
+  const redirectTo = from ? `${from.pathname || '/'}${from.search || ''}${from.hash || ''}` : '/';
 
   // MFA challenge step (shown after login returns mfaRequired)
   const [mfaStep, setMfaStep] = useState(false);
@@ -50,7 +55,7 @@ export default function Login() {
     setError('');
     setSetupSubmitting(true);
     try {
-      const response = await fetch('http://localhost:3000/api/auth/mfa/setup', {
+      const response = await fetch(`${API_BASE_URL}/auth/mfa/setup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -79,7 +84,7 @@ export default function Login() {
     setError('');
     setSetupSubmitting(true);
     try {
-      const response = await fetch('http://localhost:3000/api/auth/mfa/enable', {
+      const response = await fetch(`${API_BASE_URL}/auth/mfa/enable`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -102,7 +107,7 @@ export default function Login() {
     setResendingSetup(true);
     setError('');
     try {
-      const response = await fetch('http://localhost:3000/api/auth/mfa/resend-code', {
+      const response = await fetch(`${API_BASE_URL}/auth/mfa/resend-code`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${setupToken}` },
       });
@@ -137,7 +142,7 @@ export default function Login() {
     setForgotInfo('');
     setForgotSubmitting(true);
     try {
-      const response = await fetch('http://localhost:3000/api/auth/forgot-password', {
+      const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -166,7 +171,7 @@ export default function Login() {
     }
     setForgotSubmitting(true);
     try {
-      const response = await fetch('http://localhost:3000/api/auth/reset-password', {
+      const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -194,7 +199,7 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch('http://localhost:3000/api/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -245,7 +250,7 @@ export default function Login() {
       permissions: payload.permissions,
     }));
 
-    navigate('/');
+    navigate(redirectTo);
     window.location.reload();
   };
 
@@ -254,7 +259,7 @@ export default function Login() {
     setError('');
     setMfaSubmitting(true);
     try {
-      const response = await fetch('http://localhost:3000/api/auth/mfa/verify-login', {
+      const response = await fetch(`${API_BASE_URL}/auth/mfa/verify-login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mfaToken, code: mfaCode }),
@@ -275,7 +280,7 @@ export default function Login() {
     setResending(true);
     setError('');
     try {
-      const response = await fetch('http://localhost:3000/api/auth/mfa/login/resend-code', {
+      const response = await fetch(`${API_BASE_URL}/auth/mfa/login/resend-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mfaToken }),

@@ -1,22 +1,24 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Laptop, Plus, X, Loader2, AlertCircle, Search, UserCheck, Undo2,
-  Wrench, History, AlertTriangle, Trash2,
+  Wrench, History, AlertTriangle, Trash2, Barcode,
 } from 'lucide-react';
+import BarcodeComponent from 'react-barcode';
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import { useBranch } from '../contexts/BranchContext';
+import { API_BASE_URL } from '../config';
 
-const API_BASE_URL = 'http://localhost:3000/api';
 
 // ທະບຽນຊັບສິນບໍລິສັດ (laptop, ຈໍ, ບັດພະນັກງານ, ໂທລະສັບ) — ຄົນລະສ່ວນຈາກ Supply Requests (ວັດສະດຸສິ້ນເປືອງ)
 // ອີງໃສ່ backend module 'assets' (assign/return/status/delete ຄົບແລ້ວ), ຄົນລະ module key ຈາກ 'supplies' ທີ່ໜ້າ AssetManagement.jsx ໃຊ້ຢູ່
 export default function AssetRegistry() {
   const { selectedBranchId } = useBranch();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const token = localStorage.getItem('token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
@@ -33,6 +35,8 @@ export default function AssetRegistry() {
 
   const [branches, setBranches] = useState([]);
   const [users, setUsers] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [selectedDeptId, setSelectedDeptId] = useState("");
 
   const [overdue, setOverdue] = useState([]);
   const [loadingOverdue, setLoadingOverdue] = useState(false);
@@ -54,6 +58,7 @@ export default function AssetRegistry() {
   const [assignError, setAssignError] = useState('');
 
   const [historyModalAsset, setHistoryModalAsset] = useState(null);
+  const [barcodeModalAsset, setBarcodeModalAsset] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   function unwrap(body) {
@@ -88,6 +93,13 @@ export default function AssetRegistry() {
       .catch(() => setUsers([])); // ອາດບໍ່ມີສິດ users:read — ບໍ່ໃຫ້ຄ້າງທັງໜ້າ
   }
 
+  function fetchDepartments() {
+    fetch(`${API_BASE_URL}/departments`, { headers })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((body) => setDepartments(unwrap(body) || []))
+      .catch(() => setDepartments([]));
+  }
+
   function fetchOverdue() {
     setLoadingOverdue(true);
     setOverdueError('');
@@ -106,6 +118,7 @@ export default function AssetRegistry() {
     fetchAssets();
     fetchBranches();
     fetchUsers();
+    fetchDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
 
@@ -131,6 +144,8 @@ export default function AssetRegistry() {
     const u = users.find((u) => u._id === id);
     return u ? `${u.firstName} ${u.lastName} (${u.employeeCode})` : id;
   };
+  // backend ສົ່ງ departmentId ແບບ object (populated) ຫຼື string ກໍໄດ້ — ດຶງ id ୁອອເຟຟກ
+  const userDeptId = (u) => u?.departmentId?._id || u?.departmentId?.id || u?.departmentId || '';
 
   const statusInfo = (status) => {
     switch (status) {
@@ -180,6 +195,7 @@ export default function AssetRegistry() {
   const openAssignModal = (asset) => {
     setAssignModalAsset(asset);
     setAssignUserId('');
+    setSelectedDeptId('');
     setAssignNote('');
     setAssignError('');
   };
@@ -338,7 +354,16 @@ export default function AssetRegistry() {
                       const info = statusInfo(a.status);
                       return (
                         <tr key={a._id} className="hover:bg-gray-50">
-                          <td className="p-3 font-semibold text-gray-800">{a.assetTag}</td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/assets/${a._id}`)}
+                              className="font-semibold text-gray-800 hover:text-amber-600 hover:underline"
+                              title="ເປີດໜ້າລາຍລະອຽດຊັບສິນ"
+                            >
+                              {a.assetTag}
+                            </button>
+                          </td>
                           <td className="p-3 flex items-center gap-1.5"><Laptop size={14} className="text-gray-400" />{a.type}</td>
                           <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
                           <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
@@ -348,6 +373,9 @@ export default function AssetRegistry() {
                             <div className="flex items-center justify-center gap-1.5 flex-wrap">
                               <button onClick={() => setHistoryModalAsset(a)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="ປະຫວັດການມອບໝາຍ">
                                 <History size={15} />
+                              </button>
+                              <button onClick={() => setBarcodeModalAsset(a)} className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700" title="QR Code ຊັບສິນ">
+                                <Barcode size={15} />
                               </button>
                               {canAssign && a.status !== 'RETIRED' && a.status !== 'ASSIGNED' && (
                                 <button onClick={() => openAssignModal(a)} disabled={busyId === a._id} className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50" title="ມອບໝາຍໃຫ້ພະນັກງານ">
@@ -488,10 +516,19 @@ export default function AssetRegistry() {
                 <button type="button" onClick={() => setAssignModalAsset(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
               </div>
               <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">ພະແນກ</label>
+                <select value={selectedDeptId} onChange={(e) => { setSelectedDeptId(e.target.value); setAssignUserId(""); }} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
+                  <option value="">-- ເລືອກພະແນກ --</option>
+                  {departments.filter((d) => d.isActive !== false).map((d) => (
+                    <option key={d._id} value={d._id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ພະນັກງານ</label>
                 <select required value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
                   <option value="">-- ເລືອກພະນັກງານ --</option>
-                  {users.filter((u) => u.isActive).map((u) => (
+                  {users.filter((u) => u.isActive && (!selectedDeptId || userDeptId(u) === selectedDeptId)).map((u) => (
                     <option key={u._id} value={u._id}>{u.firstName} {u.lastName} ({u.employeeCode})</option>
                   ))}
                 </select>
@@ -534,6 +571,32 @@ export default function AssetRegistry() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+        {/* Modal: Barcode ??????????? ຊັບສິນ — ສະແກນເພື່ອເປີດໜ້າລາຍລະອຽດ /assets/:id */}
+        {barcodeModalAsset && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-xs space-y-3 text-center">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-gray-800">QR Code</h2>
+                <button type="button" onClick={() => setBarcodeModalAsset(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+              </div>
+              <div className="font-semibold text-gray-800">{barcodeModalAsset.assetTag}</div>
+              <div className="flex justify-center">
+                <BarcodeComponent
+                  value={`${window.location.origin}/assets/${barcodeModalAsset._id}`}
+                  size={200}
+                  level="H"
+                  marginSize={2}
+                />
+              </div>
+              <p className="text-xs text-gray-400">Scan ເພື່ອເຂົ້າໜ້າລາຍລະອຽດຊັບສິນ (ຕ້ອງ login ກ່ອນ)</p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => { setBarcodeModalAsset(null); navigate(`/assets/${barcodeModalAsset._id}`); }} className="px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium">
+                  ເປີດໜ້າລາຍລະອຽດ
+                </button>
+              </div>
             </div>
           </div>
         )}

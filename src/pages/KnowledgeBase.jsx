@@ -6,6 +6,8 @@ import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import mammoth from 'mammoth';
 import DOMPurify from 'dompurify';
+import { hasPermission } from '../utils/permissions';
+import { API_BASE_URL, API_ORIGIN } from '../config';
 
 export default function KnowledgeBase() {
   const [searchParams] = useSearchParams();
@@ -38,17 +40,7 @@ export default function KnowledgeBase() {
 
   const token = localStorage.getItem('token');
 
-  const hasPermission = (module, action) => {
-    if (!token) return false;
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      const perms = payload.permissions || [];
-      const entry = perms.find(p => p.module === module);
-      return !!entry?.actions?.includes(action);
-    } catch {
-      return false;
-    }
-  };
+  // ກວດສິດສິດຈາກ utils/permissions (ຕົວດຽວກັບທຸກໜ້າ) — ລວມການໃຫ້ bypass ADMIN/SUPER_ADMIN ດ້ວຍ
   const canCreateArticle = hasPermission('kb', 'create');
   // Backend only reveals DRAFT/UNPUBLISHED articles to users with kb:publish
   const canManageKb = hasPermission('kb', 'publish');
@@ -88,7 +80,7 @@ export default function KnowledgeBase() {
   const renderDocxPreview = async (url) => {
     if (docxHtml[url]) return; // already converted
     try {
-      const res = await fetch(`http://localhost:3000${url}`, {
+      const res = await fetch(`${API_ORIGIN}${url}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const buffer = await res.arrayBuffer();
@@ -121,7 +113,7 @@ export default function KnowledgeBase() {
       if (categoryFilter) params.set('category', categoryFilter);
       if (departmentFilter) params.set('departmentId', departmentFilter);
       if (canManageKb && showUnpublished) params.set('includeUnpublished', 'true');
-      const endpoint = `http://localhost:3000/api/kb-articles${params.toString() ? `?${params}` : ''}`;
+      const endpoint = `${API_BASE_URL}/kb-articles${params.toString() ? `?${params}` : ''}`;
 
       const res = await fetch(endpoint, {
         headers: {
@@ -148,7 +140,7 @@ export default function KnowledgeBase() {
     setIsDetailOpen(true);
     setSelectedArticle(null); // shows a loading state in the modal
     try {
-      const res = await fetch(`http://localhost:3000/api/kb-articles/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/kb-articles/${id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -168,7 +160,7 @@ export default function KnowledgeBase() {
     if (!selectedArticle) return;
     setFeedbackSubmitting(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/kb-articles/${selectedArticle._id}/feedback`, {
+      const res = await fetch(`${API_BASE_URL}/kb-articles/${selectedArticle._id}/feedback`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -211,7 +203,7 @@ export default function KnowledgeBase() {
     const action = selectedArticle.status === 'PUBLISHED' ? 'unpublish' : 'publish';
     setStatusSubmitting(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/kb-articles/${selectedArticle._id}/${action}`, {
+      const res = await fetch(`${API_BASE_URL}/kb-articles/${selectedArticle._id}/${action}`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -249,7 +241,7 @@ export default function KnowledgeBase() {
     try {
       const body = new FormData();
       body.append('file', file);
-      const res = await fetch('http://localhost:3000/api/uploads', {
+      const res = await fetch(`${API_BASE_URL}/uploads`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }, // no Content-Type — browser sets multipart boundary
         body
@@ -273,7 +265,7 @@ export default function KnowledgeBase() {
     const filename = url.split('/').pop();
     setFormData(prev => ({ ...prev, attachments: prev.attachments.filter(a => a !== url) }));
     try {
-      await fetch(`http://localhost:3000/api/uploads/${filename}`, {
+      await fetch(`${API_BASE_URL}/uploads/${filename}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -287,14 +279,14 @@ export default function KnowledgeBase() {
     if (!confirm(`ລຶບບົດຄວາມ "${selectedArticle.title}"? ການກະທຳນີ້ບໍ່ສາມາດຍົກເລີກໄດ້`)) return;
     setDeleting(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/kb-articles/${selectedArticle._id}`, {
+      const res = await fetch(`${API_BASE_URL}/kb-articles/${selectedArticle._id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
         await Promise.all(
           (selectedArticle.attachments || []).map(url =>
-            fetch(`http://localhost:3000/api/uploads/${url.split('/').pop()}`, {
+            fetch(`${API_BASE_URL}/uploads/${url.split('/').pop()}`, {
               method: 'DELETE',
               headers: { 'Authorization': `Bearer ${token}` }
             }).catch(err => console.error('Error deleting attachment file:', err))
@@ -320,7 +312,7 @@ export default function KnowledgeBase() {
   }, [categoryFilter, departmentFilter, showUnpublished]);
 
   useEffect(() => {
-    fetch('http://localhost:3000/api/departments', { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`${API_BASE_URL}/departments`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.ok ? res.json() : null)
       .then(data => data && setDepartments(extractArrayData(data)))
       .catch(err => console.error('Error fetching departments:', err));
@@ -357,8 +349,8 @@ export default function KnowledgeBase() {
       const isEdit = !!editingId;
       const res = await fetch(
         isEdit
-          ? `http://localhost:3000/api/kb-articles/${editingId}`
-          : 'http://localhost:3000/api/kb-articles',
+          ? `${API_BASE_URL}/kb-articles/${editingId}`
+          : `${API_BASE_URL}/kb-articles`,
         {
           method: isEdit ? 'PATCH' : 'POST',
           headers: {
@@ -711,7 +703,7 @@ export default function KnowledgeBase() {
                       </div>
                       {url.endsWith('.pdf') ? (
                         <iframe
-                          src={`http://localhost:3000${url}`}
+                          src={`${API_ORIGIN}${url}`}
                           title={url}
                           className="w-full h-[75vh]"
                         />
@@ -727,7 +719,7 @@ export default function KnowledgeBase() {
                           </div>
                         )
                       ) : (
-                        <a href={`http://localhost:3000${url}`} target="_blank" rel="noreferrer" className="block p-3 text-sm text-blue-600 underline">
+                        <a href={`${API_ORIGIN}${url}`} target="_blank" rel="noreferrer" className="block p-3 text-sm text-blue-600 underline">
                           ເປີດໄຟລ໌
                         </a>
                       )}
@@ -797,7 +789,7 @@ export default function KnowledgeBase() {
             <span className="text-sm font-medium truncate">{fullscreenAttachment.split('/').pop()}</span>
             <div className="flex items-center gap-2 shrink-0">
               <a
-                href={`http://localhost:3000${fullscreenAttachment}`}
+                href={`${API_ORIGIN}${fullscreenAttachment}`}
                 target="_blank"
                 rel="noreferrer"
                 className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition"
@@ -815,7 +807,7 @@ export default function KnowledgeBase() {
           <div className="flex-1 min-h-0">
             {fullscreenAttachment.endsWith('.pdf') ? (
               <iframe
-                src={`http://localhost:3000${fullscreenAttachment}`}
+                src={`${API_ORIGIN}${fullscreenAttachment}`}
                 title={fullscreenAttachment}
                 className="w-full h-full bg-white"
               />
@@ -832,7 +824,7 @@ export default function KnowledgeBase() {
               )
             ) : (
               <iframe
-                src={`http://localhost:3000${fullscreenAttachment}`}
+                src={`${API_ORIGIN}${fullscreenAttachment}`}
                 title={fullscreenAttachment}
                 className="w-full h-full bg-white"
               />

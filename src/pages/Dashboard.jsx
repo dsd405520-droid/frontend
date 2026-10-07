@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
+import { API_BASE_URL } from '../config';
 
 const STATUS_LABELS = {
   OPEN: 'ເປີດ',
@@ -40,7 +41,7 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
-    fetch(`http://localhost:3000/api/dashboard${branchParam}`, { headers })
+    fetch(`${API_BASE_URL}/dashboard${branchParam}`, { headers })
       .then(async res => {
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));
@@ -59,12 +60,12 @@ export default function Dashboard() {
 
     // ຫ້ອງປະຊຸມ ແລະ ຄຳຂໍອຸປະກອນ ບໍ່ໄດ້ຢູ່ໃນ payload ຂອງ /dashboard —
     // ດຶງແຍກຕ່າງຫາກ, ແລະ ບໍ່ໃຫ້ຄ້າງທັງໜ້າຖ້າບໍ່ມີສິດເຂົ້າເຖິງ (403)
-    fetch(`http://localhost:3000/api/rooms${branchParam}`, { headers })
+    fetch(`${API_BASE_URL}/rooms${branchParam}`, { headers })
       .then(res => (res.ok ? res.json() : Promise.reject()))
       .then(body => setRooms(body?.data ?? body))
       .catch(() => setRooms(null));
 
-    fetch('http://localhost:3000/api/supply-requests/my', { headers })
+    fetch(`${API_BASE_URL}/supply-requests/my`, { headers })
       .then(res => (res.ok ? res.json() : Promise.reject()))
       .then(body => setSupplyRequests(body?.data ?? body))
       .catch(() => setSupplyRequests(null));

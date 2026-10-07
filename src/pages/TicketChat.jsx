@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Send, Loader2 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import { API_BASE_URL, API_ORIGIN } from '../config';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -33,7 +34,7 @@ export default function TicketChat() {
 
   const fetchMessages = (silent) => {
     if (!silent) setLoading(true);
-    fetch(`http://localhost:3000/api/ticket-messages?ticketId=${id}`, { headers })
+    fetch(`${API_BASE_URL}/ticket-messages?ticketId=${id}`, { headers })
       .then(async res => {
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));
@@ -55,7 +56,7 @@ export default function TicketChat() {
   };
 
   useEffect(() => {
-    fetch(`http://localhost:3000/api/tickets/${id}`, { headers })
+    fetch(`${API_BASE_URL}/tickets/${id}`, { headers })
       .then(res => res.json())
       .then(b => setTicket(b?.data ?? b))
       .catch(() => { });
@@ -91,7 +92,7 @@ export default function TicketChat() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch('http://localhost:3000/api/uploads', {
+      const res = await fetch(`${API_BASE_URL}/uploads`, {
         method: 'POST',
         headers,
         body: formData
@@ -119,7 +120,7 @@ export default function TicketChat() {
     e.preventDefault();
     if (!body.trim() && pendingFiles.length === 0) return;
     setSending(true);
-    fetch('http://localhost:3000/api/ticket-messages', {
+    fetch(`${API_BASE_URL}/ticket-messages`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -156,9 +157,9 @@ export default function TicketChat() {
 
   const renderAttachment = (url, isMine) => (
     isImage(url) ? (
-      <a key={url} href={`http://localhost:3000${url}`} target="_blank" rel="noreferrer">
+      <a key={url} href={`${API_ORIGIN}${url}`} target="_blank" rel="noreferrer">
         <img
-          src={`http://localhost:3000${url}`}
+          src={`${API_ORIGIN}${url}`}
           alt=""
           className="max-w-[200px] max-h-[200px] rounded-lg border border-white/20"
         />
@@ -166,7 +167,7 @@ export default function TicketChat() {
     ) : (
       <a
         key={url}
-        href={`http://localhost:3000${url}`}
+        href={`${API_ORIGIN}${url}`}
         target="_blank"
         rel="noreferrer"
         className={`text-xs underline px-2 py-1 rounded-lg ${isMine ? 'bg-amber-600/50' : 'bg-white'}`}
@@ -243,7 +244,7 @@ export default function TicketChat() {
               <div key={url} className="relative">
                 {isImage(url) ? (
                   <img
-                    src={`http://localhost:3000${url}`}
+                    src={`${API_ORIGIN}${url}`}
                     alt=""
                     className="w-14 h-14 object-cover rounded-lg border border-gray-200"
                   />

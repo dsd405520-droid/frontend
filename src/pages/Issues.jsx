@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, MessageSquare, AlertTriangle } from 'lucide-react';
+import { Search, Filter, Plus, Loader2, X, ChevronDown, UserCheck, Clock as ClockIcon, MessageSquare, AlertTriangle, Camera } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import { getSocket } from '../utils/socket';
+import { hasPermission } from '../utils/permissions';
 import TicketProgressBar, { TICKET_STEPS } from '../components/TicketProgressBar';
+import { API_BASE_URL, API_ORIGIN } from '../config';
 
 const PRIORITY_LABELS = {
   low: 'ຕ່ຳ',
@@ -110,6 +112,9 @@ export default function Issues() {
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [pendingStatusNote, setPendingStatusNote] = useState('');
   const [pendingStatusTarget, setPendingStatusTarget] = useState(null);
+  // ຮູບຢັ້ງຢືນການແກ້ໄຂ — ອັບໂຫລດກ່ອນ (ໄດ້ URL ກັບມາ) ແລ້ວຄ່ອຍແນບ URL ໄປພ້ອມຕອນຢືນຢັນ RESOLVED
+  const [pendingStatusFiles, setPendingStatusFiles] = useState([]);
+  const [statusFileUploading, setStatusFileUploading] = useState(false);
 
   // re-render ທຸກ 30 ວິນາທີ ເພື່ອໃຫ້ ticket ທີ່ເກີນ SLA ເລີ່ມກະພິບເອງ ໂດຍບໍ່ຕ້ອງ refresh
   const [, setSlaTick] = useState(0);
@@ -120,17 +125,7 @@ export default function Issues() {
 
   const token = localStorage.getItem('token');
 
-  const hasPermission = (module, action) => {
-    if (!token) return false;
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      const perms = payload.permissions || [];
-      const entry = perms.find(p => p.module === module);
-      return !!entry?.actions?.includes(action);
-    } catch {
-      return false;
-    }
-  };
+  // ກວດສິດສິດຈາກ utils/permissions (ຕົວດຽວກັບທຸກໜ້າ) — ລວມການໃຫ້ bypass ADMIN/SUPER_ADMIN ດ້ວຍ
   const canCreateTicketType = hasPermission('ticket-types', 'create');
   const canAssign = hasPermission('tickets', 'assign');
   const canUpdateStatus = hasPermission('tickets', 'update');
@@ -197,14 +192,14 @@ export default function Issues() {
       };
 
       const ticketsUrl = selectedBranchId
-        ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
-        : 'http://localhost:3000/api/tickets';
+        ? `${API_BASE_URL}/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
+        : `${API_BASE_URL}/tickets`;
 
       const [issuesRes, typesRes, branchesRes, deptsRes] = await Promise.all([
         fetch(ticketsUrl, { headers }),
-        fetch('http://localhost:3000/api/ticket-types', { headers }),
-        fetch('http://localhost:3000/api/branches', { headers }),
-        fetch('http://localhost:3000/api/departments', { headers })
+        fetch(`${API_BASE_URL}/ticket-types`, { headers }),
+        fetch(`${API_BASE_URL}/branches`, { headers }),
+        fetch(`${API_BASE_URL}/departments`, { headers })
       ]);
 
       if (issuesRes.ok) {
@@ -229,8 +224,8 @@ export default function Issues() {
 
       if (canAssign) {
         const [meRes, usersRes] = await Promise.all([
-          fetch('http://localhost:3000/api/auth/me', { headers }),
-          fetch('http://localhost:3000/api/users', { headers }),
+          fetch(`${API_BASE_URL}/auth/me`, { headers }),
+          fetch(`${API_BASE_URL}/users`, { headers }),
         ]);
         if (meRes.ok) {
           const meData = await meRes.json();
@@ -296,7 +291,7 @@ export default function Issues() {
     const delay = setTimeout(async () => {
       setSuggestLoading(true);
       try {
-        const res = await fetch(`http://localhost:3000/api/kb-articles/suggest?q=${encodeURIComponent(formData.title)}`, {
+        const res = await fetch(`${API_BASE_URL}/kb-articles/suggest?q=${encodeURIComponent(formData.title)}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (res.ok) {
@@ -325,7 +320,7 @@ export default function Issues() {
       return;
     }
     let cancelled = false;
-    fetch(`http://localhost:3000/api/sla-policies/ticket-type/${formData.ticketTypeId}/available-priorities`, {
+    fetch(`${API_BASE_URL}/sla-policies/ticket-type/${formData.ticketTypeId}/available-priorities`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.ok ? res.json() : null)
@@ -396,7 +391,7 @@ export default function Issues() {
     setSubmitting(true);
 
     try {
-      const response = await fetch('http://localhost:3000/api/tickets', {
+      const response = await fetch(`${API_BASE_URL}/tickets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -455,7 +450,7 @@ export default function Issues() {
 
   const refreshTicketInDetail = async (ticketId) => {
     try {
-      const res = await fetch(`http://localhost:3000/api/tickets/${ticketId}`, {
+      const res = await fetch(`${API_BASE_URL}/tickets/${ticketId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
@@ -475,7 +470,7 @@ export default function Issues() {
     try {
       await Promise.all(
         ids.map((nid) =>
-          fetch(`http://localhost:3000/api/notifications/${nid}/read`, {
+          fetch(`${API_BASE_URL}/notifications/${nid}/read`, {
             method: 'PATCH',
             headers: { 'Authorization': `Bearer ${token}` },
           })
@@ -489,7 +484,7 @@ export default function Issues() {
 
   const refreshUnread = async () => {
     try {
-      const res = await fetch('http://localhost:3000/api/notifications/my?unreadOnly=true', {
+      const res = await fetch(`${API_BASE_URL}/notifications/my?unreadOnly=true`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (!res.ok) return;
@@ -520,8 +515,8 @@ export default function Issues() {
   const refreshTickets = async () => {
     try {
       const url = selectedBranchId
-        ? `http://localhost:3000/api/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
-        : 'http://localhost:3000/api/tickets';
+        ? `${API_BASE_URL}/tickets?branchId=${encodeURIComponent(selectedBranchId)}`
+        : `${API_BASE_URL}/tickets`;
       const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) setIssues(extractArrayData(await res.json()));
     } catch (error) {
@@ -566,7 +561,7 @@ export default function Issues() {
     setAssignCandidatesLoading(true);
     setAssignCandidatesError('');
     try {
-      const res = await fetch(`http://localhost:3000/api/tickets/${ticketId}/assignable-agents`, {
+      const res = await fetch(`${API_BASE_URL}/tickets/${ticketId}/assignable-agents`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const body = await res.json().catch(() => ({}));
@@ -605,7 +600,7 @@ export default function Issues() {
     }
     setAssignSubmitting(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/tickets/${selectedTicket._id}/assign`, {
+      const res = await fetch(`${API_BASE_URL}/tickets/${selectedTicket._id}/assign`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -628,22 +623,83 @@ export default function Issues() {
     }
   };
 
-  const submitStatusChange = async (status, note) => {
+  // ອັບໂຫລດຮູບຢັ້ງຢືນການແກ້ໄຂ — ຄືຮູບແບບດຽວກັບ TicketChat.jsx (ອັບຜ່ານ /api/uploads ກ່ອນ, ເກັບແຄ່ URL ໄວ້ລໍ)
+  const deleteUploadedFile = (url) => {
+    const filename = url.split('/').pop();
+    fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` },
+    }).catch(() => {}); // ຖ້າລຶບບໍ່ສຳເລັດກໍບໍ່ຕ້ອງລົບກວນຜູ້ໃຊ້
+  };
+
+  const handleStatusFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const allowedExt = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    if (!allowedExt.includes(ext)) {
+      alert('ຮອງຮັບສະເພາະຮູບພາບ (PNG/JPG/GIF/WEBP)');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert('ໄຟລ໌ໃຫຍ່ເກີນໄປ (ຈຳກັດ 10MB)');
+      return;
+    }
+
+    setStatusFileUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE_URL}/uploads`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingStatusFiles((prev) => [...prev, data.data.url]);
+      } else {
+        alert('ອັບໂຫລດຮູບບໍ່ສຳເລັດ');
+      }
+    } catch (err) {
+      console.error('Error uploading status image:', err);
+      alert('ບໍ່ສາມາດອັບໂຫລດຮູບໄດ້');
+    } finally {
+      setStatusFileUploading(false);
+    }
+  };
+
+  const removePendingStatusFile = (url) => {
+    deleteUploadedFile(url);
+    setPendingStatusFiles((prev) => prev.filter((u) => u !== url));
+  };
+
+  // ລຶບຮູບທີ່ອັບໄວ້ແລ້ວອອກຈາກ server (best-effort) — ໃຊ້ເວລາຍກເລີກ ຫຼື ປ່ຽນໄປທາງອື່ນ
+  // ໂດຍບໍ່ແຕະຮູບທີ່ຖືກສົ່ງໄປກັບ ticket ແລ້ວ (ບໍ່ຕ້ອງເອີ໵ນີ້ີ)
+  const clearPendingStatusFiles = (removeRemote = false) => {
+    if (removeRemote) pendingStatusFiles.forEach(deleteUploadedFile);
+    setPendingStatusFiles([]);
+  };
+
+  const submitStatusChange = async (status, note, attachments) => {
     if (!selectedTicket) return;
     setStatusChangeSubmitting(true);
     try {
-      const res = await fetch(`http://localhost:3000/api/tickets/${selectedTicket._id}/status`, {
+      const res = await fetch(`${API_BASE_URL}/tickets/${selectedTicket._id}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ status, note: note || undefined }),
+        body: JSON.stringify({ status, note: note || undefined, attachments: attachments?.length ? attachments : undefined }),
       });
       if (res.ok) {
         await refreshTicketInDetail(selectedTicket._id);
         setPendingStatusTarget(null);
         setPendingStatusNote('');
+        setPendingStatusFiles([]);
       } else {
         const err = await res.json().catch(() => ({}));
         alert(err.message || 'ປ່ຽນສະຖານະບໍ່ສຳເລັດ');
@@ -661,6 +717,11 @@ export default function Issues() {
       setPendingStatusTarget(status);
       setPendingStatusNote('');
       return;
+    }
+    // ຖ້າກຳລັງເປີດ panel RESOLVED ຢູ່ແລ້ວປ່ຽນໄປສະຖານະອື່ນ — ຮູບທີ່ແນບໄວ້ຈະບໍ່ຖືກສົ່ງໄປກັບ ticket
+    // ກໍລະນີນີ້ ລຶບອອກຈາກ server ເລີຍກ່ອນເພື່ອບໍ່ໃຫ້ເປັນຂີ້ເຜົ່າ
+    if (pendingStatusTarget === 'RESOLVED' && pendingStatusFiles.length > 0) {
+      clearPendingStatusFiles(true);
     }
     submitStatusChange(status);
   };
@@ -1390,9 +1451,49 @@ export default function Issues() {
                         placeholder="ອະທິບາຍວິທີແກ້ໄຂ ຫຼືສາເຫດ..."
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
                       />
+
+                      {/* ຮູບຢັ້ງຢືນການແກ້ໄຂ — ບໍ່ບັງຄັບ, ຊ່ວຍໃຫ້ຮູ້ຈຸດທີ່ແກ້ໄຂແທ້ຈິງ ນອກເໜືອຈາກຂໍ້ຄວາມ */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                          ຮູບຢັ້ງຢືນການແກ້ໄຂ (ບໍ່ບັງຄັບ)
+                        </label>
+                        {pendingStatusFiles.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {pendingStatusFiles.map((url) => (
+                              <div key={url} className="relative group">
+                                <img
+                                  src={`${API_ORIGIN}${url}`}
+                                  alt="ຮູບຢັ້ງຢືນ"
+                                  className="w-16 h-16 object-cover rounded-lg border border-gray-200"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => removePendingStatusFile(url)}
+                                  className="absolute -top-1.5 -right-1.5 bg-gray-800 text-white rounded-full p-0.5 opacity-80 hover:opacity-100"
+                                  title="ລຶບຮູບ"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <label className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-100 cursor-pointer">
+                          {statusFileUploading ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />}
+                          <span>{statusFileUploading ? 'ກຳລັງອັບໂຫລດ...' : 'ແນບຮູບ'}</span>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/gif,image/webp"
+                            onChange={handleStatusFileSelect}
+                            disabled={statusFileUploading}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
                       <div className="flex justify-end gap-2">
                         <button
-                          onClick={() => { setPendingStatusTarget(null); setPendingStatusNote(''); }}
+                          onClick={() => { setPendingStatusTarget(null); setPendingStatusNote(''); clearPendingStatusFiles(true); }}
                           className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
                         >
                           ຍົກເລີກ
@@ -1400,9 +1501,9 @@ export default function Issues() {
                         <button
                           onClick={() => {
                             if (!pendingStatusNote.trim()) { alert('ກະລຸນາໃສ່ລາຍລະອຽດການແກ້ໄຂກ່ອນ'); return; }
-                            submitStatusChange('RESOLVED', pendingStatusNote.trim());
+                            submitStatusChange('RESOLVED', pendingStatusNote.trim(), pendingStatusFiles);
                           }}
-                          disabled={statusChangeSubmitting}
+                          disabled={statusChangeSubmitting || statusFileUploading}
                           className="px-3 py-1.5 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-1.5"
                         >
                           {statusChangeSubmitting && <Loader2 className="animate-spin" size={14} />}
@@ -1430,6 +1531,19 @@ export default function Issues() {
                         </div>
                         <div className="text-gray-500 mt-0.5">ໂດຍ: {getAgentDisplayName(h.actorId)}</div>
                         {h.note && <div className="text-gray-600 mt-1">{h.note}</div>}
+                        {Array.isArray(h.attachments) && h.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {h.attachments.map((url) => (
+                              <a key={url} href={`${API_ORIGIN}${url}`} target="_blank" rel="noopener noreferrer">
+                                <img
+                                  src={`${API_ORIGIN}${url}`}
+                                  alt="ຮູບຢັ້ງຢືນ"
+                                  className="w-14 h-14 object-cover rounded-lg border border-gray-200 hover:opacity-80 transition"
+                                />
+                              </a>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import { API_BASE_URL } from '../config';
 
-const API_BASE_URL = 'http://localhost:3000/api';
 const STORAGE_KEY = 'helpdesk_selectedBranchId';
 
 const BranchContext = createContext(null);

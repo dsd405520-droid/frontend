@@ -3,6 +3,7 @@ import { BarChart3, Download } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import { useBranch } from '../contexts/BranchContext';
+import { API_BASE_URL } from '../config';
 
 const REPORT_TYPE_LABELS = {
   sla: 'SLA Compliance',
@@ -120,7 +121,7 @@ export default function Reports() {
     setLoading(true);
     setError('');
     const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
-    fetch(`http://localhost:3000/api/reports/summary${branchParam}`, { headers })
+    fetch(`${API_BASE_URL}/reports/summary${branchParam}`, { headers })
       .then(async res => {
         if (res.status === 403) {
           throw new Error('ບໍ່ມີສິດເຂົ້າເຖິງລາຍງານ (reports:read)');
@@ -155,7 +156,7 @@ export default function Reports() {
   const handleExport = () => {
     setExporting(true);
     const branchParam = selectedBranchId ? `&branchId=${encodeURIComponent(selectedBranchId)}` : '';
-    fetch(`http://localhost:3000/api/reports/export/${exportFormat}?type=${exportType}${branchParam}`, { headers })
+    fetch(`${API_BASE_URL}/reports/export/${exportFormat}?type=${exportType}${branchParam}`, { headers })
       .then(async res => {
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));

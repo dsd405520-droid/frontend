@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:3000/api';
+import { API_BASE_URL } from '../config';
 const CACHE_KEY = 'org_settings_cache';
 export const DEFAULT_SYSTEM_NAME = 'Helpdesk Enterprise';
 

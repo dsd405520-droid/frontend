@@ -22,6 +22,7 @@ import UserDetail from './pages/UserDetail';
 import MeetingRooms from './pages/MeetingRooms';
 import RoomStatusReport from './pages/RoomStatusReport';
 import AssetRegistry from './pages/AssetRegistry';
+import AssetDetail from './pages/AssetDetail';
 import InventorySupplies from './pages/InventorySupplies';
 import KnowledgeBase from './pages/KnowledgeBase';
 import TicketTypesManagement from './pages/TicketTypesManagement';
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="/room-status" element={<ProtectedRoute module="rooms"><RoomStatusReport /></ProtectedRoute>} />
         {/* ທະບຽນຊັບສິນບໍລິສັດ — ຄົນລະ module key ('assets') ຈາກ Supply Catalog ('supplies') ຢູ່ /assets */}
         <Route path="/asset-registry" element={<ProtectedRoute module="assets"><AssetRegistry /></ProtectedRoute>} />
+        <Route path="/assets/:id" element={<ProtectedRoute module="assets"><AssetDetail /></ProtectedRoute>} />
         <Route path="/supplies" element={<ProtectedRoute module="supplies"><InventorySupplies /></ProtectedRoute>} />
 
         {/* ລະບົບ */}

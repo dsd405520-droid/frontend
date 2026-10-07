@@ -1,4 +1,5 @@
 import { io } from 'socket.io-client';
+import { API_ORIGIN } from '../config';
 
 let socket = null;
 
@@ -7,7 +8,7 @@ export function getSocket() {
     if (!token) return null;
 
     if (!socket) {
-        socket = io('http://localhost:3000', {
+        socket = io(`${API_ORIGIN}`, {
             auth: { token },
             transports: ['websocket'],
         });

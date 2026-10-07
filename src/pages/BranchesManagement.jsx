@@ -5,6 +5,7 @@ import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import { API_BASE_URL } from '../config';
 
 export default function BranchesManagement() {
   const [searchParams] = useSearchParams();
@@ -70,8 +71,8 @@ export default function BranchesManagement() {
 
     try {
       const [branchRes, deptRes] = await Promise.all([
-        fetch('http://localhost:3000/api/branches', { headers }),
-        fetch('http://localhost:3000/api/departments', { headers })
+        fetch(`${API_BASE_URL}/branches`, { headers }),
+        fetch(`${API_BASE_URL}/departments`, { headers })
       ]);
 
       const branchData = await branchRes.json();
@@ -120,7 +121,7 @@ export default function BranchesManagement() {
     };
 
     try {
-      const response = await fetch('http://localhost:3000/api/branches', {
+      const response = await fetch(`${API_BASE_URL}/branches`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -171,7 +172,7 @@ export default function BranchesManagement() {
     };
 
     try {
-      const response = await fetch('http://localhost:3000/api/departments', {
+      const response = await fetch(`${API_BASE_URL}/departments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

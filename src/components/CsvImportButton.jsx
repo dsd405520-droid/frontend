@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { Upload, X, Loader2, AlertCircle } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
-const API_BASE_URL = 'http://localhost:3000/api';
 
 export default function CsvImportButton({
   endpoint,

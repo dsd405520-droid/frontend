@@ -7,6 +7,7 @@ import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import { getSocket } from '../utils/socket';
 import { useBranch } from '../contexts/BranchContext';
+import { API_BASE_URL } from '../config';
 
 export default function MeetingRooms() {
   const { selectedBranchId, branches } = useBranch();
@@ -109,7 +110,7 @@ export default function MeetingRooms() {
     if (!silent) setLoading(true);
     setError(null);
     const branchParam = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
-    fetch(`http://localhost:3000/api/rooms${branchParam}`, {
+    fetch(`${API_BASE_URL}/rooms${branchParam}`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -164,7 +165,7 @@ export default function MeetingRooms() {
       to: to.toISOString(),
     });
 
-    fetch(`http://localhost:3000/api/room-bookings?${params.toString()}`, {
+    fetch(`${API_BASE_URL}/room-bookings?${params.toString()}`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -179,7 +180,7 @@ export default function MeetingRooms() {
 
   const fetchMyBookings = () => {
     setLoadingMyBookings(true);
-    fetch('http://localhost:3000/api/room-bookings/my', {
+    fetch(`${API_BASE_URL}/room-bookings/my`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -199,7 +200,7 @@ export default function MeetingRooms() {
     const to = new Date(utilTo + 'T23:59:59').toISOString();
     const params = new URLSearchParams({ from, to });
 
-    fetch(`http://localhost:3000/api/rooms/utilization?${params.toString()}`, {
+    fetch(`${API_BASE_URL}/rooms/utilization?${params.toString()}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.json())
@@ -214,7 +215,7 @@ export default function MeetingRooms() {
   const fetchPendingApprovals = () => {
     setLoadingPending(true);
     setPendingApprovalsError('');
-    fetch('http://localhost:3000/api/room-bookings/pending', {
+    fetch(`${API_BASE_URL}/room-bookings/pending`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(async res => {
@@ -313,7 +314,7 @@ export default function MeetingRooms() {
 
   const reviewBooking = (id, action, body) => {
     setReviewingId(id);
-    return fetch(`http://localhost:3000/api/room-bookings/${id}/${action}`, {
+    return fetch(`${API_BASE_URL}/room-bookings/${id}/${action}`, {
       method: 'PATCH',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -373,7 +374,7 @@ export default function MeetingRooms() {
     const nextStatus = room.status === 'MAINTENANCE' ? 'AVAILABLE' : 'MAINTENANCE';
     setStatusUpdatingRoomId(roomId);
 
-    fetch(`http://localhost:3000/api/rooms/${roomId}/status`, {
+    fetch(`${API_BASE_URL}/rooms/${roomId}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -452,7 +453,7 @@ export default function MeetingRooms() {
       };
     }
 
-    fetch('http://localhost:3000/api/room-bookings', {
+    fetch(`${API_BASE_URL}/room-bookings`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -505,7 +506,7 @@ export default function MeetingRooms() {
   const handleCancelBooking = (id) => {
     if (!window.confirm('ທ່ານຕ້ອງການຍົກເລີກການຈອງນີ້ແທ້ບໍ?')) return;
 
-    fetch(`http://localhost:3000/api/room-bookings/${id}`, {
+    fetch(`${API_BASE_URL}/room-bookings/${id}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -525,7 +526,7 @@ export default function MeetingRooms() {
   const handleCancelSeries = (seriesId) => {
     if (!window.confirm('ການຈອງນີ້ແມ່ນສ່ວນໜຶ່ງຂອງການຈອງແບບຊ້ຳ — ຕ້ອງການຍົກເລີກທັງໝົດທຸກຄັ້ງໃນຊຸດນີ້ແທ້ບໍ?')) return;
 
-    fetch(`http://localhost:3000/api/room-bookings/series/${seriesId}`, {
+    fetch(`${API_BASE_URL}/room-bookings/series/${seriesId}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -554,7 +555,7 @@ export default function MeetingRooms() {
       endAt: new Date(newEndAt).toISOString()
     };
 
-    fetch(`http://localhost:3000/api/room-bookings/${currentBookingToReschedule._id}/reschedule`, {
+    fetch(`${API_BASE_URL}/room-bookings/${currentBookingToReschedule._id}/reschedule`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -688,7 +689,7 @@ export default function MeetingRooms() {
     setRoomSubmitting(true);
     setRoomFormError('');
     try {
-      const res = await fetch('http://localhost:3000/api/rooms', {
+      const res = await fetch(`${API_BASE_URL}/rooms`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

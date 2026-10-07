@@ -14,6 +14,7 @@ import {
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission } from '../utils/permissions';
 import { cacheOrgSettings, applySystemName } from '../utils/orgSettings';
+import { API_BASE_URL } from '../config';
 
 // ຕົງກັບ SECRET_MASK ຝັ່ງ backend — ຖ້າຄ່ານີ້ຖືກສົ່ງຄືນ ໝາຍຄວາມວ່າ "ຮັກສາຄ່າເກົ່າ"
 const SECRET_MASK = '••••••••';
@@ -56,7 +57,7 @@ export default function Settings() {
 
   const fetchSessions = () => {
     setLoadingSessions(true);
-    fetch('http://localhost:3000/api/sessions/me', { headers })
+    fetch(`${API_BASE_URL}/sessions/me`, { headers })
       .then(res => res.json())
       .then(body => {
         const rows = body?.data ?? body;
@@ -69,7 +70,7 @@ export default function Settings() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingProfile(true);
-    fetch('http://localhost:3000/api/auth/me', { headers })
+    fetch(`${API_BASE_URL}/auth/me`, { headers })
       .then(async res => {
         if (!res.ok) {
           const result = await res.json().catch(() => ({}));
@@ -95,7 +96,7 @@ export default function Settings() {
     if (!canReadOrg) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingOrg(true);
-    fetch('http://localhost:3000/api/settings/org', { headers })
+    fetch(`${API_BASE_URL}/settings/org`, { headers })
       .then(async res => {
         if (!res.ok) throw new Error('ດຶງການຕັ້ງຄ່າອົງກອນບໍ່ສຳເລັດ');
         return res.json();
@@ -194,7 +195,7 @@ export default function Settings() {
         })),
     };
 
-    fetch('http://localhost:3000/api/settings/org', {
+    fetch(`${API_BASE_URL}/settings/org`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(payload),
@@ -223,7 +224,7 @@ export default function Settings() {
   const revokeSession = (id) => {
     if (!window.confirm('ຕ້ອງການອອກຈາກລະບົບອຸປະກອນນີ້ແທ້ບໍ?')) return;
     setRevokingId(id);
-    fetch(`http://localhost:3000/api/sessions/me/${id}`, {
+    fetch(`${API_BASE_URL}/sessions/me/${id}`, {
       method: 'DELETE',
       headers,
     })

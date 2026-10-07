@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Navigate, Link } from 'react-router-dom';
+import { Navigate, Link, useLocation } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
 import { canView, logout } from '../utils/permissions';
 
@@ -14,6 +14,7 @@ function isTokenExpired(token) {
 
 export default function ProtectedRoute({ children, module }) {
   const token = localStorage.getItem('token');
+  const location = useLocation();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -28,7 +29,9 @@ export default function ProtectedRoute({ children, module }) {
   if (!token || isTokenExpired(token)) {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    return <Navigate to="/login" replace />;
+    // ເກັບ path ທີ່ຜູ້ໃຊ້ກຳລັງຈະໄປໄວ້ ເພື່ອ login ແລ້ວກັບມາເທິງເດີມ
+    // (ສຳຄັນກັບການສະແກນ QR ເຂົ້າໜ້າ /assets/:id)
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   // `module` ອາດເປັນ string ດຽວ ຫຼື array (ໜ້າທີ່ອີງໃສ່ຫຼາຍ module, ເຊັ່ນ /branches ໃຊ້ທັງ

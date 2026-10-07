@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import MainLayout from '../layouts/MainLayout';
+import { API_BASE_URL } from '../config';
 
 export default function AuditLogs() {
   const [logs, setLogs] = useState([]);
@@ -20,7 +21,7 @@ export default function AuditLogs() {
     if (from) params.set('from', new Date(from + 'T00:00:00').toISOString());
     if (to) params.set('to', new Date(to + 'T23:59:59').toISOString());
 
-    fetch(`http://localhost:3000/api/audit-logs?${params.toString()}`, { headers })
+    fetch(`${API_BASE_URL}/audit-logs?${params.toString()}`, { headers })
       .then(async res => {
         if (res.status === 403) {
           throw new Error('ບໍ່ມີສິດເຂົ້າເຖິງບັນທຶກການກວດສອບ (audit-logs:read)');

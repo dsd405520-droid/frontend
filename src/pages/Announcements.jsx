@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Megaphone, Plus, X, Loader2, Calendar, Pin, Trash2 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
+import { API_BASE_URL } from '../config';
 
 export default function Announcements() {
   const [searchParams] = useSearchParams();
@@ -41,7 +42,7 @@ export default function Announcements() {
   const fetchAnnouncements = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:3000/api/announcements/active', {
+      const res = await fetch(`${API_BASE_URL}/announcements/active`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -97,7 +98,7 @@ export default function Announcements() {
         payload.expireAt = new Date(formData.expireAt).toISOString();
       }
 
-      const res = await fetch('http://localhost:3000/api/announcements', {
+      const res = await fetch(`${API_BASE_URL}/announcements`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -134,8 +135,8 @@ export default function Announcements() {
   const handleTogglePin = async (id, currentPinned, e) => {
     e.stopPropagation();
     const endpoint = currentPinned 
-      ? `http://localhost:3000/api/announcements/${id}/unpin` 
-      : `http://localhost:3000/api/announcements/${id}/pin`;
+      ? `${API_BASE_URL}/announcements/${id}/unpin` 
+      : `${API_BASE_URL}/announcements/${id}/pin`;
     try {
       const res = await fetch(endpoint, {
         method: 'PATCH',
@@ -151,7 +152,7 @@ export default function Announcements() {
     e.stopPropagation();
     if (!confirm('ຕ້ອງການລຶບປະກາດນີ້ແທ້ບໍ?')) return;
     try {
-      const res = await fetch(`http://localhost:3000/api/announcements/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/announcements/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -163,7 +164,7 @@ export default function Announcements() {
 
   const handleMarkRead = async (id) => {
     try {
-      await fetch(`http://localhost:3000/api/announcements/${id}/read`, {
+      await fetch(`${API_BASE_URL}/announcements/${id}/read`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });

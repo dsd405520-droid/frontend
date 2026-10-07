@@ -5,6 +5,7 @@ import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import { API_BASE_URL } from '../config';
 
 const PRIORITY_KEYWORDS = {
   low: ['low', 'ຕ່ຳ'],
@@ -97,7 +98,7 @@ export default function Slamanagement() {
 
   const fetchSlas = () => {
     setLoading(true);
-    fetch('http://localhost:3000/api/sla-policies', {
+    fetch(`${API_BASE_URL}/sla-policies`, {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
@@ -118,7 +119,7 @@ export default function Slamanagement() {
   };
 
   const fetchTicketTypes = () => {
-    fetch('http://localhost:3000/api/ticket-types', {
+    fetch(`${API_BASE_URL}/ticket-types`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.json())
@@ -212,8 +213,8 @@ export default function Slamanagement() {
     try {
       const isEditing = !!editingId;
       const url = isEditing
-        ? `http://localhost:3000/api/sla-policies/${editingId}`
-        : 'http://localhost:3000/api/sla-policies';
+        ? `${API_BASE_URL}/sla-policies/${editingId}`
+        : `${API_BASE_URL}/sla-policies`;
 
       const response = await fetch(url, {
         method: isEditing ? 'PATCH' : 'POST',
@@ -244,7 +245,7 @@ export default function Slamanagement() {
     if (!window.confirm(`ຕ້ອງການລຶບນະໂຍບາຍ "${item.name}" ແທ້ບໍ?`)) return;
 
     try {
-      const response = await fetch(`http://localhost:3000/api/sla-policies/${item._id}`, {
+      const response = await fetch(`${API_BASE_URL}/sla-policies/${item._id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
