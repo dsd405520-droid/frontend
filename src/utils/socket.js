@@ -8,7 +8,7 @@ export function getSocket() {
     if (!token) return null;
 
     if (!socket) {
-        socket = io(`${API_ORIGIN}`, {
+        socket = io(API_ORIGIN || undefined, {
             auth: { token },
             transports: ['websocket'],
         });

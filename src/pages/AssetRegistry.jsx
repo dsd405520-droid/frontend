@@ -9,6 +9,7 @@ import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import BarcodeComponent from 'react-barcode';
+import { QRCodeSVG } from 'qrcode.react';
 import { API_BASE_URL } from '../config';
 
 export default function AssetRegistry() {
@@ -16,6 +17,7 @@ export default function AssetRegistry() {
   const navigate = useNavigate();
   const token = localStorage.getItem('token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const isLocalOrigin = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
   const canCreate = hasPermission('assets', 'create');
   const canRead = hasPermission('assets', 'read');
@@ -147,6 +149,20 @@ export default function AssetRegistry() {
       case 'RETIRED': return { label: 'ປົດລະວາງແລ້ວ', className: 'bg-gray-200 text-gray-600' };
       default: return { label: 'ວ່າງ', className: 'bg-green-100 text-green-700' };
     }
+  };
+
+  // ຂໍ້ມູນຊັບສິນເປັນຂໍ້ຄວາມฝังลง QR — ສະແກນດ້ວຍกลໍ່ມືຖືເຫັນຂໍ້ມູນທັນທີ ໂດຍບໍ່ຕ້ອງເຊື່ອມຕໍ່ເຊີບເວີ
+  const assetInfoText = (a) => {
+    const lines = [
+      `ຊັບສິນ: ${a.assetTag || '—'}`,
+      `ປະເພດ: ${a.type || '—'}`,
+      `ສະຖານະ: ${statusInfo(a.status).label}`,
+      `ສາຂາ: ${branchName(a.branchId)}`,
+      `ຜູ້ດູແລ: ${a.currentAssigneeId ? userName(a.currentAssigneeId) : 'ຍັງບໍ່ມີຜູ້ດູແລ'}`,
+    ];
+    if (a.purchaseDate) lines.push(`ວັນທີຊື້: ${new Date(a.purchaseDate).toLocaleDateString()}`);
+    if (a.warrantyExpiry) lines.push(`ໝົດປະກັນ: ${new Date(a.warrantyExpiry).toLocaleDateString()}`);
+    return lines.join('\n');
   };
 
   const filteredAssets = assets.filter((a) => {
@@ -534,26 +550,59 @@ export default function AssetRegistry() {
 
         {barcodeModalAsset && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-xs space-y-4 text-center">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-4 text-center">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-gray-800">Barcode</h2>
+                <h2 className="text-lg font-bold text-gray-800">Barcode & QR</h2>
                 <button type="button" onClick={() => setBarcodeModalAsset(null)} className="text-gray-400 hover:text-gray-600">
                   <X size={18} />
                 </button>
               </div>
-              <div className="font-semibold text-gray-800">{barcodeModalAsset.assetTag}</div>
-              <div className="flex flex-col items-center justify-center">
+
+              <div className="flex flex-col items-center justify-center space-y-1">
+                <div className="text-xs font-medium text-gray-600">ຂໍ້ມູນຊັບສິນ (offline)</div>
+                <QRCodeSVG
+                  value={assetInfoText(barcodeModalAsset)}
+                  size={140}
+                  level="M"
+                  marginSize={2}
+                />
+                <div className="text-[11px] text-gray-400">ສະແກນດ້ວຍກ້ອງມືຖື — ເຫັນຂໍ້ມູນທັນທີ ໂດຍບໍ່ຕ້ອງເຊື່ອມຕໍ່ server</div>
+              </div>
+
+              <div className="border-t border-gray-100 pt-3 flex flex-col items-center justify-center space-y-1">
+                <div className="text-xs font-medium text-gray-600">ເປີດໜ້າຢືນຢັນຮັບເຄື່ອງ (online)</div>
+                <QRCodeSVG
+                  value={`${window.location.origin}/assets/${barcodeModalAsset._id}?claim=1`}
+                  size={130}
+                  level="M"
+                  marginSize={2}
+                />
+                {isLocalOrigin ? (
+                  <div className="text-[11px] text-red-500 bg-red-50 border border-red-100 rounded-lg px-2 py-1">
+                    ກຳລັງເປີດຜ່ານ localhost — QR ນີ້ມືຖືຈະເປີດບໍ່ໄດ້.
+                    ໃຫ້ເປີດເວັບຜ່ານ http://&lt;IP ຂອງ PC&gt;:5173 ກ່ອນ ແລ້ວສະແກນໃໝ່
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-gray-400">ຕ້ອງເຊື່ອມຕໍ່ເຄືອຂ່າຍດຽວກັບເຊີບເວີ — ເປີດໜ້າໃສ່ລະຫັດພະນັກງານທັນທີ</div>
+                )}
+              </div>
+
+              <div className="border-t border-gray-100 pt-3 flex flex-col items-center justify-center">
                 <BarcodeComponent
-                  value={`${window.location.origin}/assets/${barcodeModalAsset._id}`}
+                  value={barcodeModalAsset.assetTag}
                   format="CODE128"
-                  width={1.8}
-                  height={40}
-                  fontSize={13}
-                  displayValue={true}
+                  width={2.0}
+                  height={50}
+                  fontSize={14}
+                  displayValue={false}
                   margin={8}
                 />
+                <div className="mt-1 text-sm font-semibold tracking-widest text-gray-800">
+                  {barcodeModalAsset.assetTag}
+                </div>
+                <div className="text-[11px] text-gray-400">Barcode — ສະແກນເພື່ອກວດສອບເລກທະບຽນ</div>
               </div>
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
                 <button 
                   type="button" 
                   onClick={() => { 
@@ -564,6 +613,17 @@ export default function AssetRegistry() {
                   className="w-full px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-medium transition"
                 >
                   ເປີດໜ້າລາຍລະອຽດ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = barcodeModalAsset._id;
+                    setBarcodeModalAsset(null);
+                    navigate(`/assets/${id}?claim=1`);
+                  }}
+                  className="w-full px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition"
+                >
+                  ຮັບເຄື່ອງ / ຍັນຍົນ
                 </button>
               </div>
             </div>
