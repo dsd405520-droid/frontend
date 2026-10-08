@@ -6,7 +6,7 @@ import { useBranch } from '../contexts/BranchContext';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import { getSocket } from '../utils/socket';
-import { hasPermission } from '../utils/permissions';
+import { hasPermission, canCreateFromMenu } from '../utils/permissions';
 import TicketProgressBar, { TICKET_STEPS } from '../components/TicketProgressBar';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 
@@ -126,7 +126,7 @@ export default function Issues() {
   const token = localStorage.getItem('token');
 
   // ກວດສິດສິດຈາກ utils/permissions (ຕົວດຽວກັບທຸກໜ້າ) — ລວມການໃຫ້ bypass ADMIN/SUPER_ADMIN ດ້ວຍ
-  const canCreateTicketType = hasPermission('ticket-types', 'create');
+  const canCreateTicketType = canCreateFromMenu('ticket-types');
   const canAssign = hasPermission('tickets', 'assign');
   const canUpdateStatus = hasPermission('tickets', 'update');
   const canCreateTicket = hasPermission('tickets', 'create');

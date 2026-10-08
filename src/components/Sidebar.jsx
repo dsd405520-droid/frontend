@@ -25,7 +25,7 @@ import {
   X
 } from 'lucide-react';
 import { LogOut } from 'lucide-react';
-import { canView, logout, getCurrentUser } from '../utils/permissions';
+import { canSeePage, canSeePath, logout, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 import { getOrgSettings, applySystemName, DEFAULT_SYSTEM_NAME } from '../utils/orgSettings';
 import { useBranch } from '../contexts/BranchContext';
@@ -35,7 +35,7 @@ import { getSocket } from '../utils/socket';
 function canViewAny(moduleOrArray) {
   if (!moduleOrArray) return true;
   const mods = Array.isArray(moduleOrArray) ? moduleOrArray : [moduleOrArray];
-  return mods.some((m) => canView(m));
+  return mods.some((m) => canSeePage(m));
 }
 
 // Backend ຫໍ່ທຸກ response ດ້ວຍ interceptor: { response, msg, data: <ຕົວຈິງ>, time }
@@ -267,7 +267,7 @@ export default function Sidebar({ open = false, onClose }) {
         {/* Menu List — ຄັດຕອງແຕ່ລະລາຍການດ້ວຍ canView(module) ກ່ອນສະແດງ */}
         <div className="flex-1 p-4 space-y-6">
           {MENU_SECTIONS.map((section) => {
-            const visibleItems = section.items.filter((item) => canViewAny(item.module));
+            const visibleItems = section.items.filter((item) => canViewAny(item.module) && canSeePath(item.to));
             if (visibleItems.length === 0) return null;
 
             return (

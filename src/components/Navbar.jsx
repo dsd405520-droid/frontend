@@ -5,7 +5,7 @@ import {
   ChevronDown, Tag, Clock, Users, Shield, Building2, Layers, Package, Laptop,
   Calendar, Briefcase, Megaphone,
 } from 'lucide-react';
-import { canView, hasPermission, getCurrentUser } from '../utils/permissions';
+import { canSeePage, canSeePath, canCreateFromMenu, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 import { getSocket } from '../utils/socket';
 
@@ -44,7 +44,7 @@ function toArray(payload) {
 function canViewAny(moduleOrArray) {
   if (!moduleOrArray) return true;
   const mods = Array.isArray(moduleOrArray) ? moduleOrArray : [moduleOrArray];
-  return mods.some((m) => canView(m));
+  return mods.some((m) => canSeePage(m));
 }
 
 // ລາຍການທັງໝົດທີ່ສາມາດສ້າງໄດ້ — ກັ່ນຕາມສິດ create ຂອງແຕ່ລະ module
@@ -211,7 +211,8 @@ const SEARCH_SOURCES = [
       (i.category && i.category.toLowerCase().includes(ql)),
     text: (i) => i.name,
     sub: (i) => `${i.category} · ຄົງເຫຼືອ ${i.stockQty ?? 0} ${i.unit || ''}`,
-    to: () => '/assets',
+    // ຜູ້ທີ່ບໍ່ເຫັນໜ້າຈັດການຊັບສິນ (ເຊັ່ນ EMPLOYEE) ໃຫ້ໄປໜ້າຂໍອຸປະກອນແທນ
+    to: () => (canSeePath('/assets') ? '/assets' : '/supplies'),
   },
   {
     key: 'assets',
@@ -246,6 +247,31 @@ export default function Navbar({ onMenuClick }) {
 
   // ແຖບສີບອກສະຖານະ (role) ຂອງຜູ້ໃຊ້ທີ່ login ຢູ່ — ອ່ານຄັ້ງດຽວຕອນ mount, ບໍ່ປ່ຽນລະຫວ່າງ session
   const roleBadge = getRoleBadge(getCurrentUser()?.role);
+
+  // ຊື່ ແລະ ອີເມວ ຂອງຜູ້ໃຊ້ — JWT ມີແຕ່ email ຈຶ່ງດຶງຊື່ຈາກ /auth/me (ທຸກຄົນທີ່ login ເອີ້ນໄດ້)
+  const [profile, setProfile] = useState(() => {
+    const u = getCurrentUser();
+    return { name: u?.name || '', email: u?.email || '' };
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/auth/me')
+      .then((res) => {
+        if (cancelled) return;
+        const me = unwrap(res.data);
+        if (!me) return;
+        const name = [me.firstName, me.lastName].filter(Boolean).join(' ');
+        const email = me.email || profile.email;
+        setProfile({ name, email });
+        // ເກັບໄວ້ໃນ localStorage ເພື່ອໃຫ້ສະແດງໄດ້ທັນທີຕອນໂຫຼດໜ້າຄັ້ງຕໍ່ໄປ
+        const u = getCurrentUser();
+        if (u) localStorage.setItem('user', JSON.stringify({ ...u, name, email }));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ຈຳນວນແຈ້ງເຕືອນທີ່ຍັງບໍ່ໄດ້ອ່ານ — ດຶງຈາກ /dashboard ຄືກັບ Sidebar
   const [unreadCount, setUnreadCount] = useState(0);
@@ -500,6 +526,18 @@ export default function Navbar({ onMenuClick }) {
 
       {/* Right Actions */}
       <div className="flex items-center gap-1 sm:gap-4">
+        {(profile.name || profile.email) && (
+          <div className="hidden md:flex flex-col items-end leading-tight max-w-[220px]">
+            <span className="text-sm font-semibold text-gray-800 truncate max-w-full" title={profile.name}>
+              {profile.name || profile.email}
+            </span>
+            {profile.name && profile.email && (
+              <span className="text-xs text-gray-500 truncate max-w-full" title={profile.email}>
+                {profile.email}
+              </span>
+            )}
+          </div>
+        )}
         {roleBadge && (
           <span
             className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${roleBadge.className}`}
@@ -598,7 +636,7 @@ export default function Navbar({ onMenuClick }) {
           {createOpen && (
             <div className="absolute right-0 top-full mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-xl z-40 max-h-[70vh] overflow-y-auto">
               {CREATE_OPTIONS.map((group) => {
-                const items = group.items.filter((item) => hasPermission(item.module, 'create'));
+                const items = group.items.filter((item) => canCreateFromMenu(item.module) && canSeePath(item.to));
                 if (items.length === 0) return null;
                 return (
                   <div key={group.section} className="p-2">
@@ -618,7 +656,7 @@ export default function Navbar({ onMenuClick }) {
                   </div>
                 );
               })}
-              {CREATE_OPTIONS.every((g) => g.items.filter((i) => hasPermission(i.module, 'create')).length === 0) && (
+              {CREATE_OPTIONS.every((g) => g.items.filter((i) => canCreateFromMenu(i.module) && canSeePath(i.to)).length === 0) && (
                 <div className="p-4 text-center text-sm text-gray-400">
                   ບໍ່ມີສິດສ້າງລາຍການໃດໆ
                 </div>

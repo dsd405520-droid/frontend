@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, Link, useLocation } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
-import { canView, logout } from '../utils/permissions';
+import { canSeePage, canSeePath, logout } from '../utils/permissions';
 
 function isTokenExpired(token) {
   try {
@@ -37,7 +37,9 @@ export default function ProtectedRoute({ children, module }) {
   // `module` ອາດເປັນ string ດຽວ ຫຼື array (ໜ້າທີ່ອີງໃສ່ຫຼາຍ module, ເຊັ່ນ /branches ໃຊ້ທັງ
   // 'branches' ແລະ 'departments') — ຖ້າເປັນ array, ພຽງແຕ່ 1 module ທີ່ມີສິດກໍ່ພໍໃຫ້ເຂົ້າໜ້າໄດ້
   const modules = Array.isArray(module) ? module : module ? [module] : [];
-  const allowed = modules.length === 0 || modules.some((m) => canView(m));
+  const allowed =
+    (modules.length === 0 || modules.some((m) => canSeePage(m))) &&
+    canSeePath(location.pathname);
 
   if (!allowed) {
     return (
