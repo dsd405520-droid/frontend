@@ -18,4 +18,9 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // ໂຄງການ vite/eslint ເຮັດວຽກໃນ Node — ມີ process ແລະອື່ນໆ
+    files: ['vite.config.js', 'eslint.config.js'],
+    languageOptions: { globals: globals.node },
+  },
 ])

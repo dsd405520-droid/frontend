@@ -116,8 +116,8 @@ export default function Reports() {
   const headers = { 'Authorization': `Bearer ${token}` };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setError('');
     const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';

@@ -7,7 +7,8 @@ import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import { getSocket } from '../utils/socket';
 import { hasPermission, canCreateFromMenu } from '../utils/permissions';
-import TicketProgressBar, { TICKET_STEPS } from '../components/TicketProgressBar';
+import TicketProgressBar from '../components/TicketProgressBar';
+import { TICKET_STEPS } from '../constants/ticketSteps';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 
 const PRIORITY_LABELS = {
@@ -506,6 +507,7 @@ export default function Issues() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshUnread();
     window.addEventListener('notifications:changed', refreshUnread);
     return () => window.removeEventListener('notifications:changed', refreshUnread);
@@ -526,6 +528,7 @@ export default function Issues() {
 
   const openTicketIdRef = useRef(null);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     openTicketIdRef.current = isDetailModalOpen ? selectedTicket?._id : null;
   }, [selectedTicket, isDetailModalOpen]);
 
@@ -583,6 +586,7 @@ export default function Issues() {
   // ໂຫຼດລາຍຊື່ໃໝ່ທຸກເທື່ອທີ່ເປີດແຜງມອບໝາຍ ເພື່ອໃຫ້ຈຳນວນວຽກຄ້າງເປັນປັດຈຸບັນສະເໝີ
   useEffect(() => {
     if (isAssignPanelOpen && selectedTicket?._id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       loadAssignCandidates(selectedTicket._id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -629,7 +633,7 @@ export default function Issues() {
     fetch(`${API_BASE_URL}/uploads/${encodeURIComponent(filename)}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` },
-    }).catch(() => {}); // ຖ້າລຶບບໍ່ສຳເລັດກໍບໍ່ຕ້ອງລົບກວນຜູ້ໃຊ້
+    }).catch(() => { }); // ຖ້າລຶບບໍ່ສຳເລັດກໍບໍ່ຕ້ອງລົບກວນຜູ້ໃຊ້
   };
 
   const handleStatusFileSelect = async (e) => {
