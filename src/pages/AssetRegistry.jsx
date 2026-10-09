@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Plus, X, AlertCircle, Search, UserCheck, Undo2,
-  Wrench, History, AlertTriangle, Trash2, Barcode,
+  Wrench, History, AlertTriangle, Trash2, Barcode, Archive,
 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
@@ -32,6 +32,7 @@ export default function AssetRegistry() {
   const [assetsError, setAssetsError] = useState('');
 
   const [branches, setBranches] = useState([]);
+  const [catalog, setCatalog] = useState([]);
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [selectedDeptId, setSelectedDeptId] = useState("");
@@ -45,7 +46,7 @@ export default function AssetRegistry() {
   const [branchFilter, setBranchFilter] = useState('');
 
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ assetTag: '', type: '', branchId: '', purchaseDate: '', warrantyExpiry: '' });
+  const [createForm, setCreateForm] = useState({ assetTag: '', catalogSearch: '', catalogItemId: '', type: '', branchId: '', purchaseDate: '', warrantyExpiry: '' });
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState('');
 
@@ -56,6 +57,7 @@ export default function AssetRegistry() {
   const [assignError, setAssignError] = useState('');
 
   const [barcodeModalAsset, setBarcodeModalAsset] = useState(null);
+  const [historyModalAsset, setHistoryModalAsset] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   function unwrap(body) {
@@ -97,6 +99,13 @@ export default function AssetRegistry() {
       .catch(() => setDepartments([]));
   }
 
+  function fetchCatalog() {
+    fetch(`${API_BASE_URL}/supply-catalog`, { headers })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((body) => setCatalog(unwrap(body) || []))
+      .catch(() => setCatalog([]));
+  }
+
   function fetchOverdue() {
     setLoadingOverdue(true);
     setOverdueError('');
@@ -116,6 +125,7 @@ export default function AssetRegistry() {
     fetchBranches();
     fetchUsers();
     fetchDepartments();
+    if (canCreate) fetchCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchFilter]);
 
@@ -152,38 +162,51 @@ export default function AssetRegistry() {
   };
 
   // ຂໍ້ມູນຊັບສິນເປັນຂໍ້ຄວາມฝังลง QR — ສະແກນດ້ວຍกลໍ່ມືຖືເຫັນຂໍ້ມູນທັນທີ ໂດຍບໍ່ຕ້ອງເຊື່ອມຕໍ່ເຊີບເວີ
-  const assetInfoText = (a) => {
-    const lines = [
-      `ຊັບສິນ: ${a.assetTag || '—'}`,
-      `ປະເພດ: ${a.type || '—'}`,
-      `ສະຖານະ: ${statusInfo(a.status).label}`,
-      `ສາຂາ: ${branchName(a.branchId)}`,
-      `ຜູ້ດູແລ: ${a.currentAssigneeId ? userName(a.currentAssigneeId) : 'ຍັງບໍ່ມີຜູ້ດູແລ'}`,
-    ];
-    if (a.purchaseDate) lines.push(`ວັນທີຊື້: ${new Date(a.purchaseDate).toLocaleDateString()}`);
-    if (a.warrantyExpiry) lines.push(`ໝົດປະກັນ: ${new Date(a.warrantyExpiry).toLocaleDateString()}`);
-    return lines.join('\n');
-  };
+  // QR ແບບອອຟໄລ — ຝັງສະເພາະ Asset Tag ເພື່ອພິມເປັນສະຕິກເກີ ບໍ່ໃຫ້ມີຂໍ້ມູນທີ່ຈະລ້າສະໄໝ
+  const assetInfoText = (a) => a.assetTag || '';
+
+  const isAscii = (s) => !(s || '').split('').some((c) => c.charCodeAt(0) > 127);
 
   const filteredAssets = assets.filter((a) => {
     if (statusFilter && a.status !== statusFilter) return false;
     if (branchFilter && a.branchId !== branchFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!a.assetTag.toLowerCase().includes(q) && !a.type.toLowerCase().includes(q)) return false;
+      if (!a.assetTag.toLowerCase().includes(q)) return false;
     }
     return true;
   });
 
+  // ຂໍວະລັບຈາກ Catalog — ເລືອກລາຍການແລ້ວເຊື່ອມກັບ catalogItemId (ເພື່ອ Backend ສ້າງ Asset Tag ໃຫ້: SC002-001)
+  const handleCatalogSearchChange = (value) => {
+    const clean = value.trim().toLowerCase();
+    const matched = catalog.find(
+      (c) => (c.name || '').toLowerCase() === clean || (c._id || '').toLowerCase() === clean,
+    );
+    setCreateForm((f) => ({
+      ...f,
+      catalogSearch: value,
+      catalogItemId: matched ? matched._id : '',
+      ...(matched && !f.type ? { type: matched.name } : {}),
+    }));
+  };
+
   const submitCreate = (e) => {
     e.preventDefault();
+    if (!createForm.assetTag && !createForm.catalogItemId) {
+      setCreateError('ກະລຸນາກອກ Asset Tag ຫຼື ເລືອກລາຍການ Catalog ເພື່ອສ້າງ Tag ອັດຕະໂນມັດ (SC002-001)');
+      return;
+    }
     setCreateSubmitting(true);
     setCreateError('');
     fetch(`${API_BASE_URL}/assets`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        ...createForm,
+        assetTag: createForm.assetTag || undefined,
+        catalogItemId: createForm.catalogItemId || undefined,
+        type: createForm.type,
+        branchId: createForm.branchId,
         purchaseDate: createForm.purchaseDate || undefined,
         warrantyExpiry: createForm.warrantyExpiry || undefined,
       }),
@@ -192,7 +215,7 @@ export default function AssetRegistry() {
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດເພີ່ມຊັບສິນໄດ້');
         setShowCreateModal(false);
-        setCreateForm({ assetTag: '', type: '', branchId: '', purchaseDate: '', warrantyExpiry: '' });
+        setCreateForm({ assetTag: '', catalogSearch: '', catalogItemId: '', type: '', branchId: '', purchaseDate: '', warrantyExpiry: '' });
         fetchAssets();
       })
       .catch((err) => setCreateError(err.message))
@@ -322,7 +345,7 @@ export default function AssetRegistry() {
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="ຄົ້ນຫາ ASSET TAG ຫຼືປະເພດ..."
+                  placeholder="ຄົ້ນຫາ ASSET TAG..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm"
@@ -385,7 +408,7 @@ export default function AssetRegistry() {
                         <td className="p-3 text-gray-500">{a.warrantyExpiry ? new Date(a.warrantyExpiry).toLocaleDateString() : '—'}</td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                            <button onClick={() => navigate(`/assets/${a._id}?tab=maintenance`)} className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100" title="ປະຫວັດການສ້ອມແປງ">
+                            <button onClick={() => setHistoryModalAsset(a)} className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100" title="ປະຫວັດການມອບໝາຍ">
                               <History size={15} />
                             </button>
                             <button onClick={() => setBarcodeModalAsset(a)} className="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100" title="ສະແດງ Barcode">
@@ -409,6 +432,11 @@ export default function AssetRegistry() {
                             {canUpdate && a.status === 'UNDER_REPAIR' && (
                               <button onClick={() => handleSetStatus(a, 'AVAILABLE')} disabled={busyId === a._id} className="text-xs px-2 py-1 rounded-lg bg-green-50 text-green-700 hover:bg-green-100" title="ສ້ອມແປງແລ້ວ">
                                 ✓ ແລ້ວ
+                              </button>
+                            )}
+                            {canUpdate && a.status !== 'RETIRED' && (
+                              <button onClick={() => handleSetStatus(a, 'RETIRED')} disabled={busyId === a._id} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" title="ປົດລະວາງ / ເລີກໃຊ້ (ຖອນການຕິດຕັ້ງ)">
+                                <Archive size={15} />
                               </button>
                             )}
                             {canDelete && (
@@ -476,8 +504,25 @@ export default function AssetRegistry() {
                 <h2 className="text-lg font-bold text-gray-800">ເພີ່ມຊັບສິນໃໝ່</h2>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Asset Tag</label>
-                <input type="text" required value={createForm.assetTag} onChange={(e) => setCreateForm({ ...createForm, assetTag: e.target.value })} placeholder="A-1042" className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
+                <label className="block text-xs font-medium text-gray-700 mb-1">ຈາກ Supply Catalog (ທາງເລືອກ)</label>
+                <input
+                  type="text"
+                  list="asset-catalog-options"
+                  value={createForm.catalogSearch}
+                  onChange={(e) => handleCatalogSearchChange(e.target.value)}
+                  placeholder="ພິມຊື່ອຸປະກອນ ຫຼື SC001, SC002..."
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                />
+                <datalist id="asset-catalog-options">
+                  {catalog.map((c) => (
+                    <option key={c._id} value={c.name}>{c._id} — {c.category}</option>
+                  ))}
+                </datalist>
+                <p className="text-xs text-gray-400 mt-1">ເລືອກແລ້ວ Backend ຈະສ້າງ Asset Tag ໃຫ້ອັດຕະໂນມັດ (SC002-001, SC002-002...)</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Asset Tag (ບໍ່ບັງຄັບ)</label>
+                <input type="text" value={createForm.assetTag} onChange={(e) => setCreateForm({ ...createForm, assetTag: e.target.value })} placeholder="A-1042 (ຫວ່າງ = ລະບົບສ້າງໃຫ້ອັດຕະໂນມັດ)" className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ປະເພດ</label>
@@ -559,14 +604,14 @@ export default function AssetRegistry() {
               </div>
 
               <div className="flex flex-col items-center justify-center space-y-1">
-                <div className="text-xs font-medium text-gray-600">ຂໍ້ມູນຊັບສິນ (offline)</div>
+                <div className="text-xs font-medium text-gray-600">Asset Tag (offline)</div>
                 <QRCodeSVG
                   value={assetInfoText(barcodeModalAsset)}
                   size={140}
                   level="M"
                   marginSize={2}
                 />
-                <div className="text-[11px] text-gray-400">ສະແກນດ້ວຍກ້ອງມືຖື — ເຫັນຂໍ້ມູນທັນທີ ໂດຍບໍ່ຕ້ອງເຊື່ອມຕໍ່ server</div>
+                <div className="text-[11px] text-gray-400">QR ບັນຈຸສະເພາະ Asset Tag — ພິມເປັນສະຕິກເກີໄດ້ ບໍ່ມີຂໍ້ມູນລ້າສະໄໝ</div>
               </div>
 
               <div className="border-t border-gray-100 pt-3 flex flex-col items-center justify-center space-y-1">
@@ -588,19 +633,25 @@ export default function AssetRegistry() {
               </div>
 
               <div className="border-t border-gray-100 pt-3 flex flex-col items-center justify-center">
-                <BarcodeComponent
-                  value={barcodeModalAsset.assetTag}
-                  format="CODE128"
-                  width={2.0}
-                  height={50}
-                  fontSize={14}
-                  displayValue={false}
-                  margin={8}
-                />
+                {isAscii(barcodeModalAsset.assetTag) ? (
+                  <BarcodeComponent
+                    value={barcodeModalAsset.assetTag}
+                    format="CODE128"
+                    width={2.0}
+                    height={50}
+                    fontSize={14}
+                    displayValue={false}
+                    margin={8}
+                  />
+                ) : (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-[260px]">
+                    Asset Tag ມີຕົວອັກສອນທີ່ບໍ່ແມ່ນ ASCII (ຕົວຢ່າງ: ພາສາລາວ) — CODE128 ສ້າງບໍ່ໄດ້
+                  </div>
+                )}
                 <div className="mt-1 text-sm font-semibold tracking-widest text-gray-800">
                   {barcodeModalAsset.assetTag}
                 </div>
-                <div className="text-[11px] text-gray-400">Barcode — ສະແກນເພື່ອກວດສອບເລກທະບຽນ</div>
+                <div className="text-[11px] text-gray-400">Barcode — CODE128 ຮອງຮັບສະເພາະຕົວອັກສອນ ASCII (A-Z, 0-9, ສັນຍາລັກ)</div>
               </div>
               <div className="pt-2 space-y-2">
                 <button 
@@ -626,6 +677,35 @@ export default function AssetRegistry() {
                   ຮັບເຄື່ອງ / ຍັນຍົນ
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {historyModalAsset && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-3 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-gray-800">ປະຫວັດການມອບໝາຍ — {historyModalAsset.assetTag}</h2>
+                <button type="button" onClick={() => setHistoryModalAsset(null)} className="text-gray-400 hover:text-gray-600">
+                  <X size={20} />
+                </button>
+              </div>
+              {(historyModalAsset.assignmentHistory || []).length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">ຍັງບໍ່ເຄີຍຖືກມອບໝາຍ</p>
+              ) : (
+                <div className="space-y-2">
+                  {[...historyModalAsset.assignmentHistory].reverse().map((h, i) => (
+                    <div key={h._id || i} className="border border-gray-100 rounded-xl p-3 text-sm">
+                      <div className="font-medium text-gray-800">{userName(h.assigneeId)}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {h.assignedAt ? new Date(h.assignedAt).toLocaleString() : '—'} —{' '}
+                        {h.returnedAt ? new Date(h.returnedAt).toLocaleString() : <span className="text-blue-600 font-medium">ຍັງຖືຢູ່</span>}
+                      </div>
+                      {h.note && <div className="text-xs text-gray-500 mt-1 italic">"{h.note}"</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

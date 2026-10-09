@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Package, Plus, CheckCircle, Clock, XCircle } from 'lucide-react';
-import { hasPermission } from '../utils/permissions';
+import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine } from 'lucide-react';
+import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import axios from '../services/api';
 
@@ -15,6 +15,18 @@ export default function InventorySupplies() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   const [items, setItems] = useState([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
+
+  // ຮັບເຄື່ອງທີ່ຄັງ — ຫຼັງອະນຸມັດແລ້ວ ພະນັກງານສະແກນ QR/ບາໂຄ໊ດ ຂອງອຸປະກອນ 2 ຂັ້ນ:
+  //   1. ສະແກນເຄື່ອງ → ກວດກັບລາຍການທີ່ຂໍ (ຖ້າມີສິດອ່ານທະບຽນຊັບສິນ)
+  //   2. ຢືນຢັນຜູ້ຮັບ (ລະຫັດພະນັກງານ) → ບັນທຶກ ເຄື່ອງຈະຂຶ້ນກັບທະບຽນຊັບສິນຂອງບໍລິສັດ
+  const [receiveRequest, setReceiveRequest] = useState(null);
+  const [scanTags, setScanTags] = useState('');
+  const [receiveStage, setReceiveStage] = useState(1); // 1 = ສະແກນເຄື່ອງ, 2 = ຢືນຢັນຜູ້ຮັບ
+  const [allAssets, setAllAssets] = useState(null);    // null = ບໍ່ມີສິດ assets:read → ໃຫ້ Backend ກວດຕອນບັນທຶກ
+  const [assigneeCode, setAssigneeCode] = useState('');
+  const [receiving, setReceiving] = useState(false);
+  const [receiveError, setReceiveError] = useState('');
+  const [receiveResult, setReceiveResult] = useState(null);
 
   const fetchData = async () => {
     try {
@@ -110,6 +122,98 @@ useEffect(() => {
     }
   };
 
+  const openReceive = async (req) => {
+    setReceiveRequest(req);
+    setScanTags('');
+    setReceiveStage(1);
+    setAllAssets(null);
+    setAssigneeCode(
+      req.requestedBy?.employeeCode || req.userId?.employeeCode || req.createdBy?.employeeCode || getCurrentUser()?.employeeCode || ''
+    );
+    setReceiveError('');
+    setReceiveResult(null);
+    // ຄົ້ນຫາທະບຽນຊັບສິນກ່ອນ (ເພື່ອກວດວ່າ tag ມີຈິງ/ຊະນິດກົງ/ສະຖານະວ່າງ) — ຖ້າບໍ່ມີສິດ ໃຫ້ Backend ກວດຕອນບັນທຶກ
+    if (hasPermission('assets', 'read')) {
+      try {
+        const res = await axios.get('/assets');
+        const data = res.data;
+        setAllAssets(Array.isArray(data) ? data : (data.data || data.items || []));
+      } catch {
+        setAllAssets(null);
+      }
+    }
+  };
+
+  const closeReceive = () => {
+    setReceiveRequest(null);
+    setReceiveResult(null);
+    setReceiveError('');
+    setReceiveStage(1);
+    fetchData();
+  };
+
+  const scannedTags = () => scanTags.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+
+  // ກວດ tag ທີ່ສະແກນກັບທະບຽນຊັບສິນ + ລາຍການທີ່ຂໍ (ສະແດງຜົນກ່ອນຢືນຢັນ)
+  const scanResults = receiveRequest
+    ? scannedTags().map((tag) => {
+        if (!Array.isArray(allAssets)) return { tag };
+        const a = allAssets.find((x) => (x.assetTag || '').toLowerCase() === tag.toLowerCase());
+        if (!a) return { tag, status: 'not-found' };
+        const reqNames = (receiveRequest.items || []).map((i) => (i.name || '').toLowerCase()).filter(Boolean);
+        const typeOk =
+          reqNames.length === 0 ||
+          reqNames.some((n) => n.includes((a.type || '').toLowerCase()) || (a.type || '').toLowerCase().includes(n));
+        const status = a.status === 'AVAILABLE' && typeOk ? 'ok' : (a.status !== 'AVAILABLE' ? 'not-available' : 'type-mismatch');
+        return { tag, status, asset: a };
+      })
+    : [];
+
+  const gotoStage2 = () => {
+    const tags = scannedTags();
+    if (tags.length === 0) {
+      setReceiveError('ກະລຸນາສະແກນ ຫຼື ກຣອກລະຫັດ Asset Tag ຢ່າງໜ້ອຍ 1 ລາຍການ');
+      return;
+    }
+    // ຖ້າສາມາດກວດໃນໜ້າໄດ້ ຕ້ອງຜ່ານທຸກລາຍການກ່ອນ (ບໍ່ພົບ/ບໍ່ວ່າງ/ຊະນິດບໍ່ກົງ) ຈຶ່ງດຳເນີນຕໍ່ໄດ້
+    if (Array.isArray(allAssets) && scanResults.some((r) => r.status && r.status !== 'ok')) {
+      setReceiveError('ມີລາຍການທີ່ບໍ່ຜ່ານການກວດ (ເບິ່ງສີແດງ) — ໃຫ້ແກ້/ລຶບແຖວນັ້ນກ່ອນ ຈຶ່ງດຳເນີນການຕໍ່ (ເພື່ອບໍ່ມອບເຄື່ອງຜິດ)');
+      return;
+    }
+    setReceiveError('');
+    setReceiveStage(2);
+  };
+
+  // ບັນທຶກ: Backend ກວດ ໃບຂໍຕ້ອງເປັນ APPROVED, asset ມີຢູ່ + AVAILABLE + ຊະນິດກົງກັບລາຍການ,
+  // ຢືນຢັນລະຫັດຜູ້ຮັບ ແລ້ວຜູກ asset ກັບຜູ້ຮັບ + ອັບທະບຽນຊັບສິນ ແລະ ຕັ້ງໃບຂໍເປັນ FULFILLED
+  const submitReceive = async (e) => {
+    e.preventDefault();
+    const assetTags = scannedTags();
+    if (assetTags.length === 0) {
+      setReceiveError('ກະລຸນາສະແກນ ຫຼື ກຣອກລະຫັດ Asset Tag ຢ່າງໜ້ອຍ 1 ລາຍການ');
+      return;
+    }
+    setReceiving(true);
+    setReceiveError('');
+    try {
+      await axios.patch(`/supply-requests/${receiveRequest._id}/receive`, {
+        assetTags,
+        ...(assigneeCode.trim() ? { assigneeCode: assigneeCode.trim() } : {}),
+      });
+      setReceiveResult({ ok: true, assetTags, assigneeCode });
+      fetchData();
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 404 || status === 405) {
+        setReceiveError('Backend ຍັງບໍ່ມີ Endpoint ນີ້: PATCH /supply-requests/:id/receive — ລໍຖ້າຝ່າຍ Backend ເພີ່ມໃຫ້ກ່ອນ');
+      } else {
+        setReceiveError(err.response?.data?.message || err.response?.data?.msg || 'ການບັນທຶກບໍ່ສຳເລັດ — ກະລຸນາກວດສອບລະຫັດທີ່ສະແກນ ຫຼື ລະຫັດພະນັກງານຜູ້ຮັບ');
+      }
+    } finally {
+      setReceiving(false);
+    }
+  };
+
   const renderStatus = (status) => {
     switch (status) {
       case 'REQUESTED':
@@ -194,7 +298,18 @@ useEffect(() => {
                     <td className="p-4 text-xs text-gray-500">
                       {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : '-'}
                     </td>
-                    <td className="p-4">{renderStatus(req.status)}</td>
+                    <td className="p-4">
+                      {renderStatus(req.status)}
+                      {req.status === 'APPROVED' && (
+                        <button
+                          onClick={() => openReceive(req)}
+                          title="ສະແກນເຄື່ອງ — ຮັບເຄື່ອງທີ່ຄັງ ແລະ ຜູກເຂົ້າທະບຽນຊັບສິນ"
+                          className="mt-1.5 inline-flex items-center gap-1 text-xs px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-medium transition"
+                        >
+                          <ScanLine size={13} /> ສະແກນເຄື່ອງ
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))
               ) : (
@@ -305,6 +420,136 @@ useEffect(() => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {receiveRequest && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-bold text-gray-800">
+                  {receiveStage === 1 ? 'ສະແກນເຄື່ອງ' : 'ຢືນຢັນຜູ້ຮັບ'} — {receiveRequest._id}
+                </h2>
+                <button type="button" onClick={closeReceive} className="text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+
+              {receiveStage === 1 ? (
+                <form onSubmit={(e) => { e.preventDefault(); gotoStage2(); }} className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    ສະແກນ ຫຼື ກຣອກລະຫັດ Asset Tag ຈາກບາໂຄ໊ດ/QR ທີ່ຕິດກັບເຄື່ອງຂອງບໍລິສັດ.
+                    ລະບົບຈະກວດກັບທະບຽນຊັບສິນ ແລະ ລາຍການທີ່ຂໍ ກ່ອນຈະຢືນຢັນ.
+                  </p>
+
+                  <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1.5">
+                    <div className="font-semibold text-gray-700">ລາຍການທີ່ຂໍ:</div>
+                    {Array.isArray(receiveRequest.items) && receiveRequest.items.map((it, idx) => (
+                      <div key={idx} className="text-xs flex justify-between">
+                        <span>{it.name}</span>
+                        <span className="text-gray-500">x{it.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Asset Tag (ສະແກນ/ພິມ)</label>
+                    <textarea
+                      autoFocus
+                      required
+                      rows={4}
+                      value={scanTags}
+                      onChange={(e) => { setScanTags(e.target.value); setReceiveError(''); }}
+                      placeholder="ສະແກນ ຫຼື ກຣອກ ລະຫັດ Asset Tag — 1 ລາຍການຕໍ່ແຖວ..."
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-mono"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">ສະແກນຫຼາຍອັນຕິດຕໍ່ກັນໄດ້ — ແຕ່ລະອັນຂຶ້ນບັນທັດໃໝ່ (Enter ພາຍຫຼັງສະແກນ)</p>
+                  </div>
+
+                  {scanResults.length > 0 && (
+                    <div className="space-y-1.5">
+                      {scanResults.map((r, i) => {
+                        const { cls, text } =
+                          !r.status
+                            ? { text: 'ລໍຖ້າ Backend ກວດສອບຕອນບັນທຶກ', cls: 'text-gray-500' }
+                            : r.status === 'ok'
+                              ? { text: `✓ ${r.asset.type} — ກົງກັບລາຍການ ແລະ ວ່າງ`, cls: 'text-emerald-600' }
+                              : r.status === 'not-found'
+                                ? { text: '✕ ບໍ່ພົບລະຫັດນີ້ໃນທະບຽນຊັບສິນ', cls: 'text-red-600' }
+                                : r.status === 'not-available'
+                                  ? { text: `✕ ສະຖານະ ${r.asset.status} — ບໍ່ວ່າງ`, cls: 'text-red-600' }
+                                  : { text: `✕ ຊະນິດບໍ່ກົງກັບລາຍການທີ່ຂໍ (${r.asset.type})`, cls: 'text-red-600' };
+                        return (
+                          <div key={i} className="text-xs bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 flex justify-between gap-2">
+                            <span className="font-mono truncate">{r.tag}</span>
+                            <span className={cls}>{text}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {receiveError && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{receiveError}</div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" onClick={closeReceive} className="px-4 py-2 text-sm text-gray-600">ປິດ</button>
+                    <button
+                      type="submit"
+                      disabled={scannedTags().length === 0}
+                      className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+                    >
+                      <PackageCheck size={15} /> ຖັດໄປ: ຢືນຢັນຜູ້ຮັບ
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={submitReceive} className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    ກວດສອບຜູ້ທີ່ຈະຮັບເຄື່ອງ. Backend ຈະຢືນຢັນລະຫັດອີກຄັ້ງ ກ່ອນຜູກເຄື່ອງເຂົ້າທະບຽນຊັບສິນຂອງບໍລິສັດ.
+                  </p>
+
+                  <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
+                    <div className="font-semibold text-gray-700">ເຄື່ອງທີ່ຈະຮັບ ({scannedTags().length})</div>
+                    <div className="text-xs text-gray-600 break-all font-mono">{scannedTags().join(', ')}</div>
+                    <div className="pt-1">
+                      <label className="block text-xs text-gray-500 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບ *</label>
+                      <input
+                        required
+                        value={assigneeCode}
+                        onChange={(e) => setAssigneeCode(e.target.value)}
+                        placeholder="ລະຫັດພະນັກງານ..."
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm tracking-widest"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">
+                        ຄ່າເລີ່ມຕົ້ນ = ຜູ້ຂໍຂອງຄຳຂໍນີ້ — ແກ້ໄດ້ຖ້າໃຫ້ຄົນອື່ນຮັບ (ຖ້າບໍ່ມີສິດ assets:assign Backend ຈະປະຕິເສດ)
+                      </p>
+                    </div>
+                  </div>
+
+                  {receiveError && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{receiveError}</div>
+                  )}
+                  {receiveResult?.ok && (
+                    <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      ✓ ບັນທຶກສຳເລັດ — ຜູກ {receiveResult.assetTags.length} ຊິ້ນ ກັບຜູ້ຮັບ {receiveResult.assigneeCode} ແລະ ຂຶ້ນທະບຽນຊັບສິນແລ້ວ
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" onClick={() => setReceiveStage(1)} className="px-4 py-2 text-sm text-gray-600">ກັບຄືນ</button>
+                    <button type="button" onClick={closeReceive} className="px-4 py-2 text-sm text-gray-600">ປິດ</button>
+                    <button
+                      type="submit"
+                      disabled={receiving || !!receiveResult?.ok}
+                      className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+                    >
+                      <PackageCheck size={15} />
+                      {receiving ? 'ກຳລັງບັນທຶກ...' : 'ຢືນຢັນ ແລະ ບັນທຶກ'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         )}

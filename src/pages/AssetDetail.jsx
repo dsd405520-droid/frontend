@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Laptop, Wrench, AlertCircle, UserCheck, X, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Laptop, Wrench, AlertCircle, UserCheck, X, CheckCircle2, History } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { hasPermission, getCurrentUser } from '../utils/permissions';
 import { API_BASE_URL } from '../config';
@@ -26,10 +26,10 @@ export default function AssetDetail() {
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
 
-  // Modal ຍັນຍົນຮັບເຄື່ອງ (ຢືນຢັນຕົວຕົນດ້ວຍລະຫັດພະນັກງານ)
+  // Modal ຍັນຍົນຮັບເຄື່ອງ — ມອບໝາຍໃຫ້ຜູ້ທີ່ກຳລັງ login ເທົ່ານັ້ນ (PATCH /assets/:id/claim)
+  const currentUser = getCurrentUser();
+  const claimUser = users.find((u) => u._id === currentUser?._id) || currentUser;
   const [claimOpen, setClaimOpen] = useState(false);
-  const [claimCode, setClaimCode] = useState(() => getCurrentUser()?.employeeCode || '');
-  const [claimUser, setClaimUser] = useState(null);
   const [claimError, setClaimError] = useState('');
   const [claimSubmitting, setClaimSubmitting] = useState(false);
   const [claimDone, setClaimDone] = useState(false);
@@ -59,7 +59,7 @@ export default function AssetDetail() {
 
   function fetchMaintenanceLogs() {
     setLoadingLogs(true);
-    fetch(`${API_BASE_URL}/assets/${id}/maintenance`, { headers })
+    fetch(`${API_BASE_URL}/maintenance-history/asset/${id}`, { headers })
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((body) => setMaintenanceLogs(unwrap(body) || []))
       .catch(() => setMaintenanceLogs([]))
@@ -108,8 +108,6 @@ export default function AssetDetail() {
   }, [searchParams, asset]);
 
   const openClaim = () => {
-    setClaimCode(getCurrentUser()?.employeeCode || '');
-    setClaimUser(null);
     setClaimError('');
     setClaimDone(false);
     setClaimOpen(true);
@@ -118,44 +116,19 @@ export default function AssetDetail() {
   const closeClaim = () => {
     const wasDone = claimDone;
     setClaimOpen(false);
-    setClaimUser(null);
     setClaimError('');
     setClaimDone(false);
     if (wasDone) fetchAssetDetail(true);
   };
 
-  const searchClaimUser = (e) => {
-    e.preventDefault();
-    const code = claimCode.trim().toLowerCase();
-    if (!code) return;
-    if (users.length === 0) {
-      setClaimError('ບໍ່ສາມາດຄົ້ນຫາລາຍຊື່ພະນັກງານໄດ້ (ບໍ່ມີສິດ users:read)');
-      return;
-    }
-    const found = users.find((u) => (u.employeeCode || '').toLowerCase() === code);
-    if (!found) {
-      setClaimUser(null);
-      setClaimError('ບໍ່ພົບລະຫັດພະນັກງານນີ້ໃນລະບົບ');
-      return;
-    }
-    if (found.isActive === false) {
-      setClaimUser(null);
-      setClaimError('ບັນຊີພະນັກງານນີ້ຖືກປິດການໃຊ້ງານແລ້ວ');
-      return;
-    }
-    setClaimError('');
-    setClaimUser(found);
-  };
-
   const confirmClaim = () => {
     setClaimSubmitting(true);
     setClaimError('');
-    fetch(`${API_BASE_URL}/assets/${id}/assign`, {
+    fetch(`${API_BASE_URL}/assets/${id}/claim`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({
-        assigneeId: claimUser._id,
-        note: `ຮັບເຄື່ອງດ້ວຍຕົນເອງ — ຢືນຢັນລະຫັດ ${claimUser.employeeCode}`,
+        note: 'ຮັບເຄື່ອງດ້ວຍຕົນເອງ — ຢືນຢັນຕົວຕົນຂອງຜູ້ໃຊ້ທີ່ກຳລັງ login',
       }),
     })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
@@ -194,6 +167,12 @@ export default function AssetDetail() {
     ? `${assignee.firstName || ''} ${assignee.lastName || ''}`.trim() + (assignee.employeeCode ? ` (${assignee.employeeCode})` : '')
     : 'ຍັງບໍ່ມີຜູ້ດູແລ';
 
+  const assigneeName = (uid) => {
+    if (!uid) return '—';
+    const u = users.find((x) => x._id === uid);
+    return u ? `${u.firstName || ''} ${u.lastName || ''}`.trim() + (u.employeeCode ? ` (${u.employeeCode})` : '') : uid;
+  };
+
   const lastMaintenanceAt = maintenanceLogs.reduce((latest, log) => {
     const t = log.createdAt ? new Date(log.createdAt).getTime() : 0;
     return t > latest ? t : latest;
@@ -203,10 +182,11 @@ export default function AssetDetail() {
     e.preventDefault();
     setRepairSubmitting(true);
     setRepairError('');
-    fetch(`${API_BASE_URL}/assets/${id}/maintenance`, {
+    fetch(`${API_BASE_URL}/maintenance-history`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
+        assetId: id,
         ...repairForm,
         cost: repairForm.cost ? Number(repairForm.cost) : undefined,
       }),
@@ -311,6 +291,13 @@ export default function AssetDetail() {
           >
             ປະຫວັດການສ້ອມແປງ ({maintenanceLogs.length})
           </button>
+          <button
+            onClick={() => handleTabChange('assignment')}
+            className={`pb-3 text-sm font-medium transition border-b-2 flex items-center gap-1.5 ${activeTab === 'assignment' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            <History size={14} />
+            ປະຫວັດການມອບໝາຍ ({Array.isArray(asset.assignmentHistory) ? asset.assignmentHistory.length : 0})
+          </button>
         </div>
 
         {activeTab === 'overview' && (
@@ -394,6 +381,31 @@ export default function AssetDetail() {
           </div>
         )}
 
+        {activeTab === 'assignment' && (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-gray-100 font-bold text-gray-800 flex items-center gap-2">
+              <History size={16} className="text-amber-500" />
+              ປະຫວັດການມອບໝາຍ (ຜູ້ຖືຄອງອຸປະກອນ)
+            </div>
+            <div className="divide-y divide-gray-100">
+              {!Array.isArray(asset.assignmentHistory) || asset.assignmentHistory.length === 0 ? (
+                <div className="p-6 text-center text-sm text-gray-500">ຍັງບໍ່ເຄີຍຖືກມອບໝາຍ</div>
+              ) : (
+                [...asset.assignmentHistory].reverse().map((h, i) => (
+                  <div key={h._id || i} className="p-4 text-sm">
+                    <div className="font-semibold text-gray-800">{assigneeName(h.assigneeId)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {h.assignedAt ? new Date(h.assignedAt).toLocaleString() : '—'} —{' '}
+                      {h.returnedAt ? new Date(h.returnedAt).toLocaleString() : <span className="text-blue-600 font-medium">ຍັງຖືຢູ່</span>}
+                    </div>
+                    {h.note && <div className="text-xs text-gray-500 mt-1 italic">"{h.note}"</div>}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {showRepairModal && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
             <form onSubmit={submitRepair} className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-3">
@@ -443,7 +455,7 @@ export default function AssetDetail() {
                   <CheckCircle2 size={44} className="mx-auto text-emerald-500" />
                   <div className="font-semibold text-gray-800">ບັນທຶກການຮັບເຄື່ອງສຳເລັດ</div>
                   <div className="text-sm text-gray-500">
-                    {asset.assetTag} → {claimUser ? `${claimUser.firstName} ${claimUser.lastName}` : ''}
+                    {asset.assetTag} → {claimUser ? `${claimUser.firstName || ''} ${claimUser.lastName || ''}` : ''}
                   </div>
                   <button
                     type="button"
@@ -454,34 +466,14 @@ export default function AssetDetail() {
                   </button>
                 </div>
               ) : !claimUser ? (
-                <form onSubmit={searchClaimUser} className="space-y-3">
-                  <p className="text-xs text-gray-500">
-                    ກະລຸນາໃສ່ລະຫັດພະນັກງານຂອງຜູ້ທີ່ຈະຮັບເຄື່ອງເພື່ອຢືນຢັນຕົວຕົນ
-                  </p>
-                  <input
-                    autoFocus
-                    required
-                    value={claimCode}
-                    onChange={(e) => setClaimCode(e.target.value)}
-                    placeholder="ລະຫັດພະນັກງານ..."
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm tracking-widest"
-                  />
-                  {claimError && (
-                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{claimError}</div>
-                  )}
-                  <div className="flex justify-end gap-2 pt-1">
-                    <button type="button" onClick={closeClaim} className="px-4 py-2 text-sm text-gray-600">ຍົກເລີກ</button>
-                    <button
-                      type="submit"
-                      disabled={asset.status !== 'AVAILABLE'}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium disabled:opacity-50"
-                    >
-                      ຕໍ່ໄປ
-                    </button>
-                  </div>
-                </form>
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  ບໍ່ສາມາດຢືນຢັນຕົວຕົນໄດ້ — ກະລຸນາ login ໃໝ່ແລ້ວລອງໃໝ່
+                </p>
               ) : (
                 <div className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    ຈະມອບໝາຍ {asset.assetTag} ໃຫ້ບັນຊີທີ່ກຳລັງ login ເທົ່ານັ້ນ (ບໍ່ສາມາດກຳນົດໃຫ້ບຸກຄົນອື່ນໄດ້):
+                  </p>
                   <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
                     <div className="flex justify-between py-1 border-b border-gray-100">
                       <span className="text-gray-500">ຊື່-ນາມສະກຸນ</span>
@@ -518,8 +510,8 @@ export default function AssetDetail() {
                     <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{claimError}</div>
                   )}
                   <div className="flex justify-end gap-2">
-                    <button type="button" onClick={() => { setClaimUser(null); setClaimError(''); }} className="px-4 py-2 text-sm text-gray-600">
-                      ກັບຄືນ
+                    <button type="button" onClick={closeClaim} className="px-4 py-2 text-sm text-gray-600">
+                      ຍົກເລີກ
                     </button>
                     <button
                       type="button"
