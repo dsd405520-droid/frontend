@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Plus, X, AlertCircle, Search, UserCheck, Undo2,
-  Wrench, History, AlertTriangle, Trash2, Barcode, Archive,
+  Wrench, History, AlertTriangle, Trash2, Barcode, Archive, Camera,
 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import CameraScanner from '../components/CameraScanner';
 import BarcodeComponent from 'react-barcode';
 import { QRCodeSVG } from 'qrcode.react';
 import { API_BASE_URL } from '../config';
@@ -58,6 +59,7 @@ export default function AssetRegistry() {
 
   const [barcodeModalAsset, setBarcodeModalAsset] = useState(null);
   const [historyModalAsset, setHistoryModalAsset] = useState(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
   function unwrap(body) {
@@ -348,8 +350,16 @@ export default function AssetRegistry() {
                   placeholder="ຄົ້ນຫາ ASSET TAG..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm"
+                  className="w-full pl-9 pr-10 py-2 border border-gray-200 rounded-xl text-sm"
                 />
+                <button
+                  type="button"
+                  onClick={() => setScannerOpen(true)}
+                  title="ສະແກນ QR / ບາໂຄ໊ດ ເພື່ອຄົ້ນຫາ"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-gray-500 hover:bg-gray-100"
+                >
+                  <Camera size={16} />
+                </button>
               </div>
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
                 <option value="">ທຸກສະຖານະ</option>
@@ -708,6 +718,26 @@ export default function AssetRegistry() {
               )}
             </div>
           </div>
+        )}
+
+        {scannerOpen && (
+          <CameraScanner
+            title="ສະແກນ Asset Tag"
+            hint="ຈ່ອງກ້ອງໃສ່ QR/ບາໂຄ໊ດ ເພື່ອຄົ້ນຫາຊັບສິນ"
+            onScan={(text) => {
+              const raw = String(text || '').trim();
+              const urlMatch = raw.match(/\/assets\/([A-Za-z0-9_-]+)/);
+              if (urlMatch) {
+                const found = assets.find((a) => a._id === urlMatch[1]);
+                if (found) {
+                  navigate(`/assets/${found._id}?claim=1`);
+                  return;
+                }
+              }
+              setSearch(raw);
+            }}
+            onClose={() => setScannerOpen(false)}
+          />
         )}
       </div>
     </MainLayout>

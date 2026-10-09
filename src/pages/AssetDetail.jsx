@@ -28,7 +28,9 @@ export default function AssetDetail() {
 
   // Modal ຍັນຍົນຮັບເຄື່ອງ — ມອບໝາຍໃຫ້ຜູ້ທີ່ກຳລັງ login ເທົ່ານັ້ນ (PATCH /assets/:id/claim)
   const currentUser = getCurrentUser();
-  const claimUser = users.find((u) => u._id === currentUser?._id) || currentUser;
+  const claimUser = users.find(
+    (u) => (currentUser?._id && u._id === currentUser._id) || (currentUser?.email && u.email === currentUser.email),
+  ) || currentUser;
   const [claimOpen, setClaimOpen] = useState(false);
   const [claimError, setClaimError] = useState('');
   const [claimSubmitting, setClaimSubmitting] = useState(false);
@@ -455,7 +457,7 @@ export default function AssetDetail() {
                   <CheckCircle2 size={44} className="mx-auto text-emerald-500" />
                   <div className="font-semibold text-gray-800">ບັນທຶກການຮັບເຄື່ອງສຳເລັດ</div>
                   <div className="text-sm text-gray-500">
-                    {asset.assetTag} → {claimUser ? `${claimUser.firstName || ''} ${claimUser.lastName || ''}` : ''}
+                    {asset.assetTag} → {claimUser ? (`${claimUser.firstName || ''} ${claimUser.lastName || ''}`.trim() || claimUser.email || '') : ''}
                   </div>
                   <button
                     type="button"
@@ -477,7 +479,7 @@ export default function AssetDetail() {
                   <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
                     <div className="flex justify-between py-1 border-b border-gray-100">
                       <span className="text-gray-500">ຊື່-ນາມສະກຸນ</span>
-                      <span className="font-medium text-gray-800">{claimUser.firstName} {claimUser.lastName}</span>
+                      <span className="font-medium text-gray-800">{`${claimUser.firstName || ''} ${claimUser.lastName || ''}`.trim() || claimUser.email || '—'}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-gray-100">
                       <span className="text-gray-500">ລະຫັດພະນັກງານ</span>

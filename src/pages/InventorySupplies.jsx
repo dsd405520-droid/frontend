@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine } from 'lucide-react';
+import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine, Camera } from 'lucide-react';
 import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
+import CameraScanner from '../components/CameraScanner';
 import axios from '../services/api';
 
 export default function InventorySupplies() {
@@ -27,6 +28,7 @@ export default function InventorySupplies() {
   const [receiving, setReceiving] = useState(false);
   const [receiveError, setReceiveError] = useState('');
   const [receiveResult, setReceiveResult] = useState(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -132,6 +134,7 @@ useEffect(() => {
     );
     setReceiveError('');
     setReceiveResult(null);
+    setScannerOpen(false);
     // ຄົ້ນຫາທະບຽນຊັບສິນກ່ອນ (ເພື່ອກວດວ່າ tag ມີຈິງ/ຊະນິດກົງ/ສະຖານະວ່າງ) — ຖ້າບໍ່ມີສິດ ໃຫ້ Backend ກວດຕອນບັນທຶກ
     if (hasPermission('assets', 'read')) {
       try {
@@ -149,10 +152,24 @@ useEffect(() => {
     setReceiveResult(null);
     setReceiveError('');
     setReceiveStage(1);
+    setScannerOpen(false);
     fetchData();
   };
 
   const scannedTags = () => scanTags.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+
+  // ເພີ່ມ tag ທີ່ສະແກນຈາກກ້ອງ (ກັນຊ້ຳ, ແຍກບັນທັດລະແຖວ)
+  const appendScannedTag = (text) => {
+    const tag = String(text || '').trim();
+    if (!tag) return;
+    setScanTags((prev) => {
+      const existing = prev.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      if (existing.some((t) => t.toLowerCase() === tag.toLowerCase())) return prev;
+      const trimmed = prev.replace(/\s+$/, '');
+      return trimmed ? `${trimmed}\n${tag}` : tag;
+    });
+    setReceiveError('');
+  };
 
   // ກວດ tag ທີ່ສະແກນກັບທະບຽນຊັບສິນ + ລາຍການທີ່ຂໍ (ສະແດງຜົນກ່ອນຢືນຢັນ)
   const scanResults = receiveRequest
@@ -300,7 +317,7 @@ useEffect(() => {
                     </td>
                     <td className="p-4">
                       {renderStatus(req.status)}
-                      {req.status === 'APPROVED' && (
+                      {req.status === 'APPROVED' && hasPermission('supplies', 'fulfill') && (
                         <button
                           onClick={() => openReceive(req)}
                           title="ສະແກນເຄື່ອງ — ຮັບເຄື່ອງທີ່ຄັງ ແລະ ຜູກເຂົ້າທະບຽນຊັບສິນ"
@@ -452,7 +469,16 @@ useEffect(() => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">Asset Tag (ສະແກນ/ພິມ)</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-gray-600">Asset Tag (ສະແກນ/ພິມ)</label>
+                      <button
+                        type="button"
+                        onClick={() => setScannerOpen(true)}
+                        className="inline-flex items-center gap-1 text-xs px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-medium transition"
+                      >
+                        <Camera size={13} /> ສະແກນດ້ວຍກ້ອງ
+                      </button>
+                    </div>
                     <textarea
                       autoFocus
                       required
@@ -552,6 +578,16 @@ useEffect(() => {
               )}
             </div>
           </div>
+        )}
+
+        {scannerOpen && (
+          <CameraScanner
+            continuous
+            title="ສະແກນ Asset Tag"
+            hint="ຈ່ອງກ້ອງໃສ່ QR/ບາໂຄ໊ດ — ສະແກນໄດ້ຫຼາຍອັນຕິດຕໍ່ກັນ"
+            onScan={appendScannedTag}
+            onClose={() => setScannerOpen(false)}
+          />
         )}
       </div>
     </MainLayout>
