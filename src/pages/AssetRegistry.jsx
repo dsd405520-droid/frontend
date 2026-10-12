@@ -18,7 +18,9 @@ export default function AssetRegistry() {
   const navigate = useNavigate();
   const token = localStorage.getItem('token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  const isLocalOrigin = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  const publicBaseUrl = (import.meta.env.VITE_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  const claimBaseUrl = publicBaseUrl || window.location.origin;
+  const isLocalOrigin = !publicBaseUrl && ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
   const canCreate = hasPermission('assets', 'create');
   const canRead = hasPermission('assets', 'read');
@@ -627,7 +629,7 @@ export default function AssetRegistry() {
               <div className="border-t border-gray-100 pt-3 flex flex-col items-center justify-center space-y-1">
                 <div className="text-xs font-medium text-gray-600">ເປີດໜ້າຢືນຢັນຮັບເຄື່ອງ (online)</div>
                 <QRCodeSVG
-                  value={`${window.location.origin}/assets/${barcodeModalAsset._id}?claim=1`}
+                  value={`${claimBaseUrl}/assets/${barcodeModalAsset._id}?claim=1`}
                   size={130}
                   level="M"
                   marginSize={2}
@@ -635,7 +637,8 @@ export default function AssetRegistry() {
                 {isLocalOrigin ? (
                   <div className="text-[11px] text-red-500 bg-red-50 border border-red-100 rounded-lg px-2 py-1">
                     ກຳລັງເປີດຜ່ານ localhost — QR ນີ້ມືຖືຈະເປີດບໍ່ໄດ້.
-                    ໃຫ້ເປີດເວັບຜ່ານ http://&lt;IP ຂອງ PC&gt;:5173 ກ່ອນ ແລ້ວສະແກນໃໝ່
+                    ໃຫ້ເປີດເວັບຜ່ານ https://&lt;IP ຂອງ PC&gt;:5173 ກ່ອນ ແລ້ວສະແກນໃໝ່
+                    (ຫຼື ຕັ້ງ VITE_PUBLIC_BASE_URL=https://&lt;IP&gt;:5173)
                   </div>
                 ) : (
                   <div className="text-[11px] text-gray-400">ຕ້ອງເຊື່ອມຕໍ່ເຄືອຂ່າຍດຽວກັບເຊີບເວີ — ເປີດໜ້າໃສ່ລະຫັດພະນັກງານທັນທີ</div>

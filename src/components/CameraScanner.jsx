@@ -45,6 +45,14 @@ export default function CameraScanner({
     let cancelled = false;
 
     (async () => {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setStarting(false);
+        setError(
+          `ເບຣົາເຊີບລັອກກ້ອງ ເນື່ອງຈາກໜ້ານີ້ບໍ່ແມ່ນ HTTPS (ປັດຈຸບັນ: ${window.location.origin}). ກະລຸນາເປີດຜ່ານ https://... ຫຼື localhost ເທົ່ານັ້ນ`,
+        );
+        return;
+      }
+
       let Html5Qrcode;
       try {
         ({ Html5Qrcode } = await import('html5-qrcode'));
