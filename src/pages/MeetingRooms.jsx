@@ -5,6 +5,7 @@ import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import BookingInvitePanel from '../components/BookingInvitePanel';
 import { getSocket } from '../utils/socket';
 import { useBranch } from '../contexts/BranchContext';
 import { API_BASE_URL } from '../config';
@@ -73,6 +74,16 @@ export default function MeetingRooms() {
 
   const [pickStart, setPickStart] = useState(null);
 
+  // States ສຳລັບ Filter "ຫ້ອງວ່າງຕາມເວລາ" (ຢູ່ຖັດຈາກ search/filter ໃນແຖບຫ້ອງ)
+  const [isAvailOpen, setIsAvailOpen] = useState(false);
+  const [availDate, setAvailDate] = useState(''); // 'YYYY-MM-DD' — ຕ້ອງເລືອກວັນທີກ່ອນ
+  const [availRange, setAvailRange] = useState({ start: 9 * 60, end: 10 * 60 }); // ນາທີຂອງມື້ (slider)
+  const [availFrom, setAvailFrom] = useState(''); // datetime-local ຂອງຊ່ວງທີ່ໃຊ້ filter ຢູ່
+  const [availTo, setAvailTo] = useState('');
+  const [availRooms, setAvailRooms] = useState(null); // null = ບໍ່ໄດ້ filter ຕາມເວລາ
+  const [availLoading, setAvailLoading] = useState(false);
+  const [availError, setAvailError] = useState('');
+
   // States ສຳລັບ Reschedule Modal
   const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
   const [currentBookingToReschedule, setCurrentBookingToReschedule] = useState(null);
@@ -94,6 +105,15 @@ export default function MeetingRooms() {
   const [loadingPending, setLoadingPending] = useState(false);
   const [pendingApprovalsError, setPendingApprovalsError] = useState('');
   const [reviewingId, setReviewingId] = useState(null);
+
+  // States ສຳລັບຕາຕະລາງພາບລວມຄຳຮ້ອງ (tab Admin)
+  const [adminWeek, setAdminWeek] = useState(new Date());
+  const [adminConfirmed, setAdminConfirmed] = useState([]); // ການຈອງທີ່ CONFIRMED ໃນອາທິດທີ່ກຳລັງເບິ່ງ
+  const [adminRoomId, setAdminRoomId] = useState('');
+  const [adminRoomQuery, setAdminRoomQuery] = useState(''); // ຂໍ້ຄວາມຄົ້ນຫາໃນຊ່ອງເລືອກຫ້ອງ
+  const [adminRoomOpen, setAdminRoomOpen] = useState(false);
+  const adminRoomRef = useRef(null);
+  const [adminSelectedId, setAdminSelectedId] = useState(null); // ຄຳຮ້ອງ (pending) ທີ່ເລືອກ → ພື້ນຫຼັງສີຂຽວ
 
   // States ສຳລັບ popup ໃສ່ເຫດຜົນຕອນປະຕິເສດຄຳຮ້ອງຂໍຈອງ
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
@@ -185,8 +205,8 @@ export default function MeetingRooms() {
       .catch(() => setCalendarBookings([]));
   };
 
-  const fetchMyBookings = () => {
-    setLoadingMyBookings(true);
+  const fetchMyBookings = (silent = false) => {
+    if (!silent) setLoadingMyBookings(true);
     fetch(`${API_BASE_URL}/room-bookings/my`, {
       headers: {
         'Authorization': `Bearer ${token}`
@@ -201,8 +221,8 @@ export default function MeetingRooms() {
   };
 
   // Org-wide room utilization report — ໃຊ້ endpoint GET /rooms/utilization?from=&to=
-  const fetchUtilization = () => {
-    setLoadingUtilization(true);
+  const fetchUtilization = (silent = false) => {
+    if (!silent) setLoadingUtilization(true);
     const from = new Date(utilFrom + 'T00:00:00').toISOString();
     const to = new Date(utilTo + 'T23:59:59').toISOString();
     const params = new URLSearchParams({ from, to });
@@ -219,8 +239,8 @@ export default function MeetingRooms() {
   };
 
   // ລາຍການຄຳຮ້ອງຂໍຈອງທີ່ລໍຖ້າອະນຸມັດ — ສະເພາະຄົນທີ່ມີສິດ 'rooms:approve' ຈຶ່ງຈະ 200; ຄົນອື່ນຈະ 403
-  const fetchPendingApprovals = () => {
-    setLoadingPending(true);
+  const fetchPendingApprovals = (silent = false) => {
+    if (!silent) setLoadingPending(true);
     setPendingApprovalsError('');
     fetch(`${API_BASE_URL}/room-bookings/pending`, {
       headers: { 'Authorization': `Bearer ${token}` }
@@ -265,6 +285,9 @@ export default function MeetingRooms() {
   // ປິດ dropdown ຂອງ Filter (ຊັ້ນ / ຈຸດໃນຊັ້ນ) ເມື່ອກົດນອກພື້ນທີ່
   useEffect(() => {
     const handleClickOutside = (e) => {
+      if (adminRoomRef.current && !adminRoomRef.current.contains(e.target)) {
+        setAdminRoomOpen(false);
+      }
       if (floorRef.current && !floorRef.current.contains(e.target)) {
         setIsFloorOpen(false);
       }
@@ -290,31 +313,62 @@ export default function MeetingRooms() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarViewMode, calendarAnchorDate]);
 
-  // ຟັງເຫດການ real-time ຈາກ Backend (WebSocket):
-  // ພໍມີການຈອງ ຫຼື ແກ້ໄຂຫ້ອງຈາກໜ້າຈໍອື່ນ/ຜູ້ອື່ນ →
-  // ດຶງຂໍ້ມູນມາສະແດງໃໝ່ທັນທີ ໂດຍບໍ່ຕ້ອງ reload ໜ້າ
+  // ຕາຕະລາງຄຳຮ້ອງໃນ tab Admin — ດຶງການຈອງ CONFIRMED ຂອງອາທິດທີ່ເບິ່ງຢູ່ (ແຍກຈາກຕາຕະລາງຫ້ອງ ເພື່ອບໍ່ຂຶ້ນກັບ mode ວັນ/ອາທິດ)
+  // ດຶງໃໝ່ເມື່ອລາຍການ pending ປ່ຽນ (ລວມທັງຕອນ real-time refresh)
   useEffect(() => {
+    if (activeTab !== 'admin' || !canApproveBookings) return;
+    const { from, to } = getWeekRange(adminWeek);
+    const params = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() });
+    fetch(`${API_BASE_URL}/room-bookings?${params.toString()}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+      .then(res => res.json())
+      .then(data => setAdminConfirmed(Array.isArray(data) ? data : data.data || []))
+      .catch(() => setAdminConfirmed([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, adminWeek, pendingApprovals]);
+
+  // ດຶງຂໍ້ມູນທຸກຢ່າງທີ່ໜ້ານີ້ສະແດງ ແບບ "ງຽບ" (ບໍ່ສະແດງ loading ກະພິບ) — ໃຊ້ໂດຍ WebSocket, polling ແລະ ຕອນກັບມາເບິ່ງ tab
+  // ຕ້ອງເປັນ function ທີ່ອ່ານ state ລ່າສຸດສະເໝີ (ຜ່ານ ref ຂ້າງລຸ່ມ) — ບໍ່ດັ່ງນັ້ນຕາຕະລາງຈະດຶງອາທິດ/ມື້ເກົ່າທີ່ຄ້າງໃນ closure
+  const refreshFromServer = () => {
+    fetchRooms(true);
+    fetchCalendarBookings();
+    fetchMyBookings(true);
+    if (activeTabRef.current === 'admin') {
+      if (canApproveBookings) fetchPendingApprovals(true);
+      if (canManageRooms) fetchUtilization(true);
+    }
+  };
+  const refreshRef = useRef(refreshFromServer);
+  refreshRef.current = refreshFromServer;
+
+  // Real-time:
+  //  1) WebSocket — ມີການຈອງ/ອະນຸມັດ/ປະຕິເສດ/ຍົກເລີກ/ເລື່ອນເວລາ/check-in/out ຫຼື ແກ້ໄຂຫ້ອງ → ດຶງໃໝ່ທັນທີ
+  //  2) ເຊື່ອມຕໍ່ socket ໃໝ່ (reconnect) → ດຶງໃໝ່ ເພື່ອເກັບເຫດການທີ່ພາດໄປຕອນຫຼຸດ
+  //  3) Polling ທຸກ 30 ວິນາທີ — ສະຖານະທີ່ປ່ຽນຕາມເວລາ (ກຳລັງໃຊ້ງານ / no-show / ເວລາຜ່ານໄປແລ້ວ) ບໍ່ມີເຫດການຈາກ Backend
+  //  4) ກັບມາເບິ່ງ tab ນີ້ອີກຄັ້ງ → ດຶງໃໝ່
+  useEffect(() => {
+    const run = () => refreshRef.current();
     const socket = getSocket();
-    if (!socket) return;
-
-    const refreshFromServer = () => {
-      fetchRooms(true);
-      fetchCalendarBookings();
-      if (activeTabRef.current === 'my-bookings') {
-        fetchMyBookings();
-      }
-      if (activeTabRef.current === 'admin') {
-        if (canApproveBookings) fetchPendingApprovals();
-        if (canManageRooms) fetchUtilization();
-      }
-    };
-
-    socket.on('room-bookings:changed', refreshFromServer);
-    socket.on('room:changed', refreshFromServer);
+    if (socket) {
+      socket.on('room-bookings:changed', run);
+      socket.on('room:changed', run);
+      socket.on('connect', run);
+    }
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') run();
+    }, 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') run(); };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
-      socket.off('room-bookings:changed', refreshFromServer);
-      socket.off('room:changed', refreshFromServer);
+      if (socket) {
+        socket.off('room-bookings:changed', run);
+        socket.off('room:changed', run);
+        socket.off('connect', run);
+      }
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
@@ -414,6 +468,88 @@ export default function MeetingRooms() {
     if (hour > WORK_END_HOUR) return true;
     if (hour === WORK_END_HOUR && minutes > 0) return true;
     return false;
+  };
+
+  // Timeline ລາກເລືອກເວລາ: ສະແດງປ້າຍທຸກຊົ່ວໂມງ (08:00 – 17:00) ແຕ່ snap ທຸກ 30 ນາທີ
+  const AVAIL_START_MIN = 8 * 60;
+  const AVAIL_END_MIN = 17 * 60;
+  const AVAIL_STEP = 30;
+  const AVAIL_HOUR_LABELS = Array.from({ length: (AVAIL_END_MIN - AVAIL_START_MIN) / 60 + 1 }, (_, i) => 8 + i);
+
+  const availDateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const fmtMin = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+  // ນາທີ "ຕອນນີ້" ຖ້າວັນທີທີ່ເລືອກແມ່ນມື້ນີ້ (ເວລາກ່ອນນັ້ນເລືອກບໍ່ໄດ້), ຖ້າເປັນວັນອະນາຄົດ = 0
+  const availMinAllowed = () => {
+    if (!availDate) return AVAIL_START_MIN;
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (availDate < todayKey) return AVAIL_END_MIN; // ມື້ທີ່ຜ່ານໄປ — ເລືອກບໍ່ໄດ້
+    if (availDate > todayKey) return AVAIL_START_MIN;
+    return Math.max(AVAIL_START_MIN, Math.ceil((now.getHours() * 60 + now.getMinutes()) / AVAIL_STEP) * AVAIL_STEP);
+  };
+
+  // ຍ້າຍ slider (ຂະຫຍັບທຸກ 30 ນາທີ) — ມືຈັບຊ້າຍ = ເລີ່ມ, ມືຈັບຂວາ = ສິ້ນສຸດ
+  const handleAvailSlider = (which, value) => {
+    const v = Number(value);
+    setAvailRange(prev => {
+      if (which === 'start') {
+        const start = Math.min(Math.max(v, availMinAllowed()), prev.end - AVAIL_STEP);
+        return { ...prev, start: Math.min(start, AVAIL_END_MIN - AVAIL_STEP) };
+      }
+      return { ...prev, end: Math.max(v, prev.start + AVAIL_STEP) };
+    });
+  };
+
+  // ຄົ້ນຫາຫ້ອງວ່າງອັດຕະໂນມັດ ເມື່ອເລືອກວັນທີ ຫຼື ຂະຫຍັບ slider (ລໍຖ້າ 400ms ຫຼັງຢຸດຂະຫຍັບ)
+  useEffect(() => {
+    if (!isAvailOpen || !availDate) return undefined;
+    const allowed = availMinAllowed();
+    if (allowed >= AVAIL_END_MIN) {
+      setAvailRooms(null); setAvailFrom(''); setAvailTo('');
+      setAvailError('ວັນທີນີ້ຜ່ານໄປແລ້ວ ກະລຸນາເລືອກວັນທີອື່ນ');
+      return undefined;
+    }
+    const start = Math.max(availRange.start, allowed);
+    const end = Math.max(availRange.end, start + AVAIL_STEP);
+    const t = setTimeout(() => {
+      const fromVal = `${availDate}T${fmtMin(start)}`;
+      const toVal = `${availDate}T${fmtMin(end)}`;
+      setAvailFrom(fromVal);
+      setAvailTo(toVal);
+      searchAvailable(fromVal, toVal);
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availDate, availRange.start, availRange.end, isAvailOpen]);
+
+  const clearAvailFilter = () => {
+    setAvailDate('');
+    setAvailFrom('');
+    setAvailTo('');
+    setAvailRooms(null);
+    setAvailError('');
+  };
+
+  const searchAvailable = (fromVal, toVal) => {
+    setAvailLoading(true);
+    setAvailError('');
+    const params = new URLSearchParams({
+      from: new Date(fromVal).toISOString(),
+      to: new Date(toVal).toISOString(),
+    });
+    if (selectedBranchId) params.set('branchId', selectedBranchId);
+    fetch(`${API_BASE_URL}/rooms/available?${params.toString()}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+      .then(res => res.json().then(body => ({ ok: res.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body?.msg || body?.message || 'ບໍ່ສາມາດຄົ້ນຫາຫ້ອງວ່າງໄດ້');
+        setAvailRooms(Array.isArray(body) ? body : body.data || []);
+      })
+      .catch(err => { setAvailError(err.message || 'ບໍ່ສາມາດຄົ້ນຫາຫ້ອງວ່າງໄດ້'); setAvailRooms(null); })
+      .finally(() => setAvailLoading(false));
   };
 
   const handleBookingSubmit = (e) => {
@@ -591,7 +727,23 @@ export default function MeetingRooms() {
       .catch(err => alert(err.message));
   };
 
-  const timeSlots = ['08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00'];
+  // ຊ່ອງເວລາທຸກ 30 ນາທີ (08:00, 08:30, ... 16:30) — ຂ້າມພັກທ່ຽງ 12:00–13:00; ແຕ່ລະຊ່ອງ = 30 ນາທີ ເລີ່ມທີ່ເວລາທີ່ສະແດງ
+  const timeSlots = [
+    '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+    '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30',
+  ];
+  const SLOT_MINUTES = 30;
+  // ປ້າຍຫົວຕາຕະລາງ: ສະແດງສະເພາະຊົ່ວໂມງເຕັມ (08:00, 09:00 ...) ແຕ່ລະປ້າຍກວມ 2 ຊ່ອງ
+  const hourHeaderSlots = timeSlots.filter(t => t.endsWith(':00'));
+  const SLOT_COLS = timeSlots.length + 1; // +1 = ຄໍລຳຊື່ວັນ
+  // ຕຳແໜ່ງ (ໜ່ວຍ = 1 ຊ່ອງ) ຂອງເວລາໜຶ່ງໃນແກນເວລາທີ່ຂ້າມພັກທ່ຽງ — ໃຊ້ວາງ/ຍືດກ່ອງການຈອງຕາມນາທີຈິງ
+  const slotPos = (d) => {
+    const m = d.getHours() * 60 + d.getMinutes();
+    if (m <= 480) return 0;
+    if (m <= 720) return (m - 480) / SLOT_MINUTES;
+    if (m < 780) return 8;
+    return Math.min(16, 8 + (m - 780) / SLOT_MINUTES);
+  };
   const weekDays = [
     { key: 'mon', label: 'ຈັນ', dayIndex: 1 },
     { key: 'tue', label: 'ອັງຄານ', dayIndex: 2 },
@@ -845,7 +997,9 @@ export default function MeetingRooms() {
         .some((f) => f.toLowerCase().includes(q));
     const matchesFloor = floorFilter.length === 0 || floorFilter.includes(roomFloor(room));
     const matchesLocation = locationFilter.length === 0 || locationFilter.includes(roomSpot(room));
-    return matchesSearch && matchesFloor && matchesLocation;
+    const matchesAvailability = !availRooms
+      || availRooms.some((ar) => String(ar.roomId || ar._id) === String(room.roomId || room._id));
+    return matchesSearch && matchesFloor && matchesLocation && matchesAvailability;
   });
 
   // ຫ້ອງທີ່ຈະສະແດງໃນຕາຕະລາງ — ຖ້າບໍ່ເລືອກຫ້ອງໃດ ຈະເອົາຫ້ອງທັງໝົດມາສະແດງ
@@ -868,6 +1022,12 @@ export default function MeetingRooms() {
   // Backend (findPendingApprovals) ຄຳນວນໃຫ້ມາແລ້ວ ເພື່ອໃຫ້ຄືກັນກັບ assertNoOverlap ເຊີ່ງ [startAt, endAt)
   //   conflictWith = ຄຳຮ້ອງ PENDING ອື່ນ ທີ່ຊົ່ວກັນ (ຕ້ອງເລືອກວ່າຈະອະນຸມັດລາຍການໃດ)
   //   blockedBy    = booking ທີ່ CONFIRMED ແລ້ວ ທີ່ຊົ່ວກັນ (ອະນຸມັດຈະໂດນ 409 ທັນທີ)
+  const selectPendingRequest = (b) => {
+    setAdminSelectedId(b._id);
+    setAdminRoomId(String(bookingRoomId(b)));
+    setAdminWeek(new Date(b.startAt));
+  };
+
   const conflictWith = (b) => b.conflictWith || [];
   const blockedBy = (b) => b.blockedBy || [];
 
@@ -952,20 +1112,6 @@ export default function MeetingRooms() {
     return calendarRooms.some((r) => String(r.roomId || r._id) === id);
   };
 
-  const slotHours = timeSlots.map(t => parseInt(t, 10));
-
-  // ຄຳນວນຈຳນວນຊົ່ວໂມງທີ່ booking ກິນເວລາ (ໃຊ້ stretch ຂໍ້ຄວາມຕາມເວລາເລີ່ມ–ສິ້ນສຸດ)
-  const getBookingSlotSpan = (b) => {
-    const start = new Date(b.startAt);
-    const end = new Date(b.endAt);
-    const startIdx = slotHours.indexOf(start.getHours());
-    if (startIdx === -1) return 1;
-    const endHour = end.getHours() + (end.getMinutes() > 0 ? 1 : 0);
-    let endIdx = slotHours.findIndex(h => h >= endHour);
-    if (endIdx === -1) endIdx = slotHours.length;
-    return Math.max(1, endIdx - startIdx);
-  };
-
   // ຈັດ lane ໃຫ້ບັນດາການຈອງທີ່ເວລາຊ້ອນກັນ — ໃຫ້ lane ດຽວກັນບໍ່ໄດ້ ຈຶ່ງຈະບໍ່ທັບກັນ, ແຕ່ຍັງ stretch ຕາມເວລາເລີ່ມ–ສິ້ນສຸດ
   const computeLanes = (items) => {
     const sorted = items
@@ -1022,41 +1168,38 @@ export default function MeetingRooms() {
 
   // ກວດວ່າ slot (ວັນ + ເວລາ) ຂອງຫ້ອງທີ່ລະບຸ ຖືກຈອງໄວ້ແລ້ວບໍ່ — ໃຊ້ຮ່ວມທັງຟອມຈອງຫ້ອງ ແລະ ຟອມເລື່ອນເວລາ
   // excludeBookingId: ຕອນເລື່ອນເວລາ ຕ້ອງບໍ່ນັບການຈອງຂອງໂຕເອງມາເປັນຕົວສະກັດ (ບໍ່ດັ່ງນັ້ນຈະເລືອກຊ່ອງເດີມບໍ່ໄດ້)
-  const isSlotOccupiedForRoom = (roomId, dayIndex, time, excludeBookingId = null) => {
-    const hour = parseInt(time, 10);
-    return calendarBookings.some(b => {
+  const isRangeOccupiedForRoom = (roomId, rangeStart, rangeEnd, excludeBookingId = null) => (
+    calendarBookings.some(b => {
       if (excludeBookingId && b._id === excludeBookingId) return false;
-      const bStart = new Date(b.startAt);
-      const bEnd = new Date(b.endAt);
       const bRoomId = typeof b.roomId === 'object' ? (b.roomId?._id || b.roomId?.roomId) : b.roomId;
-      if (String(bRoomId) !== String(roomId) || bStart.getDay() !== dayIndex) return false;
+      if (String(bRoomId) !== String(roomId)) return false;
+      return new Date(b.startAt) < rangeEnd && new Date(b.endAt) > rangeStart;
+    })
+  );
 
-      const startHour = bStart.getHours();
-      const endHour = bEnd.getHours() + (bEnd.getMinutes() > 0 ? 1 : 0);
-      return hour >= startHour && hour < endHour;
-    });
+  const addMinutes = (d, mins) => new Date(d.getTime() + mins * 60000);
+
+  // ຊ່ອງ 30 ນາທີ [ເວລາຊ່ອງ, +30] ຖືກຈອງແລ້ວບໍ່
+  const isSlotOccupiedForRoom = (roomId, dayIndex, time, excludeBookingId = null) => {
+    const slotStart = getSlotDateTime(dayIndex, time);
+    return isRangeOccupiedForRoom(roomId, slotStart, addMinutes(slotStart, SLOT_MINUTES), excludeBookingId);
   };
 
   const isSlotOccupied = (dayIndex, time) => isSlotOccupiedForRoom(selectedRoom, dayIndex, time);
 
   const isSlotInSelectedRange = (dayIndex, time, startVal = startAt, endVal = endAt) => {
     if (!startVal || !endVal) return false;
-    const start = new Date(startVal);
-    const end = new Date(endVal);
-    if (start.getDay() !== dayIndex) return false;
-    const hour = parseInt(time, 10);
-    return hour >= start.getHours() && hour < end.getHours();
+    const slotStart = getSlotDateTime(dayIndex, time);
+    return slotStart >= new Date(startVal) && slotStart < new Date(endVal);
   };
 
   // ກົດເລືອກຈຸດເລີ່ມ ແລ້ວກົດອີກເທື່ອເພື່ອເລືອກຈຸດສິ້ນສຸດ — ແທນທີ່ຈະພິມວັນ/ເວລາເອງ
+  // ຊ່ອງທີ່ກົດເປັນຈຸດສິ້ນສຸດ "ລວມຊ່ອງນັ້ນ" — ເວລາສິ້ນສຸດ = ເວລາຂອງຊ່ອງ + 30 ນາທີ (ຈຶ່ງເລືອກຈົບ xx:30 ແລະ 17:00 ໄດ້)
   const handlePickerClick = (dayIndex, time) => {
     if (!canCreateBooking) {
       setBookingMessage({ type: 'error', text: 'ທ່ານບໍ່ມີສິດຈອງຫ້ອງ' });
       return;
     }
-
-    const isPickingEnd = pickStart && pickStart.dayIndex === dayIndex &&
-      slotHours.indexOf(parseInt(time, 10)) > slotHours.indexOf(parseInt(pickStart.time, 10));
 
     // Fail-safe: ຖ້າສຳເລັດກົດມາໄດ້ (UI ຄວນ disable ແລ້ວ) ໃຫ້ສະແດງຂໍ້ຜິດພາດ ແລະ ລຶບການເລືອກເວລາທີ່ຜ່ານໄປອອກ
     if (isSlotInPast(dayIndex, time)) {
@@ -1075,7 +1218,7 @@ export default function MeetingRooms() {
       return;
     }
 
-    if (isSlotOccupied(dayIndex, time) && !isPickingEnd) return;
+    if (isSlotOccupied(dayIndex, time)) return;
 
     if (!pickStart || pickStart.dayIndex !== dayIndex) {
       setPickStart({ dayIndex, time });
@@ -1084,33 +1227,25 @@ export default function MeetingRooms() {
       return;
     }
 
-    const startIdx = slotHours.indexOf(parseInt(pickStart.time, 10));
-    const clickedIdx = slotHours.indexOf(parseInt(time, 10));
-
-    if (clickedIdx === startIdx) {
-      setPickStart(null);
-      return;
-    }
+    const startIdx = timeSlots.indexOf(pickStart.time);
+    const clickedIdx = timeSlots.indexOf(time);
 
     if (clickedIdx < startIdx) {
       setPickStart({ dayIndex, time });
       return;
     }
 
-    const rangeHasConflict = slotHours.slice(startIdx, clickedIdx).some(h =>
-      isSlotOccupied(dayIndex, `${String(h).padStart(2, '0')}:00`)
-    );
+    const rangeStart = getSlotDateTime(dayIndex, pickStart.time);
+    const rangeEnd = addMinutes(getSlotDateTime(dayIndex, time), SLOT_MINUTES);
 
-    if (rangeHasConflict) {
+    if (isRangeOccupiedForRoom(selectedRoom, rangeStart, rangeEnd)) {
       alert('ຊ່ວງເວລານີ້ຊ້ອນກັບການຈອງທີ່ມີຢູ່ແລ້ວ ກະລຸນາເລືອກໃໝ່');
       setPickStart(null);
       return;
     }
 
-    const startVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, pickStart.time));
-    const endVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, time));
-    setStartAt(startVal);
-    setEndAt(endVal);
+    setStartAt(toDateTimeLocalValue(rangeStart));
+    setEndAt(toDateTimeLocalValue(rangeEnd));
     setPickStart(null);
   };
 
@@ -1134,8 +1269,6 @@ export default function MeetingRooms() {
 
     const roomId = String(bookingRoomId(booking));
     const excludeId = booking._id;
-    const isPickingEnd = reschedulePickStart && reschedulePickStart.dayIndex === dayIndex &&
-      slotHours.indexOf(parseInt(time, 10)) > slotHours.indexOf(parseInt(reschedulePickStart.time, 10));
 
     if (isSlotInPast(dayIndex, time)) {
       alert('ເວລານີ້ຜ່ານໄປແລ້ວ ກະລຸນາເລືອກເວລາທີ່ຍັງບໍ່ທັນຜ່ານໄປ');
@@ -1152,7 +1285,7 @@ export default function MeetingRooms() {
       return;
     }
 
-    if (isSlotOccupiedForRoom(roomId, dayIndex, time, excludeId) && !isPickingEnd) return;
+    if (isSlotOccupiedForRoom(roomId, dayIndex, time, excludeId)) return;
 
     if (!reschedulePickStart || reschedulePickStart.dayIndex !== dayIndex) {
       setReschedulePickStart({ dayIndex, time });
@@ -1161,33 +1294,25 @@ export default function MeetingRooms() {
       return;
     }
 
-    const startIdx = slotHours.indexOf(parseInt(reschedulePickStart.time, 10));
-    const clickedIdx = slotHours.indexOf(parseInt(time, 10));
-
-    if (clickedIdx === startIdx) {
-      setReschedulePickStart(null);
-      return;
-    }
+    const startIdx = timeSlots.indexOf(reschedulePickStart.time);
+    const clickedIdx = timeSlots.indexOf(time);
 
     if (clickedIdx < startIdx) {
       setReschedulePickStart({ dayIndex, time });
       return;
     }
 
-    const rangeHasConflict = slotHours.slice(startIdx, clickedIdx).some(h =>
-      isSlotOccupiedForRoom(roomId, dayIndex, `${String(h).padStart(2, '0')}:00`, excludeId)
-    );
+    const rangeStart = getSlotDateTime(dayIndex, reschedulePickStart.time);
+    const rangeEnd = addMinutes(getSlotDateTime(dayIndex, time), SLOT_MINUTES);
 
-    if (rangeHasConflict) {
+    if (isRangeOccupiedForRoom(roomId, rangeStart, rangeEnd, excludeId)) {
       alert('ຊ່ວງເວລານີ້ຊ້ອນກັບການຈອງທີ່ມີຢູ່ແລ້ວ ກະລຸນາເລືອກໃໝ່');
       setReschedulePickStart(null);
       return;
     }
 
-    const startVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, reschedulePickStart.time));
-    const endVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, time));
-    setNewStartAt(startVal);
-    setNewEndAt(endVal);
+    setNewStartAt(toDateTimeLocalValue(rangeStart));
+    setNewEndAt(toDateTimeLocalValue(rangeEnd));
     setReschedulePickStart(null);
   };
 
@@ -1220,10 +1345,10 @@ export default function MeetingRooms() {
 
       <div className="border border-gray-200 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
-          <div className="min-w-[760px] grid grid-cols-9 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-600 text-center py-1.5">
+          <div className="min-w-[1000px] bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-600 text-center py-1.5" style={{ display: 'grid', gridTemplateColumns: `repeat(${SLOT_COLS}, minmax(0, 1fr))` }}>
             <div>ວັນ / ເວລາ</div>
-            {timeSlots.map(time => (
-              <div key={time}>{time}</div>
+            {hourHeaderSlots.map(time => (
+              <div key={time} className="text-left pl-1 border-l border-gray-300" style={{ gridColumn: 'span 2' }}>{time}</div>
             ))}
           </div>
           <div className="divide-y divide-gray-100">
@@ -1241,8 +1366,8 @@ export default function MeetingRooms() {
               .map(day => {
                 const dayDate = day.dayDate;
                 return (
-                  <div key={day.key} className="min-w-[760px] grid grid-cols-9 items-stretch">
-                    <div className="text-center text-[11px] font-medium text-gray-400 border-r border-gray-100 py-2 flex flex-col items-center justify-center gap-0.5">
+                  <div key={day.key} className="min-w-[1000px] items-stretch" style={{ display: 'grid', gridTemplateColumns: `repeat(${SLOT_COLS}, minmax(0, 1fr))` }}>
+                    <div className="text-center text-[11px] font-medium text-gray-400 border-r border-gray-300 py-2 flex flex-col items-center justify-center gap-0.5">
                       <span>{day.label}</span>
                       <span className="text-[10px] font-normal text-gray-300">
                         {dayDate.toLocaleDateString('lo-LA', { day: 'numeric', month: 'short' })}
@@ -1252,9 +1377,7 @@ export default function MeetingRooms() {
                       const occupied = isOccupied(day.dayIndex, time);
                       const isPast = isSlotInPast(day.dayIndex, time);
                       const isChosenStart = pickStart && pickStart.dayIndex === day.dayIndex && pickStart.time === time;
-                      const isPickingEnd = pickStart && pickStart.dayIndex === day.dayIndex &&
-                        slotHours.indexOf(parseInt(time, 10)) > slotHours.indexOf(parseInt(pickStart.time, 10));
-                      const isDisabled = isPast || (occupied && !isPickingEnd);
+                      const isDisabled = isPast || occupied;
                       const isInRange = isSlotInSelectedRange(day.dayIndex, time, startVal, endVal);
                       const isInOriginalRange = isSlotInSelectedRange(day.dayIndex, time, originalStartVal, originalEndVal);
                       return (
@@ -1263,7 +1386,7 @@ export default function MeetingRooms() {
                           key={time}
                           disabled={isDisabled}
                           onClick={() => onSlotClick(day.dayIndex, time)}
-                          className={`h-9 border-r border-gray-100 text-[10px] transition ${isPast
+                          className={`h-9 border-r ${time.endsWith(':30') ? 'border-gray-300' : 'border-gray-100'} text-[10px] transition ${isPast
                             ? 'bg-gray-50 text-gray-300 cursor-not-allowed opacity-60'
                             : isDisabled
                               ? 'bg-red-50 text-red-300 cursor-not-allowed'
@@ -1282,7 +1405,7 @@ export default function MeetingRooms() {
                             : isDisabled
                               ? 'ບໍ່ວ່າງ'
                               : occupied
-                                ? 'ຊົ່ວໂມງນີ້ບໍ່ວ່າງ, ແຕ່ສາມາດເລືອກເປັນຈຸດສິ້ນສຸດໄດ້'
+                                ? 'ບໍ່ວ່າງ'
                                 : isInOriginalRange && !isInRange
                                   ? `${time} — ເວລາເດີມຂອງການຈອງ`
                                   : time}
@@ -1468,6 +1591,29 @@ export default function MeetingRooms() {
               </div>
 
               <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+                {/* FILTER: ຫ້ອງວ່າງຕາມເວລາ */}
+                <div>
+                  <button
+                    onClick={() => { setIsAvailOpen(!isAvailOpen); setIsFloorOpen(false); setIsLocationOpen(false); }}
+                    className={`border px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${availRooms ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
+                  >
+                    <Clock size={16} />
+                    <span>
+                      {availRooms
+                        ? `ວ່າງ ${availFrom.slice(5, 10).replace('-', '/')} ${availFrom.slice(11)}–${availTo.slice(11)}`
+                        : 'ຫ້ອງວ່າງຕາມເວລາ'}
+                    </span>
+                  </button>
+                </div>
+                {availRooms && (
+                  <button
+                    onClick={clearAvailFilter}
+                    className="px-3 py-2 text-xs text-amber-600 hover:text-amber-700 transition"
+                  >
+                    ລ້າງເວລາ
+                  </button>
+                )}
+
                 {/* FILTER: ຊັ້ນ */}
                 <div className="relative" ref={floorRef}>
                   <button
@@ -1553,6 +1699,109 @@ export default function MeetingRooms() {
               </div>
             </div>
 
+            {isAvailOpen && (() => {
+              const span = AVAIL_END_MIN - AVAIL_START_MIN;
+              const ratio = (m) => (m - AVAIL_START_MIN) / span;
+              const THUMB = 18; // px — ຕ້ອງກົງກັບ CSS ຂ້າງລຸ່ມ
+              const posOf = (m) => `calc(${THUMB / 2}px + (100% - ${THUMB}px) * ${ratio(m)})`;
+              const blockedUntil = availMinAllowed();
+              const shownStart = Math.max(availRange.start, Math.min(blockedUntil, AVAIL_END_MIN - AVAIL_STEP));
+              const shownEnd = Math.max(availRange.end, shownStart + AVAIL_STEP);
+              const todayStr = availDateKey(new Date());
+              return (
+                <div className="-mt-4 bg-white border border-gray-200 rounded-2xl shadow-sm p-4 space-y-3">
+                  <style>{`
+                    .avail-range { position: absolute; left: 0; width: 100%; top: 0; height: 18px; margin: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; }
+                    .avail-range::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 18px; height: 18px; border-radius: 9999px; background: #f59e0b; border: 2px solid #fff; box-shadow: 0 0 0 1px #d97706; cursor: grab; }
+                    .avail-range::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px; border-radius: 9999px; background: #f59e0b; border: 2px solid #fff; box-shadow: 0 0 0 1px #d97706; cursor: grab; }
+                    .avail-range::-webkit-slider-runnable-track { background: transparent; }
+                    .avail-range::-moz-range-track { background: transparent; }
+                    .avail-range:disabled::-webkit-slider-thumb { background: #d1d5db; box-shadow: 0 0 0 1px #9ca3af; cursor: not-allowed; }
+                    .avail-range:disabled::-moz-range-thumb { background: #d1d5db; box-shadow: 0 0 0 1px #9ca3af; cursor: not-allowed; }
+                  `}</style>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-medium text-gray-700">ຄົ້ນຫາຫ້ອງວ່າງຕາມວັນ ແລະ ເວລາ</p>
+                    <button type="button" onClick={() => setIsAvailOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-8">
+                    {/* ຊ້າຍ: ເລືອກວັນທີ */}
+                    <div className="md:w-56 shrink-0">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">ວັນທີ <span className="text-red-500">*</span></label>
+                      <input
+                        type="date"
+                        value={availDate}
+                        min={todayStr}
+                        onChange={(e) => { setAvailDate(e.target.value); setAvailError(''); if (!e.target.value) clearAvailFilter(); }}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-1.5 text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* ຂວາ: slider ເລືອກຊ່ວງເວລາ */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs font-medium text-gray-500">
+                          ເວລາ {availDate ? '' : '— ກະລຸນາເລືອກວັນທີກ່ອນ'}
+                        </label>
+                        <span className="text-sm font-semibold text-amber-600">
+                          {fmtMin(shownStart)} – {fmtMin(shownEnd)}
+                        </span>
+                      </div>
+                      <div className="px-1">
+                        <div className="relative" style={{ height: THUMB }}>
+                          <div className="absolute left-0 right-0 rounded-full bg-gray-200" style={{ top: THUMB / 2 - 3, height: 6 }} />
+                          <div
+                            className={`absolute rounded-full ${availDate ? 'bg-amber-400' : 'bg-gray-300'}`}
+                            style={{ top: THUMB / 2 - 3, height: 6, left: posOf(shownStart), width: `calc(${posOf(shownEnd)} - ${posOf(shownStart)})` }}
+                          />
+                          <input
+                            type="range"
+                            className="avail-range"
+                            min={AVAIL_START_MIN}
+                            max={AVAIL_END_MIN}
+                            step={AVAIL_STEP}
+                            value={shownStart}
+                            disabled={!availDate}
+                            onChange={(e) => handleAvailSlider('start', e.target.value)}
+                            aria-label="ເວລາເລີ່ມ"
+                          />
+                          <input
+                            type="range"
+                            className="avail-range"
+                            min={AVAIL_START_MIN}
+                            max={AVAIL_END_MIN}
+                            step={AVAIL_STEP}
+                            value={shownEnd}
+                            disabled={!availDate}
+                            onChange={(e) => handleAvailSlider('end', e.target.value)}
+                            aria-label="ເວລາສິ້ນສຸດ"
+                          />
+                        </div>
+                        {/* ປ້າຍສະເພາະທຸກຊົ່ວໂມງ — ບໍ່ສະແດງ :30 */}
+                        <div className="relative h-5 mt-1 text-[11px] text-gray-500">
+                          {AVAIL_HOUR_LABELS.map(h => (
+                            <span key={h} className="absolute -translate-x-1/2" style={{ left: posOf(h * 60) }}>
+                              {String(h).padStart(2, '0')}:00
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {availLoading && <p className="text-xs text-gray-500">ກຳລັງຄົ້ນຫາ...</p>}
+                  {availError && <p className="text-xs text-red-600">{availError}</p>}
+                  {availRooms && !availLoading && (
+                    <p className="text-xs text-gray-600">
+                      {availRooms.length === 0
+                        ? 'ບໍ່ມີຫ້ອງວ່າງໃນຊ່ວງເວລານີ້'
+                        : `ພົບ ${availRooms.length} ຫ້ອງວ່າງ (${availFrom.slice(0, 10)} ${availFrom.slice(11)}–${availTo.slice(11)}) — ສະແດງເປັນບັດຫ້ອງດ້ານລຸ່ມ`}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
             <p className="text-xs text-gray-400 -mt-4">
               ຄລິກທີ່ບັດຫ້ອງເພື່ອເພີ່ມ/ຖອດອອກຈາກຕາຕະລາງ — ຖ້າຢັງບໍ່ເລືອກຫ້ອງໃດ, ຕາຕະລາງຈະສະແດງທຸກຫ້ອງ
             </p>
@@ -1607,6 +1856,13 @@ export default function MeetingRooms() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedRoom(roomId);
+                          if (availRooms && availFrom && availTo) {
+                            setStartAt(availFrom);
+                            setEndAt(availTo);
+                            setPickStart(null);
+                            setCalendarViewMode('week');
+                            setCalendarAnchorDate(new Date(availFrom));
+                          }
                           setIsModalOpen(true);
                         }}
                         className="w-full mt-4 bg-gray-50 hover:bg-amber-50 text-amber-600 border border-amber-200 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-1.5"
@@ -1701,10 +1957,10 @@ export default function MeetingRooms() {
                 <div className="overflow-x-auto">
                   {calendarViewMode === 'week' ? (
                     <>
-                      <div className="min-w-[900px] grid grid-cols-9 border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-600 text-center py-2.5">
+                      <div className="min-w-[1100px] border-b border-gray-200 bg-gray-50 text-xs font-semibold text-gray-600 text-center py-2.5" style={{ display: 'grid', gridTemplateColumns: `repeat(${SLOT_COLS}, minmax(0, 1fr))` }}>
                         <div>ວັນ / ເວລາ</div>
-                        {timeSlots.map(time => (
-                          <div key={time}>{time}</div>
+                        {hourHeaderSlots.map(time => (
+                          <div key={time} className="text-left pl-1 border-l border-gray-300" style={{ gridColumn: 'span 2' }}>{time}</div>
                         ))}
                       </div>
 
@@ -1727,32 +1983,32 @@ export default function MeetingRooms() {
                           const rowHeight = Math.max(56, 4 + maxLanes * 26 + 4);
 
                           return (
-                            <div key={day.key} className="min-w-[900px] relative" style={{ height: rowHeight }}>
+                            <div key={day.key} className="min-w-[1100px] relative" style={{ height: rowHeight }}>
                               {/* ຕາຂ່າຍພື້ນຖານ: ຊື່ມື້ + ເສັ້ນແບ່ງຊົ່ວໂມງ */}
-                              <div className="absolute inset-0 grid grid-cols-9 text-xs text-gray-500">
-                                <div className="text-center font-medium text-gray-400 border-r border-gray-100 py-1 flex flex-col items-center justify-center gap-0.5">
+                              <div className="absolute inset-0 text-xs text-gray-500" style={{ display: 'grid', gridTemplateColumns: `repeat(${SLOT_COLS}, minmax(0, 1fr))` }}>
+                                <div className="text-center font-medium text-gray-400 border-r border-gray-300 py-1 flex flex-col items-center justify-center gap-0.5">
                                   <span>{day.label}</span>
                                   <span className="text-[10px] font-normal text-gray-400">
                                     {dayDate.toLocaleDateString('lo-LA', { day: 'numeric', month: 'short' })}
                                   </span>
                                 </div>
                                 {timeSlots.map(time => (
-                                  <div key={time} className="border-r border-gray-100" />
+                                  <div key={time} className={`border-r ${time.endsWith(':30') ? 'border-gray-300' : 'border-gray-100'}`} />
                                 ))}
                               </div>
 
-                              {/* ການຈອງ — stretch ຕາມຊົ່ວໂມງ ແລະ ແຍກ lane ບໍ່ໃຫ້ທັບກັນ */}
+                              {/* ການຈອງ — stretch ຕາມນາທີຈິງ (ຮອງຮັບ xx:30) ແລະ ແຍກ lane ບໍ່ໃຫ້ທັບກັນ */}
                               {dayBookings.map((booking, idx) => {
-                                const startIdx = slotHours.indexOf(new Date(booking.startAt).getHours());
-                                if (startIdx === -1) return null;
-                                const span = getBookingSlotSpan(booking);
+                                const startPos = slotPos(new Date(booking.startAt));
+                                const span = slotPos(new Date(booking.endAt)) - startPos;
+                                if (span <= 0) return null;
                                 return (
                                   <div
                                     key={booking._id || idx}
                                     className="absolute bg-amber-50 border border-amber-200 text-amber-800 px-1.5 rounded text-[10px] font-medium truncate z-10 flex items-center"
                                     style={{
-                                      left: `calc(${(1 + startIdx) * (100 / 9)}% + 4px)`,
-                                      width: `calc(${span * (100 / 9)}% - 8px)`,
+                                      left: `calc(${(1 + startPos) * (100 / SLOT_COLS)}% + 2px)`,
+                                      width: `calc(${span * (100 / SLOT_COLS)}% - 4px)`,
                                       top: 4 + laneOf[idx] * 26,
                                       height: 22,
                                       lineHeight: '20px',
@@ -1778,11 +2034,11 @@ export default function MeetingRooms() {
                       </div>
 
                       <div className="relative">
-                        <div className="divide-y divide-gray-100">
+                        <div>
                           {timeSlots.map(time => (
-                            <div key={time} className="min-w-[300px] grid grid-cols-2 text-xs text-gray-500 h-[60px]">
-                              <div className="text-center font-medium text-gray-400 border-r border-gray-100 py-2">
-                                {time}
+                            <div key={time} className={`min-w-[300px] grid grid-cols-2 text-xs text-gray-500 h-[30px] border-b ${time.endsWith(':30') ? 'border-gray-300' : 'border-gray-100'}`}>
+                              <div className="text-center font-medium text-gray-400 border-r border-gray-100 py-1.5">
+                                {time.endsWith(':00') ? time : ''}
                               </div>
                               <div className="border-r border-gray-100" />
                             </div>
@@ -1792,17 +2048,17 @@ export default function MeetingRooms() {
                         {/* ການຈອງ — overlay ຢູ່ຄໍລໍາເບື້ອງຂວາ (ເຂດເວລາ), stretch ຕາມຊົ່ວໂມງ ແລະ ແຍກ lane ຂ້າງກັນ */}
                         <div className="absolute top-0 right-0 w-1/2 h-full pointer-events-none">
                           {dayViewBookings.map((booking, idx) => {
-                            const startIdx = slotHours.indexOf(new Date(booking.startAt).getHours());
-                            if (startIdx === -1) return null;
-                            const span = getBookingSlotSpan(booking);
+                            const startPos = slotPos(new Date(booking.startAt));
+                            const span = slotPos(new Date(booking.endAt)) - startPos;
+                            if (span <= 0) return null;
                             const lane = dayViewLaneOf[idx];
                             return (
                               <div
                                 key={booking._id || idx}
                                 className="absolute bg-amber-50 border border-amber-200 text-amber-800 px-1.5 rounded text-[10px] font-medium truncate pointer-events-auto flex items-center"
                                 style={{
-                                  top: startIdx * 60 + 4,
-                                  height: span * 60 - 8,
+                                  top: startPos * 30 + 2,
+                                  height: Math.max(span * 30 - 4, 14),
                                   left: `calc(${lane} * ${100 / dayViewMaxLanes}% + 4px)`,
                                   width: `calc(${100 / dayViewMaxLanes}% - 8px)`,
                                 }}
@@ -1968,6 +2224,206 @@ export default function MeetingRooms() {
         {/* TAB 3: ADMIN — Pending approvals + Maintenance toggle + Org-wide utilization report */}
         {activeTab === 'admin' && canSeeAdminTab && (
           <div className="space-y-6">
+            {canApproveBookings && (() => {
+              const selectedPending = pendingApprovals.find(b => b._id === adminSelectedId) || null;
+              const effectiveRoomId = String(
+                adminRoomId
+                || (selectedPending && bookingRoomId(selectedPending))
+                || (pendingApprovals[0] && bookingRoomId(pendingApprovals[0]))
+                || (rooms[0] && (rooms[0].roomId || rooms[0]._id))
+                || ''
+              );
+              const roomPending = pendingApprovals.filter(b => String(bookingRoomId(b)) === effectiveRoomId);
+              const roomConfirmed = adminConfirmed.filter(b => String(bookingRoomId(b)) === effectiveRoomId);
+              const weekStart = getWeekRange(adminWeek).from;
+              const overlaps = (item, a0, a1) => new Date(item.startAt) < a1 && new Date(item.endAt) > a0;
+              const selectedRoomObj = rooms.find(r => String(r.roomId || r._id) === effectiveRoomId) || null;
+              // ຄົ້ນຫາແບບ "ຄຳທີ່ຂຶ້ນຕົ້ນດ້ວຍ" (word-prefix), ບໍ່ສົນຕົວພິມໃຫຍ່/ນ້ອຍ:
+              //   "d"  → Conference Room D, Dinner room, ROOM DINNER   (ມີຄຳໃດຄຳໜຶ່ງຂຶ້ນຕົ້ນດ້ວຍ d)
+              //   "di" → Dinner room, DINNER, ROOM DINNER              (ບໍ່ລວມ Conference Room D)
+              // ຫຼາຍຄຳ ("room di") → ທຸກຄຳຕ້ອງກົງກັບຕົ້ນຂອງຄຳໃດຄຳໜຶ່ງ (ລຳດັບໃດກໍໄດ້); ຜົນທີ່ຊື່ຂຶ້ນຕົ້ນດ້ວຍຄຳຄົ້ນຫາຈະຢູ່ກ່ອນ
+              const roomTokens = adminRoomQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+              const splitWords = (str) => String(str || '').toLowerCase().split(/[\s\-_/.,()[\]]+/).filter(Boolean);
+              const roomSearchScore = (r) => {
+                if (roomTokens.length === 0) return 0;
+                const nameWords = splitWords(r.name);
+                const otherWords = [String(r.roomId || r._id || ''), r.floor, r.location].flatMap(splitWords);
+                const allWords = [...nameWords, ...otherWords];
+                const everyTokenMatches = roomTokens.every(t => allWords.some(w => w.startsWith(t)));
+                if (!everyTokenMatches) return -1;
+                const fullName = String(r.name || '').toLowerCase();
+                if (fullName.startsWith(roomTokens.join(' '))) return 0; // ຊື່ຂຶ້ນຕົ້ນດ້ວຍຄຳຄົ້ນຫາ
+                if (roomTokens.every(t => nameWords.some(w => w.startsWith(t)))) return 1; // ກົງໃນຊື່ (ຄຳກາງ/ທ້າຍ)
+                return 2; // ກົງສະເພາະ ລະຫັດ/ຊັ້ນ/ສະຖານທີ່
+              };
+              const matchedRooms = rooms
+                .map(r => ({ r, score: roomSearchScore(r) }))
+                .filter(x => x.score >= 0)
+                .sort((x, y) => x.score - y.score || String(x.r.name || '').localeCompare(String(y.r.name || '')))
+                .map(x => x.r);
+              const pickAdminRoom = (r) => {
+                setAdminRoomId(String(r.roomId || r._id));
+                setAdminSelectedId(null);
+                setAdminRoomOpen(false);
+                setAdminRoomQuery('');
+              };
+              const pendingCountFor = (id) => pendingApprovals.filter(b => String(bookingRoomId(b)) === String(id)).length;
+
+              const Ring = ({ color, cross }) => (
+                <svg viewBox="0 0 16 16" width="16" height="16" className="mx-auto" aria-hidden="true">
+                  <circle cx="8" cy="8" r="5.5" fill="none" stroke={color} strokeWidth="2" />
+                  {cross && (
+                    <>
+                      <line x1="5.2" y1="5.2" x2="10.8" y2="10.8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+                      <line x1="10.8" y1="5.2" x2="5.2" y2="10.8" stroke={color} strokeWidth="2" strokeLinecap="round" />
+                    </>
+                  )}
+                </svg>
+              );
+
+              return (
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
+                  <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="font-bold text-gray-800">ຕາຕະລາງພາບລວມຄຳຮ້ອງຂໍຈອງ</div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="relative w-64" ref={adminRoomRef}>
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={15} />
+                        <input
+                          type="text"
+                          value={adminRoomOpen ? adminRoomQuery : (selectedRoomObj?.name || '')}
+                          placeholder="ພິມເພື່ອຄົ້ນຫາ / ເລືອກຫ້ອງ..."
+                          onFocus={(e) => { setAdminRoomQuery(''); setAdminRoomOpen(true); e.target.select?.(); }}
+                          onChange={(e) => { setAdminRoomQuery(e.target.value); setAdminRoomOpen(true); }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') { setAdminRoomOpen(false); e.target.blur(); }
+                            if (e.key === 'Enter') { e.preventDefault(); if (matchedRooms[0]) pickAdminRoom(matchedRooms[0]); }
+                          }}
+                          className="w-full pl-9 pr-8 py-1.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-amber-500 focus:outline-none"
+                        />
+                        {adminRoomOpen && adminRoomQuery && (
+                          <button
+                            type="button"
+                            onMouseDown={(e) => { e.preventDefault(); setAdminRoomQuery(''); }}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                            aria-label="ລ້າງການຄົ້ນຫາ"
+                          >
+                            <X size={15} />
+                          </button>
+                        )}
+                        {adminRoomOpen && (
+                          <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 max-h-64 overflow-y-auto py-1">
+                            {matchedRooms.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-gray-400">ບໍ່ພົບຫ້ອງທີ່ຄົ້ນຫາ</div>
+                            ) : matchedRooms.map(r => {
+                              const id = String(r.roomId || r._id);
+                              const n = pendingCountFor(id);
+                              return (
+                                <button
+                                  type="button"
+                                  key={id}
+                                  onMouseDown={(e) => { e.preventDefault(); pickAdminRoom(r); }}
+                                  className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 hover:bg-amber-50 ${id === effectiveRoomId ? 'bg-amber-50 text-amber-700 font-medium' : 'text-gray-700'}`}
+                                >
+                                  <span className="truncate">
+                                    {r.name}
+                                    {(r.floor || r.location) && <span className="text-xs text-gray-400"> · {[r.floor, r.location].filter(Boolean).join(' ')}</span>}
+                                  </span>
+                                  {n > 0 && <span className="shrink-0 text-[11px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">{n} ລໍຖ້າ</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                      <button type="button" onClick={() => setAdminWeek(prev => { const d = new Date(prev); d.setDate(d.getDate() - 7); return d; })} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">◀</button>
+                      <span className="text-xs text-gray-600 min-w-[110px] text-center">
+                        {weekStart.toLocaleDateString('lo-LA', { day: 'numeric', month: 'short' })}
+                        {' – '}
+                        {getWeekRange(adminWeek).to.toLocaleDateString('lo-LA', { day: 'numeric', month: 'short' })}
+                      </span>
+                      <button type="button" onClick={() => setAdminWeek(prev => { const d = new Date(prev); d.setDate(d.getDate() + 7); return d; })} className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">▶</button>
+                    </div>
+                  </div>
+
+                  <div className="px-4 pt-3 flex items-center gap-x-5 gap-y-1 flex-wrap text-xs text-gray-600">
+                    <span className="flex items-center gap-1.5"><span className="font-bold text-black text-sm leading-none">✕</span> ອະນຸມັດແລ້ວ</span>
+                    <span className="flex items-center gap-1.5"><Ring color="#2563eb" /> ລໍຖ້າອະນຸມັດ</span>
+                    <span className="flex items-center gap-1.5"><Ring color="#dc2626" cross /> ລໍຖ້າອະນຸມັດ ແຕ່ຊົ່ວກັບຄຳຮ້ອງອື່ນ</span>
+                    <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-4 rounded bg-green-300 border border-green-500" /> ຄຳຮ້ອງທີ່ເລືອກ</span>
+                  </div>
+
+                  <div className="p-4">
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <div className="min-w-[1000px] bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-600 text-center py-1.5" style={{ display: 'grid', gridTemplateColumns: `repeat(${SLOT_COLS}, minmax(0, 1fr))` }}>
+                          <div>ວັນ / ເວລາ</div>
+                          {hourHeaderSlots.map(time => (
+                            <div key={time} className="text-left pl-1 border-l border-gray-300" style={{ gridColumn: 'span 2' }}>{time}</div>
+                          ))}
+                        </div>
+                        <div className="divide-y divide-gray-100">
+                          {weekDays.map(day => {
+                            const dayDate = new Date(weekStart);
+                            dayDate.setDate(dayDate.getDate() + (day.dayIndex - 1));
+                            return (
+                              <div key={day.key} className="min-w-[1000px] items-stretch" style={{ display: 'grid', gridTemplateColumns: `repeat(${SLOT_COLS}, minmax(0, 1fr))` }}>
+                                <div className="text-center text-[11px] font-medium text-gray-400 border-r border-gray-300 py-2 flex flex-col items-center justify-center gap-0.5">
+                                  <span>{day.label}</span>
+                                  <span className="text-[10px] font-normal text-gray-300">
+                                    {dayDate.toLocaleDateString('lo-LA', { day: 'numeric', month: 'short' })}
+                                  </span>
+                                </div>
+                                {timeSlots.map(time => {
+                                  const [h, m] = time.split(':').map(Number);
+                                  const slotStart = new Date(dayDate);
+                                  slotStart.setHours(h, m, 0, 0);
+                                  const slotEnd = addMinutes(slotStart, SLOT_MINUTES);
+                                  const confirmedHere = roomConfirmed.filter(b => overlaps(b, slotStart, slotEnd));
+                                  const pendingHere = roomPending.filter(b => overlaps(b, slotStart, slotEnd));
+                                  const isSelected = !!selectedPending && pendingHere.some(b => b._id === selectedPending._id);
+                                  const hasConfirmed = confirmedHere.length > 0;
+                                  const clickable = pendingHere.length > 0;
+                                  const tip = [
+                                    `${day.label} ${time}`,
+                                    ...confirmedHere.map(b => `✕ ${b.title || 'ບໍ່ມີຫົວຂໍ້'} (ອະນຸມັດແລ້ວ)`),
+                                    ...pendingHere.map(b => `${pendingHere.length > 1 ? '⊗' : '○'} ${b.title || 'ບໍ່ມີຫົວຂໍ້'} (ລໍຖ້າ)`),
+                                  ].join('\n');
+                                  return (
+                                    <button
+                                      type="button"
+                                      key={time}
+                                      disabled={!clickable}
+                                      onClick={() => {
+                                        const idx = pendingHere.findIndex(b => b._id === adminSelectedId);
+                                        selectPendingRequest(pendingHere[(idx + 1) % pendingHere.length]);
+                                      }}
+                                      title={tip}
+                                      className={`h-9 border-r ${time.endsWith(':30') ? 'border-gray-300' : 'border-gray-100'} flex items-center justify-center transition ${isSelected ? 'bg-green-300' : 'bg-white'} ${clickable ? 'cursor-pointer hover:brightness-95' : 'cursor-default'}`}
+                                    >
+                                      {hasConfirmed ? (
+                                        <span className="font-bold text-black text-sm leading-none">✕</span>
+                                      ) : pendingHere.length >= 2 ? (
+                                        <Ring color="#dc2626" cross />
+                                      ) : pendingHere.length === 1 ? (
+                                        <Ring color="#2563eb" />
+                                      ) : null}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] text-gray-400">
+                      ກົດຊ່ອງ ຫຼື ກົດຄຳຮ້ອງໃນລາຍການດ້ານລຸ່ມ ເພື່ອເລືອກ (ພື້ນຫຼັງສີຂຽວ). ຖ້າຊ່ອງໃດມີຫຼາຍຄຳຮ້ອງ ກົດຊ້ຳເພື່ອສະຫຼັບ.
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
             {canApproveBookings && (
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm">
               <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
@@ -2009,7 +2465,9 @@ export default function MeetingRooms() {
                     return (
                       <div
                         key={b._id}
-                        className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${showConflict ? 'bg-red-50/40 border-l-4 border-l-red-400' : ''}`}
+                        onClick={() => selectPendingRequest(b)}
+                        title="ກົດເພື່ອເບິ່ງໃນຕາຕະລາງ"
+                        className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer transition ${adminSelectedId === b._id ? 'bg-green-50 ring-2 ring-inset ring-green-400' : showConflict ? 'bg-red-50/40 border-l-4 border-l-red-400' : 'hover:bg-gray-50'}`}
                       >
                         <div className="space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -2050,7 +2508,7 @@ export default function MeetingRooms() {
                             </p>
                           )}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => reviewBooking(b._id, 'approve').catch(err => alert(err.message))}
                             disabled={reviewingId === b._id}
@@ -2731,6 +3189,9 @@ export default function MeetingRooms() {
                   <p className="text-gray-700 mt-1">{detailBooking.attendees.join(', ')}</p>
                 </div>
               )}
+
+              {/* ເຊີນຄົນເຂົ້າຫ້ອງດ້ວຍ QR (ສ່ວນຕົວ/ສາທາລະນະ) + ລາຍງານຜູ້ເຂົ້າ — ສະເພາະການຈອງທີ່ອະນຸມັດແລ້ວ */}
+              {detailBooking.status === 'CONFIRMED' && (<BookingInvitePanel key={detailBooking._id} booking={detailBooking} past={isBookingPast(detailBooking)} />)}
 
               {(detailBooking.createdAt || detailBooking.updatedAt) && (
                 <div className="pt-2 border-t border-gray-100 space-y-1 text-xs text-gray-400">
