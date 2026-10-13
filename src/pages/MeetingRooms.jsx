@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2, Search, X, Layers, AlertTriangle } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, DoorClosed, Clock, MapPin, Edit3, Trash2, Search, X, Layers, AlertTriangle, ChevronRight } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
@@ -78,6 +78,7 @@ export default function MeetingRooms() {
   const [currentBookingToReschedule, setCurrentBookingToReschedule] = useState(null);
   const [newStartAt, setNewStartAt] = useState('');
   const [newEndAt, setNewEndAt] = useState('');
+  const [reschedulePickStart, setReschedulePickStart] = useState(null); // ຈຸດເລີ່ມທີ່ເລືອກໃນຕາຕະລາງຂອງ modal ເລື່ອນເວລາ
 
   // States ສຳລັບ Admin tab (Maintenance toggle + Utilization report)
   const [utilizationData, setUtilizationData] = useState([]);
@@ -100,6 +101,12 @@ export default function MeetingRooms() {
   const [rejectReason, setRejectReason] = useState('');
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
   const [rejectError, setRejectError] = useState('');
+
+  // ສຳລັບ popup ລາຍລະອຽດການຈອງ (ກົດລາຍການໃນ "ການຈອງຂອງຂ້ອຍ" ເພື່ອເບິ່ງຂໍ້ມູນ/ການປ່ຽນແປງ)
+  const [detailBooking, setDetailBooking] = useState(null);
+
+  // ສຳລັບ note hover ເທິງກ່ອງການຈອງໃນຕາຕະລາງປະຕິທິນ (ອາທິດ/ວັນ) — { booking, rect }
+  const [bookingNote, setBookingNote] = useState(null);
 
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
 
@@ -568,12 +575,18 @@ export default function MeetingRooms() {
         if (!res.ok) throw new Error(result.message || 'ບໍ່ສາມາດເລື່ອນເວລາໄດ້');
         return result;
       })
-      .then(() => {
+      .then((result) => {
         setRescheduleModalOpen(false);
         setCurrentBookingToReschedule(null);
+        setReschedulePickStart(null);
         fetchMyBookings();
         fetchCalendarBookings();
-        alert('ເລື່ອນເວລາຈອງສຳເລັດແລ້ວ!');
+        // ຫຼັງເລື່ອນເວລາ: ຄຳຮ້ອງຈອງໃໝ່ (PENDING) ຫຼື ຄຳຮ້ອງເລື່ອນເວລາຂອງການຈອງທີ່ອະນຸມັດແລ້ວ (pendingStartAt)
+        // ຕ້ອງລໍຖ້າຜູ້ມີສິດອະນຸມັດທັງສອງກໍລະນີ
+        const needsRescheduleApproval = !!result?.pendingStartAt || result?.status === 'PENDING';
+        alert(needsRescheduleApproval
+          ? 'ສົ່ງຄຳຮ້ອງເລື່ອນເວລາແລ້ວ — ລໍຖ້າຜູ້ມີສິດອະນຸມັດ'
+          : 'ເລື່ອນເວລາຈອງສຳເລັດແລ້ວ!');
       })
       .catch(err => alert(err.message));
   };
@@ -598,6 +611,84 @@ export default function MeetingRooms() {
       default: return { label: status || 'ອະນຸມັດແລ້ວ', className: 'bg-green-100 text-green-700' };
     }
   };
+
+  // ການຈອງທີ່ "ປະຊຸມຈົບແລ້ວ" ບໍ? (ເວລາສິ້ນສຸດຜ່ານໄປ) — ໃຊ້ກຳນົດວ່າເລື່ອນເວລາໄດ້ຫຼືບໍ່ ແລະ ສະແດງສີຈາງ
+  const isBookingPast = (b) => {
+    if (!b?.endAt) return false;
+    return new Date(b.endAt).getTime() <= new Date().getTime();
+  };
+
+  // ປ້າຍ ແລະ ສີ ຂອງແຕ່ລະເຫດການໃນປະຫວັດການຈອງ
+  const bookingHistoryInfo = (action) => {
+    switch (action) {
+      case 'CREATED': return { label: 'ສ້າງການຈອງ', dot: 'bg-gray-400' };
+      case 'APPROVED': return { label: 'ອະນຸມັດການຈອງ', dot: 'bg-green-500' };
+      case 'REJECTED': return { label: 'ປະຕິເສດການຈອງ', dot: 'bg-red-500' };
+      case 'RESCHEDULE_REQUESTED': return { label: 'ຂໍເລື່ອນເວລາ', dot: 'bg-sky-500' };
+      case 'REQUEST_UPDATED': return { label: 'ແກ້ໄຂຄຳຮ້ອງຈອງ', dot: 'bg-sky-400' };
+      case 'RESCHEDULE_APPROVED': return { label: 'ອະນຸມັດການເລື່ອນເວລາ', dot: 'bg-green-500' };
+      case 'RESCHEDULE_REJECTED': return { label: 'ປະຕິເສດການເລື່ອນເວລາ', dot: 'bg-red-500' };
+      case 'CANCELLED': return { label: 'ຍົກເລີກການຈອງ', dot: 'bg-gray-500' };
+      case 'NO_SHOW': return { label: 'ຍົກເລີກອັດຕະໂນມັດ (ບໍ່ check-in)', dot: 'bg-orange-500' };
+      case 'CHECKED_IN': return { label: 'Check-in ເຂົ້າຫ້ອງ', dot: 'bg-emerald-500' };
+      case 'CHECKED_OUT': return { label: 'Check-out ອອກຈາກຫ້ອງ', dot: 'bg-gray-400' };
+      default: return { label: action || 'ປ່ຽນແປງ', dot: 'bg-gray-400' };
+    }
+  };
+
+  // ສ້າງ timeline ຂອງການຈອງສຳລັບ popup — ໃຊ້ history ທີ່ເກັບໄວ້;
+  // ຖ້າຂໍ້ມູນເກົ່າຍັງບໍ່ມີ history ຈະປະກອບຈາກ field ປັດຈຸບັນໃຫ້
+  const buildBookingTimeline = (b) => {
+    const actorName = (a) => {
+      if (!a || typeof a !== 'object') return '';
+      return [a.firstName, a.lastName].filter(Boolean).join(' ') || a.email || '';
+    };
+    const entries = Array.isArray(b?.history) ? b.history.map((e) => ({ ...e })) : [];
+    if (entries.length === 0) {
+      if (b?.createdAt) {
+        entries.push({ action: 'CREATED', toStartAt: b.startAt, toEndAt: b.endAt, at: b.createdAt });
+      }
+      if (b?.pendingStartAt && b?.pendingEndAt) {
+        entries.push({
+          action: 'RESCHEDULE_REQUESTED',
+          fromStartAt: b.startAt,
+          fromEndAt: b.endAt,
+          toStartAt: b.pendingStartAt,
+          toEndAt: b.pendingEndAt,
+          at: b.pendingRequestedAt || b.updatedAt,
+        });
+      } else if (b?.rescheduleRejectionReason) {
+        entries.push({
+          action: 'RESCHEDULE_REJECTED',
+          fromStartAt: b.startAt,
+          fromEndAt: b.endAt,
+          note: b.rescheduleRejectionReason,
+          at: b.updatedAt,
+        });
+      }
+      if (b?.status === 'REJECTED' && b?.rejectionReason) {
+        entries.push({ action: 'REJECTED', note: b.rejectionReason, at: b.reviewedAt || b.updatedAt });
+      }
+      if (b?.status === 'CANCELLED') {
+        entries.push({ action: 'CANCELLED', note: b.rejectionReason, at: b.reviewedAt || b.updatedAt });
+      }
+      if (b?.checkedInAt) entries.push({ action: 'CHECKED_IN', at: b.checkedInAt });
+      if (b?.checkedOutAt) entries.push({ action: 'CHECKED_OUT', at: b.checkedOutAt });
+    }
+    entries.sort((x, y) => new Date(x.at || 0).getTime() - new Date(y.at || 0).getTime());
+    // ຄຳຮ້ອງເລື່ອນເວລາສຸດທ້າຍທີ່ຍັງລໍຖ້າອະນຸມັດ (ຍັງບໍ່ມີຜົນຕັດສິນ)
+    const stillPending = !!b?.pendingStartAt;
+    return entries.map((e, idx) => ({
+      ...e,
+      actor: actorName(e.actorId),
+      isPending:
+        stillPending &&
+        idx === entries.length - 1 &&
+        (e.action === 'RESCHEDULE_REQUESTED' || e.action === 'REQUEST_UPDATED'),
+    }));
+  };
+
+  const detailTimeline = detailBooking ? buildBookingTimeline(detailBooking) : [];
 
   // ແປສະຖານະຫ້ອງ (ຄ່າ enum ຈາກ Backend, 3 ຄ່າ: AVAILABLE / BOOKED / MAINTENANCE) ໃຫ້ເປັນຄຳລາວທີ່ອ່ານງ່າຍ
   const roomStatusLabel = (status) => {
@@ -640,6 +731,14 @@ export default function MeetingRooms() {
 
   const roomFloor = (room) => splitRoomLocation(room).floor;
   const roomSpot = (room) => splitRoomLocation(room).spot;
+
+  // ຊື່ຜູ້ຈອງທີ່ຈະສະແດງໃນ note ຕອນ hover ບັດຫ້ອງ —
+  // Backend ສົ່ງ booker = null ຖ້າຜູ້ເບິ່ງບໍ່ມີສິດເຫັນ (ສະແດງເປັນ "ຜູ້ໃຊ້ອື່ນ")
+  const roomBookerLabel = (booker) => {
+    if (!booker) return 'ຜູ້ໃຊ້ອື່ນ';
+    const name = [booker.firstName, booker.lastName].filter(Boolean).join(' ').trim();
+    return name || booker.email || 'ຜູ້ໃຊ້ອື່ນ';
+  };
 
   // ຈຸດໃນຊັ້ນທີ່ມີຈິງ ສຳລັບຊັ້ນທີ່ເລືອກ (ສະຖານະ Filter ແບບຂຶ້ນລົງ) — ຖ້າຍັງບໍ່ເລືອກຊັ້ນ ໃຫ້ເອົາທຸກຊັ້ນ
   const spotsForFloors = (floorList) => {
@@ -785,11 +884,37 @@ export default function MeetingRooms() {
   };
 
   // ຊື່ຫ້ອງຂອງ booking ນັ້ນ — ໃຊ້ສະແດງໃສ່ກ່ອງ booking ໃນຕາຕະລາງລວມ (ເພາະບໍ່ມີສ່ວນແຍກຕໍ່ຫ້ອງແລ້ວ)
+  const roomForBooking = (b) => {
+    const id = String(bookingRoomId(b));
+    return rooms.find((r) => String(r.roomId || r._id) === id) || null;
+  };
   const bookingRoomLabel = (b) => {
     const id = String(bookingRoomId(b));
-    const room = rooms.find((r) => String(r.roomId || r._id) === id);
+    const room = roomForBooking(b);
     if (room) return `${room.name} (${id})`;
     return id || 'ບໍ່ລະບຸຫ້ອງ';
+  };
+
+  // note hover ເທິງກ່ອງການຈອງໃນປະຕິທິນ — ເກັບກ່ອງນັ້ນ + ຕຳແໜ່ງເທິງໜ້າຈໍ (fixed) ເພື່ອບໍ່ໃຫ້ຖືກ overflow ຂອງຕາຕະລາງຕັດ
+  const showBookingNote = (e, booking) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setBookingNote({
+      booking,
+      rect: { left: r.left, top: r.top, bottom: r.bottom },
+    });
+  };
+  const hideBookingNote = () => setBookingNote(null);
+
+  const bookingNoteStyle = (rect) => {
+    const width = 256;
+    const margin = 8;
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    let left = rect.left;
+    if (left + width + margin > vw) left = vw - width - margin;
+    if (left < margin) left = margin;
+    // ຖ້າຢູ່ໃກ້ຂອບເທິງ ໃຫ້ສະແດງລຸ່ມກ່ອງແທນ
+    if (rect.top < 220) return { left, top: rect.bottom + margin };
+    return { left, top: rect.top - margin, transform: 'translateY(-100%)' };
   };
 
   // ແປງເວລາໃຫ້ເປັນ HH:MM ເພື່ອສະແດງໃນ chip
@@ -895,13 +1020,16 @@ export default function MeetingRooms() {
     return slotDate.getTime() <= new Date().getTime();
   };
 
-  const isSlotOccupied = (dayIndex, time) => {
+  // ກວດວ່າ slot (ວັນ + ເວລາ) ຂອງຫ້ອງທີ່ລະບຸ ຖືກຈອງໄວ້ແລ້ວບໍ່ — ໃຊ້ຮ່ວມທັງຟອມຈອງຫ້ອງ ແລະ ຟອມເລື່ອນເວລາ
+  // excludeBookingId: ຕອນເລື່ອນເວລາ ຕ້ອງບໍ່ນັບການຈອງຂອງໂຕເອງມາເປັນຕົວສະກັດ (ບໍ່ດັ່ງນັ້ນຈະເລືອກຊ່ອງເດີມບໍ່ໄດ້)
+  const isSlotOccupiedForRoom = (roomId, dayIndex, time, excludeBookingId = null) => {
     const hour = parseInt(time, 10);
     return calendarBookings.some(b => {
+      if (excludeBookingId && b._id === excludeBookingId) return false;
       const bStart = new Date(b.startAt);
       const bEnd = new Date(b.endAt);
       const bRoomId = typeof b.roomId === 'object' ? (b.roomId?._id || b.roomId?.roomId) : b.roomId;
-      if (String(bRoomId) !== String(selectedRoom) || bStart.getDay() !== dayIndex) return false;
+      if (String(bRoomId) !== String(roomId) || bStart.getDay() !== dayIndex) return false;
 
       const startHour = bStart.getHours();
       const endHour = bEnd.getHours() + (bEnd.getMinutes() > 0 ? 1 : 0);
@@ -909,10 +1037,12 @@ export default function MeetingRooms() {
     });
   };
 
-  const isSlotInSelectedRange = (dayIndex, time) => {
-    if (!startAt || !endAt) return false;
-    const start = new Date(startAt);
-    const end = new Date(endAt);
+  const isSlotOccupied = (dayIndex, time) => isSlotOccupiedForRoom(selectedRoom, dayIndex, time);
+
+  const isSlotInSelectedRange = (dayIndex, time, startVal = startAt, endVal = endAt) => {
+    if (!startVal || !endVal) return false;
+    const start = new Date(startVal);
+    const end = new Date(endVal);
     if (start.getDay() !== dayIndex) return false;
     const hour = parseInt(time, 10);
     return hour >= start.getHours() && hour < end.getHours();
@@ -984,9 +1114,260 @@ export default function MeetingRooms() {
     setPickStart(null);
   };
 
+  // ປ່ຽນອາທິດທີ່ຕາຕະລາງກຳລັງສະແດງຢູ່ (ໃຊ້ຮ່ວມທັງຟອມຈອງ ແລະ ຟອມເລື່ອນເວລາ)
+  // ເພາະທັງສອງໃຊ້ calendarAnchorDate ດຽວກັນ ຂໍ້ມູນ calendarBookings ຈຶ່ງຖືກດຶງມາໃຫ້ແລ້ວ
+  const shiftAnchorWeek = (delta) => {
+    setCalendarAnchorDate(prev => {
+      const next = new Date(prev);
+      next.setDate(next.getDate() + delta * 7);
+      return next;
+    });
+    setPickStart(null);
+    setReschedulePickStart(null);
+  };
+
+  // ກົດເລືອກເວລາໃນຟອມເລື່ອນເວລາ — ເຮັດວຽກຄືກັບ handlePickerClick ແຕ່ອັບເດດ newStartAt/newEndAt
+  // ແລະ ກວດ slot ວ່າງຂອງຫ້ອງຂອງ booking ນັ້ນ (ຍົກເວັ້ນການຈອງຂອງໂຕເອງ)
+  const handleReschedulePickerClick = (dayIndex, time) => {
+    const booking = currentBookingToReschedule;
+    if (!booking) return;
+
+    const roomId = String(bookingRoomId(booking));
+    const excludeId = booking._id;
+    const isPickingEnd = reschedulePickStart && reschedulePickStart.dayIndex === dayIndex &&
+      slotHours.indexOf(parseInt(time, 10)) > slotHours.indexOf(parseInt(reschedulePickStart.time, 10));
+
+    if (isSlotInPast(dayIndex, time)) {
+      alert('ເວລານີ້ຜ່ານໄປແລ້ວ ກະລຸນາເລືອກເວລາທີ່ຍັງບໍ່ທັນຜ່ານໄປ');
+      setReschedulePickStart(null);
+      setNewStartAt('');
+      setNewEndAt('');
+      return;
+    }
+
+    if (reschedulePickStart && isSlotInPast(reschedulePickStart.dayIndex, reschedulePickStart.time)) {
+      setReschedulePickStart(null);
+      setNewStartAt('');
+      setNewEndAt('');
+      return;
+    }
+
+    if (isSlotOccupiedForRoom(roomId, dayIndex, time, excludeId) && !isPickingEnd) return;
+
+    if (!reschedulePickStart || reschedulePickStart.dayIndex !== dayIndex) {
+      setReschedulePickStart({ dayIndex, time });
+      setNewStartAt('');
+      setNewEndAt('');
+      return;
+    }
+
+    const startIdx = slotHours.indexOf(parseInt(reschedulePickStart.time, 10));
+    const clickedIdx = slotHours.indexOf(parseInt(time, 10));
+
+    if (clickedIdx === startIdx) {
+      setReschedulePickStart(null);
+      return;
+    }
+
+    if (clickedIdx < startIdx) {
+      setReschedulePickStart({ dayIndex, time });
+      return;
+    }
+
+    const rangeHasConflict = slotHours.slice(startIdx, clickedIdx).some(h =>
+      isSlotOccupiedForRoom(roomId, dayIndex, `${String(h).padStart(2, '0')}:00`, excludeId)
+    );
+
+    if (rangeHasConflict) {
+      alert('ຊ່ວງເວລານີ້ຊ້ອນກັບການຈອງທີ່ມີຢູ່ແລ້ວ ກະລຸນາເລືອກໃໝ່');
+      setReschedulePickStart(null);
+      return;
+    }
+
+    const startVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, reschedulePickStart.time));
+    const endVal = toDateTimeLocalValue(getSlotDateTime(dayIndex, time));
+    setNewStartAt(startVal);
+    setNewEndAt(endVal);
+    setReschedulePickStart(null);
+  };
+
+  // ຕາຕະລາງເລືອກເວລາ (ວັນ x ຊົ່ວໂມງ) — ໃຊ້ຮ່ວມກັນລະຫວ່າງ "ຟອມຈອງຫ້ອງ" ແລະ "ຟອມເລື່ອນເວລາ"
+  // ເພື່ອໃຫ້ເຫັນຊ່ອງວ່າງແລະ ເລືອກເວລາໄດ້ຄືກັນໝົດ
+  // originalStartVal/originalEndVal = ເວລາເດີມຂອງ booking ທີ່ກຳລັງຈະເລື່ອນ (ສະແດງໄຮໄລ້ແບບຈາງໆ ເພື່ອທຽບກັບເວລາໃໝ່)
+  const renderSlotPicker = ({ pickStart, startVal, endVal, onSlotClick, isOccupied, originalStartVal = null, originalEndVal = null }) => (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="block text-sm font-medium text-gray-700">
+          ເລືອກເວລາ — ກົດຈຸດເລີ່ມ ແລ້ວກົດຈຸດສິ້ນສຸດ
+        </label>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => shiftAnchorWeek(-1)}
+            className="px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            onClick={() => shiftAnchorWeek(1)}
+            className="px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+          >
+            ▶
+          </button>
+        </div>
+      </div>
+
+      <div className="border border-gray-200 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <div className="min-w-[760px] grid grid-cols-9 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-600 text-center py-1.5">
+            <div>ວັນ / ເວລາ</div>
+            {timeSlots.map(time => (
+              <div key={time}>{time}</div>
+            ))}
+          </div>
+          <div className="divide-y divide-gray-100">
+            {weekDays
+              .map(day => {
+                const dayDate = new Date(getWeekRange(calendarAnchorDate).from);
+                dayDate.setDate(dayDate.getDate() + (day.dayIndex - 1));
+                return { ...day, dayDate };
+              })
+              .filter(day => {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                return day.dayDate >= today;
+              })
+              .map(day => {
+                const dayDate = day.dayDate;
+                return (
+                  <div key={day.key} className="min-w-[760px] grid grid-cols-9 items-stretch">
+                    <div className="text-center text-[11px] font-medium text-gray-400 border-r border-gray-100 py-2 flex flex-col items-center justify-center gap-0.5">
+                      <span>{day.label}</span>
+                      <span className="text-[10px] font-normal text-gray-300">
+                        {dayDate.toLocaleDateString('lo-LA', { day: 'numeric', month: 'short' })}
+                      </span>
+                    </div>
+                    {timeSlots.map(time => {
+                      const occupied = isOccupied(day.dayIndex, time);
+                      const isPast = isSlotInPast(day.dayIndex, time);
+                      const isChosenStart = pickStart && pickStart.dayIndex === day.dayIndex && pickStart.time === time;
+                      const isPickingEnd = pickStart && pickStart.dayIndex === day.dayIndex &&
+                        slotHours.indexOf(parseInt(time, 10)) > slotHours.indexOf(parseInt(pickStart.time, 10));
+                      const isDisabled = isPast || (occupied && !isPickingEnd);
+                      const isInRange = isSlotInSelectedRange(day.dayIndex, time, startVal, endVal);
+                      const isInOriginalRange = isSlotInSelectedRange(day.dayIndex, time, originalStartVal, originalEndVal);
+                      return (
+                        <button
+                          type="button"
+                          key={time}
+                          disabled={isDisabled}
+                          onClick={() => onSlotClick(day.dayIndex, time)}
+                          className={`h-9 border-r border-gray-100 text-[10px] transition ${isPast
+                            ? 'bg-gray-50 text-gray-300 cursor-not-allowed opacity-60'
+                            : isDisabled
+                              ? 'bg-red-50 text-red-300 cursor-not-allowed'
+                              : occupied
+                                ? 'bg-red-50 text-red-400 hover:bg-red-100 cursor-pointer'
+                                : isChosenStart
+                                  ? 'bg-amber-500 text-white font-semibold'
+                                  : isInRange
+                                    ? 'bg-amber-100 text-amber-700 font-semibold border-amber-200'
+                                    : isInOriginalRange
+                                      ? 'bg-sky-50 text-sky-500 ring-1 ring-inset ring-sky-200 hover:bg-sky-100 cursor-pointer'
+                                      : 'bg-white hover:bg-amber-50 text-gray-300'
+                          }`}
+                          title={isPast
+                            ? 'ເວລາຜ່ານໄປແລ້ວ'
+                            : isDisabled
+                              ? 'ບໍ່ວ່າງ'
+                              : occupied
+                                ? 'ຊົ່ວໂມງນີ້ບໍ່ວ່າງ, ແຕ່ສາມາດເລືອກເປັນຈຸດສິ້ນສຸດໄດ້'
+                                : isInOriginalRange && !isInRange
+                                  ? `${time} — ເວລາເດີມຂອງການຈອງ`
+                                  : time}
+                        >
+                          {isPast ? '' : occupied ? '✕' : isChosenStart ? '●' : isInRange ? '●' : isInOriginalRange ? '○' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-2 flex items-center gap-2 text-xs" translate="no">
+        {pickStart ? (
+          <span className="text-amber-600 font-medium">
+            ເລືອກຈຸດເລີ່ມແລ້ວ ({weekDays.find(d => d.dayIndex === pickStart.dayIndex)?.label} {pickStart.time}) — ກົດຈຸດສິ້ນສຸດຕໍ່
+          </span>
+        ) : startVal && endVal ? (
+          <span className="text-green-700 font-medium bg-green-50 border border-green-200 rounded-lg px-2 py-1">
+            {new Date(startVal).toLocaleDateString('lo-LA', { weekday: 'long', day: 'numeric', month: 'short' })}
+            {' ⋅ '}
+            {new Date(startVal).toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}
+            {' - '}
+            {new Date(endVal).toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        ) : (
+          <span className="text-gray-400">ຍັງບໍ່ໄດ້ເລືອກເວລາ</span>
+        )}
+      </div>
+
+      {originalStartVal && originalEndVal && (
+        <div className="mt-1.5 flex items-center gap-3 text-[11px] text-gray-400" translate="no">
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-3 h-3 rounded-sm bg-sky-50 ring-1 ring-inset ring-sky-200" />
+            ເວລາເດີມທີ່ຮ້ອງຂໍໄວ້
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-3 h-3 rounded-sm bg-amber-100" />
+            ເວລາໃໝ່ທີ່ເລືອກ
+          </span>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <MainLayout>
       <div className="space-y-6">
+        {/* Hover note — ລາຍລະອຽດການຈອງ ເມື່ອ hover ກ່ອງໃນຕາຕະລາງປະຕິທິນ (week/day) */}
+        {bookingNote && (() => {
+          const b = bookingNote.booking;
+          const room = roomForBooking(b);
+          return (
+            <div
+              className="fixed z-[9999] pointer-events-none w-64 bg-gray-900/95 text-white text-xs rounded-xl p-3 shadow-xl space-y-2"
+              style={bookingNoteStyle(bookingNote.rect)}
+            >
+              <p className="font-semibold text-amber-300">{room?.name || bookingRoomLabel(b)}</p>
+              <div className="space-y-1 text-gray-200">
+                <p className="flex gap-1.5"><span className="text-gray-400 shrink-0">ຊັ້ນ:</span> <span className="text-white font-medium">{room ? roomFloor(room) : '-'}</span></p>
+                <p className="flex gap-1.5"><span className="text-gray-400 shrink-0">ຈຸດໃນຊັ້ນ:</span> <span className="text-white font-medium">{(room && roomSpot(room)) || '-'}</span></p>
+              </div>
+              <div className="pt-2 border-t border-white/15 space-y-1">
+                <p className="flex gap-1.5">
+                  <span className="text-gray-400 shrink-0">ຜູ້ຈອງຫ້ອງ:</span>
+                  <span className="text-white font-medium">{roomBookerLabel(b.bookedBy)}</span>
+                </p>
+                <p className="flex gap-1.5 text-gray-300">
+                  <span className="text-gray-400 shrink-0">ເວລາ:</span>
+                  <span>{fmtTime(b.startAt)}–{fmtTime(b.endAt)}</span>
+                </p>
+                {b.title && (
+                  <p className="flex gap-1.5 text-gray-300">
+                    <span className="text-gray-400 shrink-0">ຫົວຂໍ້:</span>
+                    <span className="text-white font-medium">{b.title}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-800">ລະບົບຈອງຫ້ອງປະຊຸມ</h1>
@@ -1376,7 +1757,8 @@ export default function MeetingRooms() {
                                       height: 22,
                                       lineHeight: '20px',
                                     }}
-                                    title={`${bookingRoomLabel(booking)} — ${booking.title || 'ບໍ່ມີຫົວຂໍ້'} (${fmtTime(booking.startAt)}–${fmtTime(booking.endAt)})`}
+                                    onMouseEnter={(e) => showBookingNote(e, booking)}
+                                    onMouseLeave={hideBookingNote}
                                   >
                                     {bookingRoomLabel(booking)} · {booking.title || 'ບໍ່ມີຫົວຂໍ້'}
                                   </div>
@@ -1424,7 +1806,8 @@ export default function MeetingRooms() {
                                   left: `calc(${lane} * ${100 / dayViewMaxLanes}% + 4px)`,
                                   width: `calc(${100 / dayViewMaxLanes}% - 8px)`,
                                 }}
-                                title={`${bookingRoomLabel(booking)} — ${booking.title || 'ບໍ່ມີຫົວຂໍ້'} (${fmtTime(booking.startAt)}–${fmtTime(booking.endAt)})`}
+                                onMouseEnter={(e) => showBookingNote(e, booking)}
+                                onMouseLeave={hideBookingNote}
                               >
                                 {bookingRoomLabel(booking)} · {booking.title || 'ບໍ່ມີຫົວຂໍ້'}
                               </div>
@@ -1452,20 +1835,49 @@ export default function MeetingRooms() {
               <div className="divide-y divide-gray-100">
                 {myBookings.map((b) => {
                   const roomName = b.room?.name || b.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ';
+                  const past = isBookingPast(b);
+                  // ລາຍການທີ່ປະຊຸມຈົບແລ້ວ ຫຼື ຖືກປະຕິເສດ ຈະສະແດງສີຈາງ (light) ເພື່ອບົ່ງບອກວ່າບໍ່ສາມາດດຳເນີນການໄດ້
+                  const inactive = past || b.status === 'REJECTED';
+                  const canModify = b.status === 'PENDING' || b.status === 'CONFIRMED' || !b.status;
                   return (
-                    <div key={b._id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-gray-50 transition">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                    <div
+                      key={b._id}
+                      onClick={() => setDetailBooking(b)}
+                      title="ກົດເພື່ອເບິ່ງລາຍລະອຽດ"
+                      className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition cursor-pointer ${inactive ? 'opacity-60 bg-gray-50' : 'hover:bg-gray-50'}`}
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-gray-800 text-base">ຫ້ອງ: {roomName}</span>
                           {b.title && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">{b.title}</span>}
                           <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${bookingStatusInfo(b.status).className}`}>
                             {bookingStatusInfo(b.status).label}
                           </span>
+                          {b.pendingStartAt && b.pendingEndAt && (
+                            <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700">
+                              ລໍຖ້າອະນຸມັດການເລື່ອນເວລາ
+                            </span>
+                          )}
+                          {past && (
+                            <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">
+                              ຜ່ານໄປແລ້ວ
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-gray-500 flex items-center gap-1.5">
                           <Clock size={14} />
                           <span>ເລີ່ມ: {new Date(b.startAt).toLocaleString()} — ສິ້ນສຸດ: {new Date(b.endAt).toLocaleString()}</span>
                         </p>
+                        {b.pendingStartAt && b.pendingEndAt && (
+                          <p className="text-xs text-sky-700 bg-sky-50 rounded-lg px-2 py-1 mt-1">
+                            ເວລາໃໝ່ທີ່ຂໍປ່ຽນ: {new Date(b.pendingStartAt).toLocaleString()} — {new Date(b.pendingEndAt).toLocaleString()} (ລໍຖ້າອະນຸມັດ; ຖ້າບໍ່ອະນຸມັດ ຈະຄົງເວລາເດີມ)
+                          </p>
+                        )}
+                        {!b.pendingStartAt && b.rescheduleRejectionReason && (
+                          <p className="text-xs text-orange-700 bg-orange-50 rounded-lg px-2 py-1 mt-1">
+                            ຄຳຮ້ອງເລື່ອນເວລາບໍ່ຖືກອະນຸມັດ: {b.rescheduleRejectionReason} (ການຈອງເດີມຍັງຄົງຢູ່)
+                          </p>
+                        )}
                         {b.rejectionReason && (
                           <p className="text-xs text-red-600 bg-red-50 rounded-lg px-2 py-1 mt-1">
                             {b.status === 'REJECTED' ? 'ເຫດຜົນທີ່ປະຕິເສດ: ' : 'ເຫດຜົນທີ່ຍົກເລີກ: '}{b.rejectionReason}
@@ -1473,38 +1885,74 @@ export default function MeetingRooms() {
                         )}
                       </div>
 
-                      {(b.status === 'PENDING' || b.status === 'CONFIRMED' || !b.status) && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setCurrentBookingToReschedule(b);
-                              setNewStartAt(b.startAt ? b.startAt.slice(0, 16) : '');
-                              setNewEndAt(b.endAt ? b.endAt.slice(0, 16) : '');
-                              setRescheduleModalOpen(true);
-                            }}
-                            className="px-3 py-1.5 border border-gray-300 text-gray-700 hover:bg-gray-100 rounded-lg text-xs font-medium transition flex items-center gap-1"
-                          >
-                            <Edit3 size={14} />
-                            <span>ເລື່ອນເວລາ</span>
-                          </button>
-                          <button
-                            onClick={() => handleCancelBooking(b._id)}
-                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-medium transition flex items-center gap-1"
-                          >
-                            <Trash2 size={14} />
-                            <span>ຍົກເລີກ</span>
-                          </button>
-                          {b.seriesId && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        {canModify && (
+                          <>
                             <button
-                              onClick={() => handleCancelSeries(b.seriesId)}
-                              className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-medium transition"
-                              title="ຍົກເລີກທຸກຄັ້ງໃນຊຸດການຈອງແບບຊ້ຳນີ້"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // ປະຊຸມທີ່ຈົບໄປແລ້ວ ເລື່ອນເວລາບໍ່ໄດ້
+                                if (past) {
+                                  alert('ປະຊຸມນີ້ຈົບແລ້ວ ບໍ່ສາມາດເລື່ອນເວລາໄດ້');
+                                  return;
+                                }
+                                setCurrentBookingToReschedule(b);
+                                // ຖ້າມີຄຳຮ້ອງເລື່ອນເວລາຄ້າງຢູ່ ໃຫ້ປ້ອນຈາກເວລາທີ່ຂໍປ່ຽນນັ້ນ ເພື່ອປັບແກ້ໄດ້ເລີຍ; ບໍ່ດັ່ງນັ້ນໃຊ້ເວລາເດີມ
+                                // ແປງ ISO (UTC) ເປັນເວລາທ້ອງຖິ່ນກ່ອນປ້ອນໃສ່ input/ຕາຕະລາງ (slice ຊື່ໆ ຈະເຮັດໃຫ້ເວລາເຂື່ອນ)
+                                const prefillStartAt = b.pendingStartAt || b.startAt;
+                                const prefillEndAt = b.pendingEndAt || b.endAt;
+                                setNewStartAt(prefillStartAt ? toDateTimeLocalValue(new Date(prefillStartAt)) : '');
+                                setNewEndAt(prefillEndAt ? toDateTimeLocalValue(new Date(prefillEndAt)) : '');
+                                setReschedulePickStart(null);
+                                // ເລື່ອນຕາຕະລາງໄປອາທິດຂອງການຈອງນີ້ ເພື່ອໃຫ້ເຫັນເວລາເດີມທັນທີ
+                                if (b.startAt) setCalendarAnchorDate(new Date(b.startAt));
+                                setRescheduleModalOpen(true);
+                              }}
+                              aria-disabled={past}
+                              title={past ? 'ປະຊຸມນີ້ຈົບແລ້ວ ເລື່ອນເວລາບໍ່ໄດ້' : 'ເລື່ອນເວລາ'}
+                              className={`px-3 py-1.5 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium transition flex items-center gap-1 ${past ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100'}`}
                             >
-                              ຍົກເລີກທັງຊຸດ
+                              <Edit3 size={14} />
+                              <span>ເລື່ອນເວລາ</span>
                             </button>
-                          )}
-                        </div>
-                      )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // ປະຊຸມທີ່ຈົບໄປແລ້ວ ຍົກເລີກບໍ່ໄດ້ (ເຂົ້າຫ້ອງກໍບໍ່ໄດ້ແລ້ວ)
+                                if (past) {
+                                  alert('ປະຊຸມນີ້ຈົບແລ້ວ ຍົກເລີກບໍ່ໄດ້');
+                                  return;
+                                }
+                                handleCancelBooking(b._id);
+                              }}
+                              aria-disabled={past}
+                              title={past ? 'ປະຊຸມນີ້ຈົບແລ້ວ ຍົກເລີກບໍ່ໄດ້' : 'ຍົກເລີກການຈອງ'}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 ${past ? 'bg-red-50 text-red-400 opacity-40 cursor-not-allowed' : 'bg-red-50 hover:bg-red-100 text-red-600'}`}
+                            >
+                              <Trash2 size={14} />
+                              <span>ຍົກເລີກ</span>
+                            </button>
+                            {b.seriesId && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (past) {
+                                    alert('ປະຊຸມນີ້ຈົບແລ້ວ ຍົກເລີກບໍ່ໄດ້');
+                                    return;
+                                  }
+                                  handleCancelSeries(b.seriesId);
+                                }}
+                                aria-disabled={past}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${past ? 'bg-red-100 text-red-400 opacity-40 cursor-not-allowed' : 'bg-red-100 hover:bg-red-200 text-red-700'}`}
+                                title={past ? 'ປະຊຸມນີ້ຈົບແລ້ວ ຍົກເລີກບໍ່ໄດ້' : 'ຍົກເລີກທຸກຄັ້ງໃນຊຸດການຈອງແບບຊ້ຳນີ້'}
+                              >
+                                ຍົກເລີກທັງຊຸດ
+                              </button>
+                            )}
+                          </>
+                        )}
+                        <ChevronRight size={18} className="text-gray-300 shrink-0" />
+                      </div>
                     </div>
                   );
                 })}
@@ -1568,6 +2016,9 @@ export default function MeetingRooms() {
                             <span className="font-bold text-gray-800">ຫ້ອງ: {roomName}</span>
                             {b.title && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">{b.title}</span>}
                             {b.seriesId && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium">ຈອງແບບຊ້ຳ</span>}
+                            {b.isReschedule && (
+                              <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-md font-medium">ຄຳຮ້ອງເລື່ອນເວລາ</span>
+                            )}
                             {isBlocked && (
                               <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
                                 <AlertTriangle size={12} />
@@ -1586,6 +2037,12 @@ export default function MeetingRooms() {
                             <Clock size={14} />
                             <span>ເລີ່ມ: {new Date(b.startAt).toLocaleString()} — ສິ້ນສຸດ: {new Date(b.endAt).toLocaleString()}</span>
                           </p>
+                          {b.isReschedule && b.originalStartAt && b.originalEndAt && (
+                            <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                              <Clock size={14} />
+                              <span>ເວລາເດີມທີ່ອະນຸມັດແລ້ວ: {new Date(b.originalStartAt).toLocaleString()} — {new Date(b.originalEndAt).toLocaleString()}</span>
+                            </p>
+                          )}
                           {showConflict && (
                             <p className="text-xs text-red-600 flex items-start gap-1.5">
                               <AlertTriangle size={12} className="shrink-0 mt-0.5" />
@@ -1943,134 +2400,17 @@ export default function MeetingRooms() {
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-sm font-medium text-gray-700">
-                      ເລືອກເວລາ — ກົດຈຸດເລີ່ມ ແລ້ວກົດຈຸດສິ້ນສຸດ
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const prev = new Date(calendarAnchorDate);
-                          prev.setDate(prev.getDate() - 7);
-                          setCalendarAnchorDate(prev);
-                          setPickStart(null);
-                        }}
-                        className="px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
-                      >
-                        ◀
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = new Date(calendarAnchorDate);
-                          next.setDate(next.getDate() + 7);
-                          setCalendarAnchorDate(next);
-                          setPickStart(null);
-                        }}
-                        className="px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
-                      >
-                        ▶
-                      </button>
-                    </div>
-                  </div>
-
                   {!selectedRoom ? (
                     <div className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl p-4 text-center">
                       ກະລຸນາເລືອກຫ້ອງກ່ອນ ເພື່ອເບິ່ງເວລາທີ່ວ່າງ
                     </div>
-                  ) : (
-                    <div className="border border-gray-200 rounded-xl overflow-hidden">
-                      <div className="overflow-x-auto">
-                        <div className="min-w-[760px] grid grid-cols-9 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-600 text-center py-1.5">
-                          <div>ວັນ / ເວລາ</div>
-                          {timeSlots.map(time => (
-                            <div key={time}>{time}</div>
-                          ))}
-                        </div>
-                        <div className="divide-y divide-gray-100">
-                          {weekDays
-                            .map(day => {
-                              const dayDate = new Date(getWeekRange(calendarAnchorDate).from);
-                              dayDate.setDate(dayDate.getDate() + (day.dayIndex - 1));
-                              return { ...day, dayDate };
-                            })
-                            .filter(day => {
-                              const today = new Date();
-                              today.setHours(0, 0, 0, 0);
-                              return day.dayDate >= today;
-                            })
-                            .map(day => {
-                              const dayDate = day.dayDate;
-                              return (
-                                <div key={day.key} className="min-w-[760px] grid grid-cols-9 items-stretch">
-                                  <div className="text-center text-[11px] font-medium text-gray-400 border-r border-gray-100 py-2 flex flex-col items-center justify-center gap-0.5">
-                                    <span>{day.label}</span>
-                                    <span className="text-[10px] font-normal text-gray-300">
-                                      {dayDate.toLocaleDateString('lo-LA', { day: 'numeric', month: 'short' })}
-                                    </span>
-                                  </div>
-                                  {timeSlots.map(time => {
-                                    const occupied = isSlotOccupied(day.dayIndex, time);
-                                    const isPast = isSlotInPast(day.dayIndex, time);
-                                    const isChosenStart = pickStart && pickStart.dayIndex === day.dayIndex && pickStart.time === time;
-                                    const isPickingEnd = pickStart && pickStart.dayIndex === day.dayIndex &&
-                                      slotHours.indexOf(parseInt(time, 10)) > slotHours.indexOf(parseInt(pickStart.time, 10));
-                                    const isDisabled = isPast || (occupied && !isPickingEnd);
-                                    const isInRange = isSlotInSelectedRange(day.dayIndex, time);
-                                    return (
-                                      <button
-                                        type="button"
-                                        key={time}
-                                        disabled={isDisabled}
-                                        onClick={() => handlePickerClick(day.dayIndex, time)}
-                                        className={`h-9 border-r border-gray-100 text-[10px] transition ${isPast
-                                          ? 'bg-gray-50 text-gray-300 cursor-not-allowed opacity-60'
-                                          : isDisabled
-                                            ? 'bg-red-50 text-red-300 cursor-not-allowed'
-                                            : occupied
-                                              ? 'bg-red-50 text-red-400 hover:bg-red-100 cursor-pointer'
-                                              : isChosenStart
-                                                ? 'bg-amber-500 text-white font-semibold'
-                                                : isInRange
-                                                  ? 'bg-amber-100 text-amber-700 font-semibold border-amber-200'
-                                                  : 'bg-white hover:bg-amber-50 text-gray-300'
-                                            }`}
-                                        title={isPast
-                                          ? 'ເວລາຜ່ານໄປແລ້ວ'
-                                          : isDisabled
-                                            ? 'ບໍ່ວ່າງ'
-                                            : occupied ? 'ຊົ່ວໂມງນີ້ບໍ່ວ່າງ, ແຕ່ສາມາດເລືອກເປັນຈຸດສິ້ນສຸດໄດ້' : time}
-                                      >
-                                        {isPast ? '' : occupied ? '✕' : isChosenStart ? '●' : isInRange ? '●' : ''}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              );
-                            })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="mt-2 flex items-center gap-2 text-xs" translate="no">
-                    {pickStart ? (
-                      <span className="text-amber-600 font-medium">
-                        ເລືອກຈຸດເລີ່ມແລ້ວ ({weekDays.find(d => d.dayIndex === pickStart.dayIndex)?.label} {pickStart.time}) — ກົດຈຸດສິ້ນສຸດຕໍ່
-                      </span>
-                    ) : startAt && endAt ? (
-                      <span className="text-green-700 font-medium bg-green-50 border border-green-200 rounded-lg px-2 py-1">
-                        {new Date(startAt).toLocaleDateString('lo-LA', { weekday: 'long', day: 'numeric', month: 'short' })}
-                        {' ⋅ '}
-                        {new Date(startAt).toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}
-                        {' - '}
-                        {new Date(endAt).toLocaleTimeString('lo-LA', { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">ຍັງບໍ່ໄດ້ເລືອກເວລາ</span>
-                    )}
-                  </div>
+                  ) : renderSlotPicker({
+                    pickStart,
+                    startVal: startAt,
+                    endVal: endAt,
+                    onSlotClick: handlePickerClick,
+                    isOccupied: isSlotOccupied,
+                  })}
                 </div>
 
                 {(startAt && isOutsideWorkingHours(startAt)) || (endAt && isOutsideWorkingHours(endAt)) ? (
@@ -2129,38 +2469,70 @@ export default function MeetingRooms() {
           </div>
         )}
 
-        {/* MODAL: RESCHEDULE */}
-        {rescheduleModalOpen && (
+        {/* MODAL: RESCHEDULE — ສະແດງຕາຕະລາງຊ່ອງວ່າງຄືກັນກັບຕອນຈອງຫ້ອງ ເພື່ອໃຫ້ເຫັນ slot ທີ່ຫວ່າງ */}
+        {rescheduleModalOpen && currentBookingToReschedule && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center pb-2 border-b border-gray-100">
                 <h2 className="text-lg font-bold text-gray-800">ເລື່ອນເວລາຈອງຫ້ອງ</h2>
-                <button onClick={() => setRescheduleModalOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+                <button onClick={() => { setRescheduleModalOpen(false); setReschedulePickStart(null); }} className="text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+
+              <div className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+                ຫ້ອງ: <span className="font-medium text-gray-700">{currentBookingToReschedule.room?.name || currentBookingToReschedule.roomId?.name || bookingRoomLabel(currentBookingToReschedule)}</span>
+                {' • '}ເວລາເດີມ: {new Date(currentBookingToReschedule.startAt).toLocaleString()} — {new Date(currentBookingToReschedule.endAt).toLocaleString()}
               </div>
 
               <form onSubmit={handleRescheduleSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ເວລາເລີ່ມຕົ້ນໃໝ່</label>
-                  <input
-                    type="datetime-local"
-                    value={newStartAt}
-                    onChange={(e) => setNewStartAt(e.target.value)}
-                    required
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
-                  />
+                  <span className="block text-xs text-gray-400 mb-1">
+                    ກົດຈຸດເລີ່ມ ແລ້ວກົດຈຸດສິ້ນສຸດໃນຕາຕະລາງ ເພື່ອເລືອກເວລາໃໝ່ (ຊ່ວງຫວ່າງຈະສະແດງສີຂາວ)
+                  </span>
+                  {renderSlotPicker({
+                    pickStart: reschedulePickStart,
+                    startVal: newStartAt,
+                    endVal: newEndAt,
+                    // ເວລາເດີມທີ່ຮ້ອງຂໍໄວ້ (start–end ຕົ້ນສະບັບ) ຈະຖືກໄຮໄລ້ແບບຈາງໆ ເພື່ອທຽບກັບເວລາໃໝ່
+                    originalStartVal: currentBookingToReschedule.startAt,
+                    originalEndVal: currentBookingToReschedule.endAt,
+                    onSlotClick: handleReschedulePickerClick,
+                    isOccupied: (dayIndex, time) => isSlotOccupiedForRoom(
+                      String(bookingRoomId(currentBookingToReschedule)),
+                      dayIndex,
+                      time,
+                      currentBookingToReschedule._id
+                    ),
+                  })}
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ເວລາສິ້ນສຸດໃໝ່</label>
-                  <input
-                    type="datetime-local"
-                    value={newEndAt}
-                    onChange={(e) => setNewEndAt(e.target.value)}
-                    required
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
-                  />
+
+                <div className="pt-3 border-t border-gray-100 space-y-4">
+                  <p className="text-xs font-medium text-gray-400">ຫຼື ປ້ອນເວລາເອງ (Optional)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">ເວລາເລີ່ມຕົ້ນໃໝ່</label>
+                      <input
+                        type="datetime-local"
+                        value={newStartAt}
+                        onChange={(e) => setNewStartAt(e.target.value)}
+                        required
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">ເວລາສິ້ນສຸດໃໝ່</label>
+                      <input
+                        type="datetime-local"
+                        value={newEndAt}
+                        onChange={(e) => setNewEndAt(e.target.value)}
+                        required
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
+
                 <div className="flex justify-end gap-3 pt-2">
-                  <button type="button" onClick={() => setRescheduleModalOpen(false)} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm">ຍົກເລີກ</button>
+                  <button type="button" onClick={() => { setRescheduleModalOpen(false); setReschedulePickStart(null); }} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm">ຍົກເລີກ</button>
                   <button type="submit" className="px-4 py-2 bg-amber-500 text-white rounded-xl text-sm">ບັນທຶກການເລື່ອນເວລາ</button>
                 </div>
               </form>
@@ -2172,9 +2544,24 @@ export default function MeetingRooms() {
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
               <div className="flex justify-between items-center pb-2 border-b border-gray-100">
-                <h2 className="text-lg font-bold text-gray-800">ປະຕິເສດຄຳຮ້ອງຂໍຈອງ</h2>
+                <h2 className="text-lg font-bold text-gray-800">
+                  {bookingToReject?.isReschedule ? 'ປະຕິເສດຄຳຮ້ອງເລື່ອນເວລາ' : 'ປະຕິເສດຄຳຮ້ອງຂໍຈອງ'}
+                </h2>
                 <button onClick={closeRejectModal} className="text-gray-400 hover:text-gray-600">✕</button>
               </div>
+
+              {bookingToReject?.isReschedule && (
+                <div className="rounded-xl bg-sky-50 border border-sky-200 p-3 flex items-start gap-2 text-xs text-sky-800">
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">
+                    ການປະຕິເສດນີ້ຈະລຶບພຽງ "ຄຳຮ້ອງເລື່ອນເວລາ" ເທົ່ານັ້ນ —
+                    ການຈອງທີ່ອະນຸມັດແລ້ວຈະຄົງຢູ່ຕາມເວລາເດີມ
+                    {bookingToReject?.originalStartAt && (
+                      <> ({new Date(bookingToReject.originalStartAt).toLocaleString()} — {new Date(bookingToReject.originalEndAt).toLocaleString()})</>
+                    )}.
+                  </span>
+                </div>
+              )}
 
               {bookingToReject && (
                 <p className="text-sm text-gray-500">
@@ -2223,6 +2610,169 @@ export default function MeetingRooms() {
                   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm disabled:opacity-50"
                 >
                   {rejectSubmitting ? 'ກຳລັງປະຕິເສດ...' : 'ຢືນຢັນປະຕິເສດ'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* popup ລາຍລະອຽດການຈອງ — ເປີດເມື່ອກົດລາຍການໃນ "ການຈອງຂອງຂ້ອຍ" */}
+        {detailBooking && (
+          <div
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setDetailBooking(null)}
+          >
+            <div
+              className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+                <h2 className="text-lg font-bold text-gray-800">ລາຍລະອຽດການຈອງ</h2>
+                <button onClick={() => setDetailBooking(null)} className="text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-gray-800 text-base">
+                  ຫ້ອງ: {detailBooking.room?.name || detailBooking.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ'}
+                </span>
+                {detailBooking.title && (
+                  <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">{detailBooking.title}</span>
+                )}
+                <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${bookingStatusInfo(detailBooking.status).className}`}>
+                  {bookingStatusInfo(detailBooking.status).label}
+                </span>
+                {detailBooking.pendingStartAt && detailBooking.pendingEndAt && (
+                  <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-sky-100 text-sky-700">
+                    ລໍຖ້າອະນຸມັດການເລື່ອນເວລາ
+                  </span>
+                )}
+                {isBookingPast(detailBooking) && (
+                  <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">
+                    ຜ່ານໄປແລ້ວ
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-400">ເລີ່ມ</span>
+                  <span className="text-gray-700 font-medium text-right">{new Date(detailBooking.startAt).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-400">ສິ້ນສຸດ</span>
+                  <span className="text-gray-700 font-medium text-right">{new Date(detailBooking.endAt).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {detailTimeline.length > 0 && (
+                <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+                  <p className="text-xs font-semibold text-gray-700 mb-3">ປະຫວັດການປ່ຽນແປງ</p>
+                  <ol className="space-y-3">
+                    {detailTimeline.map((e, idx) => {
+                      const info = bookingHistoryInfo(e.action);
+                      const hasRange = e.fromStartAt || e.toStartAt;
+                      return (
+                        <li key={idx} className="flex gap-3">
+                          <div className="flex flex-col items-center pt-1">
+                            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${info.dot}`} />
+                            {idx < detailTimeline.length - 1 && <span className="w-px flex-1 bg-gray-200 my-1" />}
+                          </div>
+                          <div className="text-xs pb-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium text-gray-700">{info.label}</span>
+                              {e.isPending && (
+                                <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">ລໍຖ້າອະນຸມັດ</span>
+                              )}
+                            </div>
+                            {e.at && <p className="text-gray-400 mt-0.5">{new Date(e.at).toLocaleString()}</p>}
+                            {hasRange && (
+                              <p className="text-gray-600 mt-1 leading-relaxed">
+                                {e.fromStartAt && e.toStartAt ? (
+                                  <>
+                                    <span className="text-gray-400">ເວລາເດີມ: </span>
+                                    {new Date(e.fromStartAt).toLocaleString()} — {new Date(e.fromEndAt).toLocaleString()}
+                                    <br />
+                                    <span className="text-gray-400">ເວລາໃໝ່: </span>
+                                    <span className="text-sky-700 font-medium">{new Date(e.toStartAt).toLocaleString()} — {new Date(e.toEndAt).toLocaleString()}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="text-gray-400">ເວລາ: </span>
+                                    {new Date(e.toStartAt).toLocaleString()} — {new Date(e.toEndAt).toLocaleString()}
+                                  </>
+                                )}
+                              </p>
+                            )}
+                            {e.actor && <p className="text-gray-500 mt-0.5">ໂດຍ: {e.actor}</p>}
+                            {e.note && (
+                              <p className="text-orange-700 bg-orange-50 rounded px-1.5 py-0.5 mt-1 inline-block">ເຫດຜົນ: {e.note}</p>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              )}
+
+              {detailBooking.recurrence && (
+                <div className="flex justify-between gap-3 text-sm">
+                  <span className="text-gray-400">ຈອງແບບຊ້ຳ</span>
+                  <span className="text-gray-700 font-medium text-right">
+                    {detailBooking.recurrence.frequency === 'daily' ? 'ປະຈຳວັນ' : 'ປະຈຳອາທິດ'}
+                    {detailBooking.recurrence.until ? ` • ຮອດ ${new Date(detailBooking.recurrence.until).toLocaleDateString()}` : ''}
+                  </span>
+                </div>
+              )}
+
+              {Array.isArray(detailBooking.attendees) && detailBooking.attendees.length > 0 && (
+                <div className="text-sm">
+                  <span className="text-gray-400">ຜູ້ເຂົ້າຮ່ວມ ({detailBooking.attendees.length})</span>
+                  <p className="text-gray-700 mt-1">{detailBooking.attendees.join(', ')}</p>
+                </div>
+              )}
+
+              {(detailBooking.createdAt || detailBooking.updatedAt) && (
+                <div className="pt-2 border-t border-gray-100 space-y-1 text-xs text-gray-400">
+                  {detailBooking.createdAt && (
+                    <div className="flex justify-between gap-3">
+                      <span>ສ້າງເມື່ອ</span>
+                      <span className="text-right">{new Date(detailBooking.createdAt).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {detailBooking.updatedAt && (
+                    <div className="flex justify-between gap-3">
+                      <span>ແກ້ໄຂຫຼ້າສຸດ</span>
+                      <span className="text-right">{new Date(detailBooking.updatedAt).toLocaleString()}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-between gap-3 pt-2">
+                {detailBooking.status !== 'REJECTED' && detailBooking.status !== 'CANCELLED' && !isBookingPast(detailBooking) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // ປິດ popup ກ່ອນ ແລ້ວເອີ້ນຂະບວນການຍົກເລີກ (ມີ window.confirm ຢູ່ໃນນັ້ນແລ້ວ)
+                      const id = detailBooking._id;
+                      setDetailBooking(null);
+                      handleCancelBooking(id);
+                    }}
+                    className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-sm font-medium flex items-center gap-1.5"
+                  >
+                    <Trash2 size={16} />
+                    <span>ຍົກເລີກການຈອງ</span>
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <button
+                  type="button"
+                  onClick={() => setDetailBooking(null)}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm"
+                >
+                  ປິດ
                 </button>
               </div>
             </div>
