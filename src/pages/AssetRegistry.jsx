@@ -3,8 +3,9 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Plus, X, AlertCircle, Search, UserCheck, Undo2,
   Wrench, History, AlertTriangle, Trash2, Barcode, Archive, Camera,
+  CheckCircle2, XCircle,
 } from 'lucide-react';
-import { hasPermission } from '../utils/permissions';
+import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
@@ -63,6 +64,19 @@ export default function AssetRegistry() {
   const [historyModalAsset, setHistoryModalAsset] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [busyId, setBusyId] = useState(null);
+
+  // ເລືອກຫຼາຍລາຍການ → ຢືນຢັນຮັບເຄື່ອງທັງໝົດໃນຄັ້ງດຽວ (bulk claim)
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkClaimOpen, setBulkClaimOpen] = useState(false);
+  const [bulkClaimSubmitting, setBulkClaimSubmitting] = useState(false);
+  const [bulkClaimError, setBulkClaimError] = useState('');
+  const [bulkClaimResults, setBulkClaimResults] = useState(null);
+
+  // ຜູ້ຮັບ = ບັນຊີທີ່ກຳລັງ login (claim ຜູກກັບ token ເທົ່ານັ້ນ)
+  const currentUser = getCurrentUser();
+  const claimUser = users.find(
+    (u) => (currentUser?._id && u._id === currentUser._id) || (currentUser?.email && u.email === currentUser.email),
+  ) || currentUser;
 
   function unwrap(body) {
     return body?.data !== undefined ? body.data : body;
@@ -167,7 +181,6 @@ export default function AssetRegistry() {
 
   // ຂໍ້ມູນຊັບສິນເປັນຂໍ້ຄວາມฝังลง QR — ສະແກນດ້ວຍกลໍ່ມືຖືເຫັນຂໍ້ມູນທັນທີ ໂດຍບໍ່ຕ້ອງເຊື່ອມຕໍ່ເຊີບເວີ
   // QR ແບບອອຟໄລ — ຝັງສະເພາະ Asset Tag ເພື່ອພິມເປັນສະຕິກເກີ ບໍ່ໃຫ້ມີຂໍ້ມູນທີ່ຈະລ້າສະໄໝ
-  const assetInfoText = (a) => a.assetTag || '';
 
   const isAscii = (s) => !(s || '').split('').some((c) => c.charCodeAt(0) > 127);
 
@@ -278,6 +291,80 @@ export default function AssetRegistry() {
   const handleSetStatus = (a, status) => callAction(a._id, '/status', 'PATCH', { status });
   const handleDelete = (a) => callAction(a._id, '', 'DELETE', null, `ລຶບຊັບສິນ ${a.assetTag} ຖາວອນ? ບໍ່ສາມາດກູ້ຄືນໄດ້`);
 
+  // ເລືອກໄດ້ສະເພາະ asset ທີ່ວ່າງ (AVAILABLE) — ຕົວທີ່ຢູ່ໃນລາຍການທີ່ເຫັນຕາມ filter
+  const selectableAssets = filteredAssets.filter((a) => a.status === 'AVAILABLE');
+  const allVisibleSelected =
+    selectableAssets.length > 0 && selectableAssets.every((a) => selectedIds.has(a._id));
+  const someVisibleSelected = selectableAssets.some((a) => selectedIds.has(a._id));
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) selectableAssets.forEach((a) => next.delete(a._id));
+      else selectableAssets.forEach((a) => next.add(a._id));
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const openBulkClaim = () => {
+    setBulkClaimError('');
+    setBulkClaimResults(null);
+    setBulkClaimOpen(true);
+  };
+
+  const closeBulkClaim = () => {
+    setBulkClaimOpen(false);
+    setBulkClaimError('');
+    setBulkClaimResults(null);
+  };
+
+  // ຢືນຢັນຮັບເຄື່ອງທີ່ເລືອກທັງໝົດ — ເອີ້ນ PATCH /assets/:id/claim ເປັນລຳດັບ ແລ້ວສະຫຼຸບຜົນລາຍຊິ້ນ
+  const confirmBulkClaim = () => {
+    const targetAssets = assets.filter((a) => selectedIds.has(a._id));
+    if (targetAssets.length === 0) {
+      setBulkClaimError('ກະລຸນາເລືອກຊັບສິນຢ່າງໜ້ອຍ 1 ລາຍການ');
+      return;
+    }
+    setBulkClaimSubmitting(true);
+    setBulkClaimError('');
+    setBulkClaimResults(null);
+
+    (async () => {
+      const results = [];
+      for (const a of targetAssets) {
+        try {
+          const res = await fetch(`${API_BASE_URL}/assets/${a._id}/claim`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({
+              note: 'ຮັບເຄື່ອງຫຼາຍລາຍການດ້ວຍຕົນເອງ — ຢືນຢັນຕົວຕົນຂອງຜູ້ໃຊ້ທີ່ກຳລັງ login',
+            }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body?.msg || 'ບໍ່ສຳເລັດ');
+          results.push({ assetTag: a.assetTag, ok: true });
+        } catch (err) {
+          results.push({ assetTag: a.assetTag, ok: false, message: err.message });
+        }
+      }
+      setBulkClaimResults(results);
+      setBulkClaimSubmitting(false);
+      clearSelection();
+      fetchAssets();
+    })();
+  };
+
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -376,11 +463,46 @@ export default function AssetRegistry() {
               </select>
             </div>
 
+            {selectedIds.size > 0 && (
+              <div className="px-4 py-3 border-b border-gray-100 bg-blue-50/60 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-blue-800">
+                  ເລືອກແລ້ວ <span className="font-semibold">{selectedIds.size}</span> ລາຍການ
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="px-3 py-1.5 text-xs text-gray-600 hover:bg-white rounded-lg transition"
+                  >
+                    ລ້າງການເລືອກ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openBulkClaim}
+                    className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    <UserCheck size={14} /> ຢືນຢັນຮັບເຄື່ອງທັງໝົດ
+                  </button>
+                </div>
+              </div>
+            )}
+
             {assetsError && <div className="p-4 text-sm text-red-600 flex items-center gap-2"><AlertCircle size={16} />{assetsError}</div>}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="bg-gray-50 text-gray-500">
                   <tr>
+                    <th className="p-3 w-10">
+                      <input
+                        type="checkbox"
+                        aria-label="ເລືອກທັງໝົດ"
+                        checked={allVisibleSelected}
+                        ref={(el) => { if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected; }}
+                        onChange={toggleSelectAllVisible}
+                        disabled={selectableAssets.length === 0}
+                        className="rounded"
+                      />
+                    </th>
                     <th className="p-3 font-medium">Asset Tag</th>
                     <th className="p-3 font-medium">ສາຂາ</th>
                     <th className="p-3 font-medium">ສະຖານະ</th>
@@ -392,18 +514,29 @@ export default function AssetRegistry() {
                 <tbody className="divide-y divide-gray-100">
                   {loadingAssets && (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</td>
+                      <td colSpan={7} className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</td>
                     </tr>
                   )}
                   {!loadingAssets && filteredAssets.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="p-6 text-center text-sm text-gray-500">ບໍ່ພົບຊັບສິນທີ່ຄ້າຍຄື</td>
+                      <td colSpan={7} className="p-6 text-center text-sm text-gray-500">ບໍ່ພົບຊັບສິນທີ່ຄ້າຍຄື</td>
                     </tr>
                   )}
                   {filteredAssets.map((a) => {
                     const info = statusInfo(a.status);
                     return (
                       <tr key={a._id} className="hover:bg-gray-50">
+                        <td className="p-3">
+                          {a.status === 'AVAILABLE' && (
+                            <input
+                              type="checkbox"
+                              aria-label={`ເລືອກ ${a.assetTag}`}
+                              checked={selectedIds.has(a._id)}
+                              onChange={() => toggleSelect(a._id)}
+                              className="rounded"
+                            />
+                          )}
+                        </td>
                         <td className="p-3">
                           <button
                             type="button"
@@ -616,17 +749,6 @@ export default function AssetRegistry() {
               </div>
 
               <div className="flex flex-col items-center justify-center space-y-1">
-                <div className="text-xs font-medium text-gray-600">Asset Tag (offline)</div>
-                <QRCodeSVG
-                  value={assetInfoText(barcodeModalAsset)}
-                  size={140}
-                  level="M"
-                  marginSize={2}
-                />
-                <div className="text-[11px] text-gray-400">QR ບັນຈຸສະເພາະ Asset Tag — ພິມເປັນສະຕິກເກີໄດ້ ບໍ່ມີຂໍ້ມູນລ້າສະໄໝ</div>
-              </div>
-
-              <div className="border-t border-gray-100 pt-3 flex flex-col items-center justify-center space-y-1">
                 <div className="text-xs font-medium text-gray-600">ເປີດໜ້າຢືນຢັນຮັບເຄື່ອງ (online)</div>
                 <QRCodeSVG
                   value={`${claimBaseUrl}/assets/${barcodeModalAsset._id}?claim=1`}
@@ -723,6 +845,102 @@ export default function AssetRegistry() {
           </div>
         )}
 
+        {bulkClaimOpen && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 max-h-[85vh] overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-bold text-gray-800">ຢືນຢັນການຮັບເຄື່ອງຫຼາຍລາຍການ</h2>
+                <button type="button" onClick={closeBulkClaim} className="text-gray-400 hover:text-gray-600">
+                  <X size={18} />
+                </button>
+              </div>
+
+              {bulkClaimResults ? (
+                <div className="space-y-3">
+                  <div className="text-center space-y-2 py-1">
+                    <CheckCircle2 size={40} className="mx-auto text-emerald-500" />
+                    <div className="font-semibold text-gray-800">
+                      ສຳເລັດ {bulkClaimResults.filter((r) => r.ok).length}/{bulkClaimResults.length} ລາຍການ
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    {bulkClaimResults.map((r, i) => (
+                      <div
+                        key={i}
+                        className={`text-xs border rounded-lg px-3 py-2 flex items-center justify-between gap-2 ${
+                          r.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-600'
+                        }`}
+                      >
+                        <span className="font-mono truncate">{r.assetTag}</span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          {r.ok ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                          {r.ok ? 'ສຳເລັດ' : (r.message || 'ບໍ່ສຳເລັດ')}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeBulkClaim}
+                    className="w-full px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition"
+                  >
+                    ປິດ
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    ຈະມອບໝາຍຊັບສິນ {selectedIds.size} ລາຍການ ໃຫ້ບັນຊີທີ່ກຳລັງ login ເທົ່ານັ້ນ:
+                  </p>
+                  <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
+                    <div className="flex justify-between py-1 border-b border-gray-100">
+                      <span className="text-gray-500">ຜູ້ຮັບ</span>
+                      <span className="font-medium text-gray-800">
+                        {claimUser ? (`${claimUser.firstName || ''} ${claimUser.lastName || ''}`.trim() || claimUser.email || '—') : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-gray-100">
+                      <span className="text-gray-500">ລະຫັດພະນັກງານ</span>
+                      <span className="font-medium text-gray-800">{claimUser?.employeeCode || '—'}</span>
+                    </div>
+                    <div className="flex justify-between py-1">
+                      <span className="text-gray-500">ຈຳນວນຊັບສິນ</span>
+                      <span className="font-medium text-gray-800">{selectedIds.size} ລາຍການ</span>
+                    </div>
+                  </div>
+                  <div className="max-h-44 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100">
+                    {assets.filter((a) => selectedIds.has(a._id)).map((a) => (
+                      <div key={a._id} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                        <span className="font-mono text-gray-800 truncate">{a.assetTag}</span>
+                        <span className="text-gray-400 shrink-0">{a.type || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {!claimUser && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      ບໍ່ສາມາດຢືນຢັນຕົວຕົນໄດ້ — ກະລຸນາ login ໃໝ່ແລ້ວລອງໃໝ່
+                    </div>
+                  )}
+                  {bulkClaimError && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{bulkClaimError}</div>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={closeBulkClaim} className="px-4 py-2 text-sm text-gray-600">ຍົກເລີກ</button>
+                    <button
+                      type="button"
+                      onClick={confirmBulkClaim}
+                      disabled={bulkClaimSubmitting || !claimUser}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium disabled:opacity-50"
+                    >
+                      {bulkClaimSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ຍັນຍົນຮັບເຄື່ອງ'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {scannerOpen && (
           <CameraScanner
             title="ສະແກນ Asset Tag"
@@ -731,11 +949,9 @@ export default function AssetRegistry() {
               const raw = String(text || '').trim();
               const urlMatch = raw.match(/\/assets\/([A-Za-z0-9_-]+)/);
               if (urlMatch) {
-                const found = assets.find((a) => a._id === urlMatch[1]);
-                if (found) {
-                  navigate(`/assets/${found._id}?claim=1`);
-                  return;
-                }
+                // ໄປໜ້າລາຍລະອຽດຕາມ id ໃນ QR ໂດຍກົງ — ບໍ່ຕ້ອງໃຫ້ຊັບສິນຢູ່ໃນລາຍການທີ່ໂຫຼດ/ກັ່ນຕອງຢູ່
+                navigate(`/assets/${urlMatch[1]}?claim=1`);
+                return;
               }
               setSearch(raw);
             }}

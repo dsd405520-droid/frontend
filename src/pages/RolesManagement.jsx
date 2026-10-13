@@ -353,8 +353,8 @@ export default function RolesManagement() {
               {/* Matrix ກຳນົດ Permissions ຕາມ Module ແລະ Actions */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-2">ກຳນົດສິດທິການເຂົ້າເຖິງແຕ່ລະໂມດູນ (Permissions)</label>
-                <div className="border border-gray-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-left text-xs">
+                <div className="border border-gray-200 rounded-xl overflow-x-auto">
+                  <table className="w-full min-w-[900px] text-left text-xs">
                     <thead className="bg-gray-50 border-b border-gray-200 text-gray-600">
                       <tr>
                         <th className="p-3 font-semibold">ໂມດູນ</th>

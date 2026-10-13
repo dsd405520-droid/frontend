@@ -16,6 +16,12 @@ export default function InventorySupplies() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   const [items, setItems] = useState([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
+  const [submitError, setSubmitError] = useState('');
+
+  // ຕົວເລືອກຫຼາຍລາຍການຈາກ Catalog — ຕິກຫຼາຍອັນ + ໃສ່ຈຳນວນ ແລ້ວເພີ່ມເຂົ້າໃບຂໍພ້ອມກັນ
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerSelected, setPickerSelected] = useState({}); // { [catalogId]: quantity }
 
   // ຮັບເຄື່ອງທີ່ຄັງ — ຫຼັງອະນຸມັດແລ້ວ ພະນັກງານສະແກນ QR/ບາໂຄ໊ດ ຂອງອຸປະກອນ 2 ຂັ້ນ:
   //   1. ສະແກນເຄື່ອງ → ກວດກັບລາຍການທີ່ຂໍ (ຖ້າມີສິດອ່ານທະບຽນຊັບສິນ)
@@ -105,11 +111,85 @@ useEffect(() => {
     setItems(items.filter((_, i) => i !== index));
   };
 
+  const catalogById = (id) => (Array.isArray(catalog) ? catalog.find((c) => c._id === id) : undefined);
+
+  const isBlankRow = (it) => !it.catalogItemId && !String(it.name || '').trim() && !String(it.reason || '').trim();
+
+  const resetRequestForm = () => {
+    setItems([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
+    setSubmitError('');
+    setPickerOpen(false);
+    setPickerSearch('');
+    setPickerSelected({});
+  };
+
+  const togglePicked = (id) => {
+    setPickerSelected((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = 1;
+      return next;
+    });
+  };
+
+  const setPickedQty = (id, qty) => {
+    setPickerSelected((prev) => ({ ...prev, [id]: Math.max(1, parseInt(qty, 10) || 1) }));
+  };
+
+  // ເພີ່ມທຸກລາຍການທີ່ຕິກເຂົ້າໃບຂໍ — ຖ້າມີໃນໃບຂໍແລ້ວ ຈະບວກຈຳນວນເພີ່ມ ບໍ່ສ້າງແຖວຊ້ຳ
+  const addPickedToRequest = () => {
+    const ids = Object.keys(pickerSelected);
+    if (ids.length === 0) return;
+    let next = items.filter((it) => !isBlankRow(it));
+    for (const id of ids) {
+      const cat = catalogById(id);
+      if (!cat) continue;
+      const qty = pickerSelected[id];
+      const existing = next.findIndex((it) => it.catalogItemId === id);
+      if (existing >= 0) {
+        next[existing] = { ...next[existing], quantity: (parseInt(next[existing].quantity, 10) || 0) + qty };
+      } else {
+        next.push({ catalogItemId: id, catalogSearch: cat.name, name: cat.name, quantity: qty, reason: '' });
+      }
+    }
+    if (next.length === 0) next = [{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }];
+    setItems(next);
+    setPickerSelected({});
+    setPickerSearch('');
+    setPickerOpen(false);
+  };
+
+  // ລາຍການທີ່ຂໍເກີນສະຕ໊ອກ — ເຕືອນເທົ່ານັ້ນ (ບໍ່ບລັອກ ເພາະອາດລໍຖ້າຂອງເຂົ້າສາງໄດ້)
+  const overStockCount = items.filter((it) => {
+    const cat = it.catalogItemId ? catalogById(it.catalogItemId) : null;
+    return cat && (parseInt(it.quantity, 10) || 0) > (cat.stockQty ?? 0);
+  }).length;
+
   const handleSubmitRequest = async (e) => {
     e.preventDefault();
+    setSubmitError('');
     try {
-      // catalogSearch ເປັນ field ໃຊ້ພາຍໃນ UI ເທົ່ານັ້ນ (ສຳລັບຄົ້ນຫາ) — ບໍ່ສົ່ງໄປໃຫ້ Backend
-      const payloadItems = items.map(({ catalogItemId, name, quantity, reason }) => ({
+      // ລວມແຖວທີ່ເລືອກ catalog ອັນດຽວກັນ (ບວກຈຳນວນ, ຕໍ່ເຫດຜົນ) ກ່ອນສົ່ງ ເພື່ອບໍ່ໃຫ້ມີລາຍການຊ້ຳໃນໃບດຽວ
+      const merged = [];
+      for (const it of items.filter((x) => !isBlankRow(x))) {
+        const qty = parseInt(it.quantity, 10) || 1;
+        const name = String(it.name || '').trim();
+        const prev = it.catalogItemId ? merged.find((m) => m.catalogItemId === it.catalogItemId) : null;
+        if (prev) {
+          prev.quantity += qty;
+          if (it.reason && !String(prev.reason || '').includes(it.reason)) {
+            prev.reason = prev.reason ? `${prev.reason}; ${it.reason}` : it.reason;
+          }
+        } else {
+          merged.push({ catalogItemId: it.catalogItemId || '', name, quantity: qty, reason: it.reason || '' });
+        }
+      }
+      if (merged.length === 0 || merged.some((m) => !m.name)) {
+        setSubmitError('ກະລຸນາໃສ່ຊື່ອຸປະກອນຢ່າງໜ້ອຍ 1 ລາຍການ');
+        return;
+      }
+      // catalogSearch ເປັນ field ໃຊ້ພາຍໃນ UI ເທົ່ານັ້ນ — ບໍ່ສົ່ງໄປໃຫ້ Backend
+      const payloadItems = merged.map(({ catalogItemId, name, quantity, reason }) => ({
         ...(catalogItemId ? { catalogItemId } : {}),
         name,
         quantity,
@@ -117,10 +197,11 @@ useEffect(() => {
       }));
       await axios.post('/supply-requests', { items: payloadItems });
       setIsModalOpen(false);
-      setItems([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
+      resetRequestForm();
       fetchData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create supply request');
+      // backend ສົ່ງເຫດຜົນມາທີ່ `msg` (ບໍ່ແມ່ນ `message`)
+      setSubmitError(err.response?.data?.msg || err.response?.data?.message || 'ສົ່ງຄຳຂໍບໍ່ສຳເລັດ');
     }
   };
 
@@ -346,15 +427,76 @@ useEffect(() => {
             <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-bold text-gray-800">ສ້າງຄຳຂໍເບີກອຸປະກອນ</h2>
-                <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+                <button type="button" onClick={() => { setIsModalOpen(false); setSubmitError(''); }} className="text-gray-400 hover:text-gray-600">✕</button>
               </div>
 
               <form onSubmit={handleSubmitRequest} className="space-y-4">
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ລາຍການສິນຄ້າທີ່ຕ້ອງການ</label>
-                    <button type="button" onClick={handleAddItem} className="text-xs text-amber-600 font-medium hover:underline">+ ເພີ່ມລາຍການອື່ນ</button>
+                    <div className="flex items-center gap-3">
+                      <button type="button" onClick={() => setPickerOpen((v) => !v)} className="text-xs text-blue-600 font-medium hover:underline">
+                        {pickerOpen ? 'ປິດການເລືອກຈາກ Catalog' : '☑ ເລືອກຫຼາຍລາຍການຈາກ Catalog'}
+                      </button>
+                      <button type="button" onClick={handleAddItem} className="text-xs text-amber-600 font-medium hover:underline">+ ເພີ່ມລາຍການອື່ນ</button>
+                    </div>
                   </div>
+
+                  {pickerOpen && (
+                    <div className="border border-blue-200 bg-blue-50/40 rounded-xl p-3 space-y-2">
+                      <input
+                        type="text"
+                        value={pickerSearch}
+                        onChange={(e) => setPickerSearch(e.target.value)}
+                        placeholder="ຄົ້ນຫາຊື່ ຫຼື ໝວດໝູ່..."
+                        className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white"
+                      />
+                      <div className="max-h-56 overflow-y-auto divide-y divide-gray-100 bg-white rounded-lg border border-gray-100">
+                        {(Array.isArray(catalog) ? catalog : [])
+                          .filter((c) => c.isActive !== false)
+                          .filter((c) => {
+                            const q = pickerSearch.trim().toLowerCase();
+                            return !q || `${c.name} ${c.category || ''}`.toLowerCase().includes(q);
+                          })
+                          .map((c) => {
+                            const checked = !!pickerSelected[c._id];
+                            const stock = c.stockQty ?? 0;
+                            return (
+                              <div key={c._id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                                <input type="checkbox" checked={checked} onChange={() => togglePicked(c._id)} className="rounded" />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-gray-800 truncate">{c.name}</div>
+                                  <div className="text-[11px] text-gray-500">{c.category || '—'} · ຄົງເຫຼືອ {stock} {c.unit || ''}</div>
+                                </div>
+                                {checked && (
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={pickerSelected[c._id]}
+                                    onChange={(e) => setPickedQty(c._id, e.target.value)}
+                                    className="w-20 border border-gray-200 rounded-lg p-1.5 text-sm"
+                                  />
+                                )}
+                              </div>
+                            );
+                          })}
+                        {(!Array.isArray(catalog) || catalog.length === 0) && (
+                          <div className="p-3 text-xs text-gray-400 text-center">ຍັງບໍ່ມີລາຍການໃນ Catalog</div>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-500">ເລືອກແລ້ວ {Object.keys(pickerSelected).length} ລາຍການ</span>
+                        <button
+                          type="button"
+                          onClick={addPickedToRequest}
+                          disabled={Object.keys(pickerSelected).length === 0}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+                        >
+                          ເພີ່ມເຂົ້າໃບຂໍ
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {items.map((item, index) => (
                     <div key={index} className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3 relative">
@@ -404,6 +546,17 @@ useEffect(() => {
                             onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 1)}
                             className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white"
                           />
+                          {item.catalogItemId && (() => {
+                            const cat = catalogById(item.catalogItemId);
+                            if (!cat) return null;
+                            const stock = cat.stockQty ?? 0;
+                            const over = (parseInt(item.quantity, 10) || 0) > stock;
+                            return (
+                              <p className={`text-[11px] mt-1 ${over ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                                {over ? `⚠ ເກີນສະຕ໊ອກ (ມີ ${stock} ${cat.unit || ''})` : `ຄົງເຫຼືອ ${stock} ${cat.unit || ''}`}
+                              </p>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -421,10 +574,20 @@ useEffect(() => {
                   ))}
                 </div>
 
+                {overStockCount > 0 && (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    ມີ {overStockCount} ລາຍການທີ່ຂໍເກີນສະຕ໊ອກປັດຈຸບັນ — ສົ່ງໄດ້ ແຕ່ເຈົ້າໜ້າທີ່ສາງອາດຈ່າຍບໍ່ຄົບຈົນກວ່າຂອງຈະເຂົ້າສາງ
+                  </div>
+                )}
+                {submitError && (
+                  <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{submitError}</div>
+                )}
+                <div className="text-xs text-gray-500">ລວມ {items.filter((it) => !isBlankRow(it)).length} ລາຍການ</div>
+
                 <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
                   <button 
                     type="button" 
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={() => { setIsModalOpen(false); setSubmitError(''); }}
                     className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition"
                   >
                     ຍົກເລີກ

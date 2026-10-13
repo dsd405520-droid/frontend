@@ -122,7 +122,7 @@ export default function AssetManagement() {
       } else if (status === 401) {
         setPendingError('Session ໝົດອາຍຸ — ກະລຸນາ login ໃໝ່');
       } else {
-        setPendingError(error.response?.data?.message || 'ບໍ່ສາມາດດຶງຄຳຂໍລໍຖ້າອະນຸມັດໄດ້');
+        setPendingError(error.response?.data?.msg || error.response?.data?.message || 'ບໍ່ສາມາດດຶງຄຳຂໍລໍຖ້າອະນຸມັດໄດ້');
       }
       setPendingRequests([]);
     } finally {
@@ -149,7 +149,7 @@ export default function AssetManagement() {
       // ຖ້າ workflow ຂອງອ້າຍຫັກສະຕັອກທັນທີຕອນອະນຸມັດ, refresh catalog ນຳ
       fetchCatalog();
     } catch (error) {
-      alert(error.response?.data?.message || 'ອະນຸມັດບໍ່ສຳເລັດ');
+      alert(error.response?.data?.msg || error.response?.data?.message || 'ອະນຸມັດບໍ່ສຳເລັດ');
     } finally {
       setReviewingId(null);
     }
@@ -169,7 +169,7 @@ export default function AssetManagement() {
       await api.patch(`/supply-requests/${id}/reject`, { reason: reason.trim() });
       await fetchPendingRequests();
     } catch (error) {
-      alert(error.response?.data?.message || 'ປະຕິເສດບໍ່ສຳເລັດ');
+      alert(error.response?.data?.msg || error.response?.data?.message || 'ປະຕິເສດບໍ່ສຳເລັດ');
     } finally {
       setReviewingId(null);
     }
@@ -194,7 +194,7 @@ export default function AssetManagement() {
       setFormData({ name: '', category: '', unit: '', stockQty: 0, lowStockThreshold: 5 });
       fetchCatalog(); // Refresh list
     } catch (error) {
-      setErrorMsg(error.response?.data?.message || 'ເກີດຂໍ້ຜິດພາດໃນການບັນທຶກຂໍ້ມູນ');
+      setErrorMsg(error.response?.data?.msg || error.response?.data?.message || 'ເກີດຂໍ້ຜິດພາດໃນການບັນທຶກຂໍ້ມູນ');
     } finally {
       setSubmitting(false);
     }

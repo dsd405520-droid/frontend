@@ -43,6 +43,8 @@ export default function CameraScanner({
 
   useEffect(() => {
     let cancelled = false;
+    // StrictMode (dev) mount→cleanup→mount ໃຊ້ ref ຕົວເກົ່າ — ຕ້ອງ reset ບໍ່ດັ່ງນັ້ນ stopScanner ຈະບໍ່ເຮັດວຽກ ແລະກ້ອງຄ້າງ
+    stoppedRef.current = false;
 
     (async () => {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
