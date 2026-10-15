@@ -24,6 +24,7 @@ import RoomStatusReport from './pages/RoomStatusReport';
 import AssetRegistry from './pages/AssetRegistry';
 import AssetDetail from './pages/AssetDetail';
 import InventorySupplies from './pages/InventorySupplies';
+import SupplyReceipt from './pages/SupplyReceipt';
 import KnowledgeBase from './pages/KnowledgeBase';
 import TicketTypesManagement from './pages/TicketTypesManagement';
 import TicketDetail from './pages/TicketDetail';
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="/asset-registry" element={<ProtectedRoute module="assets"><AssetRegistry /></ProtectedRoute>} />
         <Route path="/assets/:id" element={<ProtectedRoute module="assets"><AssetDetail /></ProtectedRoute>} />
         <Route path="/supplies" element={<ProtectedRoute module="supplies"><InventorySupplies /></ProtectedRoute>} />
+        <Route path="/supplies/receipt/:id" element={<ProtectedRoute module="supplies"><SupplyReceipt /></ProtectedRoute>} />
 
         {/* ລະບົບ */}
         <Route path="/announcements" element={<ProtectedRoute module="announcements"><Announcements /></ProtectedRoute>} />

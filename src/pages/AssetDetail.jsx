@@ -13,6 +13,7 @@ export default function AssetDetail() {
   const token = localStorage.getItem('token') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   const canUpdate = hasPermission('assets', 'update');
+  const canAssign = hasPermission('assets', 'assign');
 
   const [asset, setAsset] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -35,6 +36,12 @@ export default function AssetDetail() {
   const [claimError, setClaimError] = useState('');
   const [claimSubmitting, setClaimSubmitting] = useState(false);
   const [claimDone, setClaimDone] = useState(false);
+  // ຜູ້ມີສິດ assets:assign (ຜູ້ຮັບຜິດຊອບຄັງ) ພິມລະຫັດພະນັກງານຂອງຄົນທີ່ມາຮັບ
+  const [claimCode, setClaimCode] = useState('');
+  const codeTrim = claimCode.trim();
+  // ຄົ້ນຫາຊື່ຜູ້ຮັບຈາກລະຫັດ ຜ່ານ /users/lookup (ໄດ້ສະເພາະຂໍ້ມູນຂັ້ນຕ່ຳ — ບໍ່ຕ້ອງມີສິດ users.read)
+  const [lookup, setLookup] = useState({ state: 'idle', user: null });
+  const codeUser = lookup.user;
 
   // Modal ສ້ອມແປງ
   const [showRepairModal, setShowRepairModal] = useState(false);
@@ -109,9 +116,27 @@ export default function AssetDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, asset]);
 
+  useEffect(() => {
+    if (!canAssign || !claimOpen || !codeTrim) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLookup({ state: 'idle', user: null });
+      return undefined;
+    }
+    setLookup({ state: 'loading', user: null });
+    const t = setTimeout(() => {
+      fetch(`${API_BASE_URL}/users/lookup/${encodeURIComponent(codeTrim)}`, { headers })
+        .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
+        .then(({ ok, body }) => setLookup(ok ? { state: 'found', user: unwrap(body) } : { state: 'notfound', user: null }))
+        .catch(() => setLookup({ state: 'error', user: null }));
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeTrim, claimOpen, canAssign]);
+
   const openClaim = () => {
     setClaimError('');
     setClaimDone(false);
+    setClaimCode('');
     setClaimOpen(true);
   };
 
@@ -120,17 +145,25 @@ export default function AssetDetail() {
     setClaimOpen(false);
     setClaimError('');
     setClaimDone(false);
+    setClaimCode('');
     if (wasDone) fetchAssetDetail(true);
   };
 
   const confirmClaim = () => {
+    if (canAssign && !codeTrim) {
+      setClaimError('ກະລຸນາໃສ່ລະຫັດພະນັກງານຂອງຜູ້ມາຮັບ');
+      return;
+    }
     setClaimSubmitting(true);
     setClaimError('');
     fetch(`${API_BASE_URL}/assets/${id}/claim`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({
-        note: 'ຮັບເຄື່ອງດ້ວຍຕົນເອງ — ຢືນຢັນຕົວຕົນຂອງຜູ້ໃຊ້ທີ່ກຳລັງ login',
+        note: canAssign
+          ? 'ມອບເຄື່ອງຢູ່ຄັງ — ຢືນຢັນຕົວຕົນດ້ວຍລະຫັດພະນັກງານ'
+          : 'ຮັບເຄື່ອງດ້ວຍຕົນເອງ — ຢືນຢັນຕົວຕົນຂອງຜູ້ໃຊ້ທີ່ກຳລັງ login',
+        ...(canAssign && codeTrim ? { assigneeCode: codeTrim } : {}),
       }),
     })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
@@ -337,6 +370,19 @@ export default function AssetDetail() {
                   <span className={`font-medium text-right ${assignee ? 'text-blue-600' : 'text-gray-400'}`}>{assigneeLabel}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-100">
+                  <span className="text-gray-500">ສາຂາ/ທີ່ຕັ້ງ (ຜູ້ຖືກມອບໝາຍ)</span>
+                  <span className="font-medium text-gray-800 text-right">
+                    {(() => {
+                      if (!assignee) return '—';
+                      const b = branches.find((br) => br._id === assignee.branchId);
+                      if (!b) return assignee.branchId || '—';
+                      const loc = b.location;
+                      const locText = loc ? `${loc.address || ''}${loc.city ? `, ${loc.city}` : ''}${loc.country ? `, ${loc.country}` : ''}`.replace(/^, /, '') : '';
+                      return locText ? `${b.name} — ${locText}` : b.name;
+                    })()}
+                  </span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-gray-100">
                   <span className="text-gray-500">ພະແນກ</span>
                   <span className="font-medium text-gray-800">
                     {assignee ? (assignee.departmentId?.name || '—') : '—'}
@@ -457,7 +503,9 @@ export default function AssetDetail() {
                   <CheckCircle2 size={44} className="mx-auto text-emerald-500" />
                   <div className="font-semibold text-gray-800">ບັນທຶກການຮັບເຄື່ອງສຳເລັດ</div>
                   <div className="text-sm text-gray-500">
-                    {asset.assetTag} → {claimUser ? (`${claimUser.firstName || ''} ${claimUser.lastName || ''}`.trim() || claimUser.email || '') : ''}
+                    {asset.assetTag} → {canAssign
+                      ? (codeUser ? `${`${codeUser.firstName || ''} ${codeUser.lastName || ''}`.trim()} (${codeUser.employeeCode})` : codeTrim)
+                      : (claimUser ? (`${claimUser.firstName || ''} ${claimUser.lastName || ''}`.trim() || claimUser.email || '') : '')}
                   </div>
                   <button
                     type="button"
@@ -466,6 +514,63 @@ export default function AssetDetail() {
                   >
                     ເປີດໜ້າລາຍລະອຽດ
                   </button>
+                </div>
+              ) : canAssign ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-500">
+                    ກວດສອບຜູ້ທີ່ມາຮັບ {asset.assetTag}. Backend ຈະຢືນຢັນລະຫັດ ແລະກວດວ່າມີໃບຂໍທີ່ອະນຸມັດແລ້ວ ກ່ອນຜູກເຄື່ອງເຂົ້າທະບຽນຊັບສິນ.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບ *</label>
+                    <input
+                      type="text"
+                      value={claimCode}
+                      onChange={(e) => { setClaimCode(e.target.value); setClaimError(''); }}
+                      placeholder="ເຊັ່ນ USR200"
+                      autoFocus
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                    />
+                  </div>
+                  {codeTrim && codeUser && (
+                    <div className="bg-gray-50 rounded-xl p-3 text-sm space-y-1">
+                      <div className="flex justify-between"><span className="text-gray-500">ຊື່-ນາມສະກຸນ</span><span className="font-medium text-gray-800">{`${codeUser.firstName || ''} ${codeUser.lastName || ''}`.trim() || '—'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">ພະແນກ</span><span className="font-medium text-gray-800 text-right">{deptName(codeUser.departmentId)}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">ສາຂາ</span><span className="font-medium text-gray-800 text-right">{branchName(codeUser.branchId)}</span></div>
+                      {codeUser.isActive === false && <div className="text-xs text-red-600">ບັນຊີນີ້ຖືກປິດໃຊ້ງານ</div>}
+                    </div>
+                  )}
+                  {codeTrim && lookup.state === 'loading' && (
+                    <div className="text-xs text-gray-500">ກຳລັງກວດລະຫັດ...</div>
+                  )}
+                  {codeTrim && lookup.state === 'notfound' && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      ບໍ່ພົບລະຫັດພະນັກງານນີ້ — ກວດກັບບັດພະນັກງານຂອງຜູ້ມາຮັບອີກຄັ້ງ
+                    </div>
+                  )}
+                  {codeTrim && lookup.state === 'error' && (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      ກວດລະຫັດບໍ່ໄດ້ຕອນນີ້ — Backend ຈະກວດຢືນຢັນອີກຄັ້ງຕອນບັນທຶກ
+                    </div>
+                  )}
+                  {codeUser && (
+                    <p className="text-xs text-gray-500">ກວດຊື່ນີ້ກັບບັດພະນັກງານຂອງຄົນທີ່ມາຮັບກ່ອນກົດຢືນຢັນ.</p>
+                  )}
+                  {claimError && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{claimError}</div>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={closeClaim} className="px-4 py-2 text-sm text-gray-600">
+                      ຍົກເລີກ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={confirmClaim}
+                      disabled={claimSubmitting || asset.status !== 'AVAILABLE' || !codeTrim || lookup.state === 'notfound' || lookup.state === 'loading' || codeUser?.isActive === false}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium disabled:opacity-50"
+                    >
+                      {claimSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ຢືນຢັນ ແລະບັນທຶກ'}
+                    </button>
+                  </div>
                 </div>
               ) : !claimUser ? (
                 <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine, Camera } from 'lucide-react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine, Camera, QrCode } from 'lucide-react';
 import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
@@ -31,7 +31,10 @@ export default function InventorySupplies() {
   const [receiveStage, setReceiveStage] = useState(1); // 1 = ສະແກນເຄື່ອງ, 2 = ຢືນຢັນຜູ້ຮັບ
   const [allAssets, setAllAssets] = useState(null);    // null = ບໍ່ມີສິດ assets:read → ໃຫ້ Backend ກວດຕອນບັນທຶກ
   const [assigneeCode, setAssigneeCode] = useState('');
+  const [confirmedItems, setConfirmedItems] = useState({}); // ຂອງສິ້ນເປືອງ (ບໍ່ມີ Asset Tag) ທີ່ຕິກ "ໄດ້ຮັບແລ້ວ" — key = index ລາຍການ, 'all' = ກໍລະນີກວດທະບຽນບໍ່ໄດ້
   const [receiving, setReceiving] = useState(false);
+  // ຊື່ຜູ້ຮັບຈາກລະຫັດ (ສະເພາະຜູ້ມີສິດ assets:assign) — ໃຫ້ຜູ້ເບີກຈ່າຍກວດກັບບັດພະນັກງານ
+  const [assigneeInfo, setAssigneeInfo] = useState({ state: 'idle', user: null });
   const [receiveError, setReceiveError] = useState('');
   const [receiveResult, setReceiveResult] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -216,17 +219,41 @@ useEffect(() => {
     setReceiveError('');
     setReceiveResult(null);
     setScannerOpen(false);
-    // ຄົ້ນຫາທະບຽນຊັບສິນກ່ອນ (ເພື່ອກວດວ່າ tag ມີຈິງ/ຊະນິດກົງ/ສະຖານະວ່າງ) — ຖ້າບໍ່ມີສິດ ໃຫ້ Backend ກວດຕອນບັນທຶກ
-    if (hasPermission('assets', 'read')) {
-      try {
-        const res = await axios.get('/assets');
-        const data = res.data;
-        setAllAssets(Array.isArray(data) ? data : (data.data || data.items || []));
-      } catch {
-        setAllAssets(null);
-      }
+    setConfirmedItems({});
+    await loadAssets();
+  };
+
+  // ໂຫຼດທະບຽນຊັບສິນ (ເພື່ອກວດວ່າ tag ມີຈິງ/ຊະນິດກົງ/ສະຖານະວ່າງ ແລະຮູ້ວ່າແຕ່ລະລາຍການມີຊັບສິນວ່າງພໍບໍ) — ຖ້າບໍ່ມີສິດ ໃຫ້ Backend ກວດຕອນບັນທຶກ
+  const loadAssets = async () => {
+    if (!hasPermission('assets', 'read')) { setAllAssets(null); return; }
+    try {
+      const res = await axios.get('/assets');
+      const data = res.data;
+      setAllAssets(Array.isArray(data) ? data : (data.data || data.items || []));
+    } catch {
+      setAllAssets(null);
     }
   };
+
+  useEffect(() => {
+    const code = assigneeCode.trim();
+    if (!receiveRequest || receiveStage !== 2 || !code || !hasPermission('assets', 'assign')) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAssigneeInfo({ state: 'idle', user: null });
+      return undefined;
+    }
+    setAssigneeInfo({ state: 'loading', user: null });
+    const t = setTimeout(async () => {
+      try {
+        const res = await axios.get(`/users/lookup/${encodeURIComponent(code)}`);
+        const body = res.data;
+        setAssigneeInfo({ state: 'found', user: body?.data !== undefined ? body.data : body });
+      } catch (err) {
+        setAssigneeInfo({ state: err.response?.status === 404 ? 'notfound' : 'error', user: null });
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [assigneeCode, receiveStage, receiveRequest]);
 
   const closeReceive = () => {
     setReceiveRequest(null);
@@ -267,9 +294,61 @@ useEffect(() => {
       })
     : [];
 
+  // ແຜນຮັບເຄື່ອງຕໍ່ລາຍການ: ມີ Asset Tag (ຕ້ອງສະແກນຄົບ) ຫຼື ຂອງສິ້ນເປືອງ (ຕິກ "ໄດ້ຮັບແລ້ວ") + ຊັບສິນວ່າງໃນທະບຽນພໍບໍ
+  // (ກົດດຽວກັບ Backend: catalog ທີ່ມີຊັບສິນຜູກຢູ່ = ມີ Asset Tag, ນອກນັ້ນ = ຂອງສິ້ນເປືອງ)
+  const assetsKnown = Array.isArray(allAssets);
+  const reqItems = receiveRequest && Array.isArray(receiveRequest.items) ? receiveRequest.items : [];
+  const nameMatch = (itemName, assetType) => {
+    const n = (itemName || '').toLowerCase();
+    const t = (assetType || '').toLowerCase();
+    return !!n && !!t && (n.includes(t) || t.includes(n));
+  };
+  const itemPlan = (() => {
+    const counts = reqItems.map(() => 0);
+    scanResults.forEach((r) => {
+      const a = r.asset;
+      if (!a || r.status !== 'ok') return;
+      const same = reqItems.map((_, k) => k).filter((k) => a.catalogItemId && reqItems[k].catalogItemId === a.catalogItemId);
+      let idx;
+      if (same.length > 0) idx = same.find((k) => counts[k] < (Number(reqItems[k].quantity) || 0)) ?? same[0];
+      else idx = reqItems.findIndex((it) => nameMatch(it.name, a.type));
+      if (idx >= 0) counts[idx] += 1;
+    });
+    return reqItems.map((it, k) => {
+      const qty = Number(it.quantity) || 0;
+      const linked = assetsKnown && it.catalogItemId
+        ? allAssets.filter((a) => a.status !== 'RETIRED' && a.catalogItemId === it.catalogItemId)
+        : [];
+      const kind = !assetsKnown ? 'unknown' : (linked.length > 0 ? 'asset' : 'consumable');
+      const scanned = counts[k];
+      const availableAll = assetsKnown
+        ? allAssets.filter((a) => a.status === 'AVAILABLE' && ((it.catalogItemId && a.catalogItemId === it.catalogItemId) || nameMatch(it.name, a.type))).length
+        : 0;
+      const remainingAvail = Math.max(0, availableAll - scanned);
+      const need = Math.max(0, qty - scanned);
+      const done = kind === 'asset' ? scanned === qty : kind === 'consumable' ? (scanned > 0 || !!confirmedItems[k]) : false;
+      return { it, k, qty, kind, scanned, need, remainingAvail, done, over: scanned > qty, blocked: kind === 'asset' && need > remainingAvail };
+    });
+  })();
+  const blockedPlan = itemPlan.filter((p) => p.blocked);
+  const plannedDone = itemPlan.filter((p) => p.done).length;
+  const scanAllOk = scanResults.every((r) => !r.status || r.status === 'ok');
+  const canProceed = assetsKnown
+    ? itemPlan.length > 0 && itemPlan.every((p) => p.done) && !itemPlan.some((p) => p.over) && scanAllOk
+    : scannedTags().length > 0 || !!confirmedItems.all;
+  const consumablePlan = itemPlan.filter((p) => p.kind === 'consumable' && p.scanned === 0);
+
   const gotoStage2 = () => {
     const tags = scannedTags();
-    if (tags.length === 0) {
+    if (!canProceed) {
+      setReceiveError(
+        assetsKnown
+          ? 'ຍັງຮັບບໍ່ຄົບທຸກລາຍການ — ເບິ່ງລາຍການທີ່ຂໍດ້ານເທິງ (ສະແກນໃຫ້ຄົບ ຫຼື ຕິກ "ໄດ້ຮັບແລ້ວ" ສຳລັບຂອງສິ້ນເປືອງ)'
+          : 'ກະລຸນາສະແກນ Asset Tag ຢ່າງໜ້ອຍ 1 ລາຍການ ຫຼື ຕິກຢືນຢັນຂອງສິ້ນເປືອງ',
+      );
+      return;
+    }
+    if (tags.length === 0 && consumablePlan.length === 0 && !confirmedItems.all) {
       setReceiveError('ກະລຸນາສະແກນ ຫຼື ກຣອກລະຫັດ Asset Tag ຢ່າງໜ້ອຍ 1 ລາຍການ');
       return;
     }
@@ -287,7 +366,8 @@ useEffect(() => {
   const submitReceive = async (e) => {
     e.preventDefault();
     const assetTags = scannedTags();
-    if (assetTags.length === 0) {
+    const confirmConsumables = !!confirmedItems.all || consumablePlan.some((p) => confirmedItems[p.k]);
+    if (assetTags.length === 0 && !confirmConsumables) {
       setReceiveError('ກະລຸນາສະແກນ ຫຼື ກຣອກລະຫັດ Asset Tag ຢ່າງໜ້ອຍ 1 ລາຍການ');
       return;
     }
@@ -296,16 +376,17 @@ useEffect(() => {
     try {
       await axios.patch(`/supply-requests/${receiveRequest._id}/receive`, {
         assetTags,
+        ...(confirmConsumables ? { confirmConsumables: true } : {}),
         ...(assigneeCode.trim() ? { assigneeCode: assigneeCode.trim() } : {}),
       });
-      setReceiveResult({ ok: true, assetTags, assigneeCode });
+      setReceiveResult({ ok: true, assetTags, assigneeCode, consumables: consumablePlan.filter((p) => confirmedItems[p.k]).length });
       fetchData();
     } catch (err) {
       const status = err.response?.status;
       if (status === 404 || status === 405) {
         setReceiveError('Backend ຍັງບໍ່ມີ Endpoint ນີ້: PATCH /supply-requests/:id/receive — ລໍຖ້າຝ່າຍ Backend ເພີ່ມໃຫ້ກ່ອນ');
       } else {
-        setReceiveError(err.response?.data?.message || err.response?.data?.msg || 'ການບັນທຶກບໍ່ສຳເລັດ — ກະລຸນາກວດສອບລະຫັດທີ່ສະແກນ ຫຼື ລະຫັດພະນັກງານຜູ້ຮັບ');
+        setReceiveError(err.response?.data?.msg || err.response?.data?.message || 'ການບັນທຶກບໍ່ສຳເລັດ — ກະລຸນາກວດສອບລະຫັດທີ່ສະແກນ ຫຼື ລະຫັດພະນັກງານຜູ້ຮັບ');
       }
     } finally {
       setReceiving(false);
@@ -406,6 +487,15 @@ useEffect(() => {
                         >
                           <ScanLine size={13} /> ສະແກນເຄື່ອງ
                         </button>
+                      )}
+                      {req.status === 'APPROVED' && (
+                        <Link
+                          to={`/supplies/receipt/${req._id}`}
+                          title="ເປີດໃບຮັບເຄື່ອງ — ສະແກນ/ພິມ QR ເພື່ອຢືນຢັນຮັບເຄື່ອງທັງໃບ"
+                          className="mt-1.5 ml-1.5 inline-flex items-center gap-1 text-xs px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-medium transition"
+                        >
+                          <QrCode size={13} /> ໃບຮັບເຄື່ອງ
+                        </Link>
                       )}
                     </td>
                   </tr>
@@ -621,14 +711,57 @@ useEffect(() => {
                     ລະບົບຈະກວດກັບທະບຽນຊັບສິນ ແລະ ລາຍການທີ່ຂໍ ກ່ອນຈະຢືນຢັນ.
                   </p>
 
-                  <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1.5">
-                    <div className="font-semibold text-gray-700">ລາຍການທີ່ຂໍ:</div>
-                    {Array.isArray(receiveRequest.items) && receiveRequest.items.map((it, idx) => (
-                      <div key={idx} className="text-xs flex justify-between">
-                        <span>{it.name}</span>
-                        <span className="text-gray-500">x{it.quantity}</span>
+                  <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-gray-700">
+                        ລາຍການທີ່ຂໍ {assetsKnown && <span className={plannedDone === itemPlan.length ? 'text-emerald-600' : 'text-amber-600'}>({plannedDone}/{itemPlan.length} ຄົບ)</span>}
+                      </div>
+                      {hasPermission('assets', 'read') && (
+                        <button type="button" onClick={loadAssets} className="text-xs text-blue-600 hover:underline">↻ ໂຫຼດທະບຽນໃໝ່</button>
+                      )}
+                    </div>
+                    {itemPlan.map((p) => (
+                      <div key={p.k} className={`text-xs bg-white border rounded-lg px-3 py-2 space-y-1 ${p.over ? 'border-red-200' : p.done ? 'border-emerald-200' : 'border-gray-100'}`}>
+                        <div className="flex justify-between gap-2">
+                          <span className="font-medium text-gray-800">{p.it.name} <span className="text-gray-400">x{p.qty}</span></span>
+                          {p.kind === 'asset' && (
+                            <span className={p.over ? 'text-red-600' : p.done ? 'text-emerald-600' : 'text-amber-600'}>
+                              {p.over ? `ສະແກນເກີນ ${p.scanned}/${p.qty}` : p.done ? `✓ ສະແກນຄົບ ${p.scanned}/${p.qty}` : `ສະແກນ ${p.scanned}/${p.qty}`}
+                            </span>
+                          )}
+                          {p.kind === 'consumable' && (
+                            <span className={p.done ? 'text-emerald-600' : 'text-amber-600'}>{p.done ? '✓ ຮັບແລ້ວ' : 'ລໍຖ້າຢືນຢັນ'}</span>
+                          )}
+                        </div>
+                        {p.kind === 'asset' && p.blocked && (
+                          <div className="text-red-600">
+                            ⚠ ໃນທະບຽນມີຊັບສິນວ່າງ {p.remainingAvail} ຊິ້ນ ແຕ່ຍັງຕ້ອງການອີກ {p.need} ຊິ້ນ —
+                            {' '}<a href={`/asset-registry?fromRequest=${encodeURIComponent(receiveRequest._id)}`} target="_blank" rel="noreferrer" className="underline">ເພີ່ມຊັບສິນທີ່ຂາດຕາມໃບນີ້</a>, ແລ້ວກົດ "ໂຫຼດທະບຽນໃໝ່"
+                          </div>
+                        )}
+                        {p.kind === 'consumable' && p.scanned === 0 && (
+                          <label className="flex items-center gap-2 text-gray-600">
+                            <input
+                              type="checkbox"
+                              checked={!!confirmedItems[p.k]}
+                              onChange={(e) => { setConfirmedItems((prev) => ({ ...prev, [p.k]: e.target.checked })); setReceiveError(''); }}
+                            />
+                            ໄດ້ຮັບແລ້ວ — ຂອງສິ້ນເປືອງ (ບໍ່ມີ Asset Tag, ລະບົບຕັດສະຕ໊ອກໃຫ້)
+                          </label>
+                        )}
                       </div>
                     ))}
+                    {!assetsKnown && (
+                      <label className="flex items-center gap-2 text-xs text-gray-600">
+                        <input type="checkbox" checked={!!confirmedItems.all} onChange={(e) => setConfirmedItems((prev) => ({ ...prev, all: e.target.checked }))} />
+                        ມີຂອງສິ້ນເປືອງ (ບໍ່ມີ Asset Tag) ໃນໃບນີ້ ແລະໄດ້ຮັບຄົບແລ້ວ (ເຈົ້າບໍ່ມີສິດເບິ່ງທະບຽນ — Backend ຈະກວດອີກຄັ້ງ)
+                      </label>
+                    )}
+                    {blockedPlan.length > 0 && (
+                      <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                        ໃບນີ້ຍັງຮັບບໍ່ຄົບໄດ້ ເພາະຊັບສິນບາງລາຍການບໍ່ພໍໃນທະບຽນ. ທາງອອກ: (1) ເພີ່ມຊັບສິນທີ່ຂາດໃນທະບຽນ ແລ້ວມາສະແກນໃໝ່, ຫຼື (2) ໃຫ້ແອັດມິນປະຕິເສດ/ແກ້ຈຳນວນຄຳຂໍ.
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -644,7 +777,6 @@ useEffect(() => {
                     </div>
                     <textarea
                       autoFocus
-                      required
                       rows={4}
                       value={scanTags}
                       onChange={(e) => { setScanTags(e.target.value); setReceiveError(''); }}
@@ -685,7 +817,7 @@ useEffect(() => {
                     <button type="button" onClick={closeReceive} className="px-4 py-2 text-sm text-gray-600">ປິດ</button>
                     <button
                       type="submit"
-                      disabled={scannedTags().length === 0}
+                      disabled={!canProceed}
                       className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
                     >
                       <PackageCheck size={15} /> ຖັດໄປ: ຢືນຢັນຜູ້ຮັບ
@@ -699,8 +831,11 @@ useEffect(() => {
                   </p>
 
                   <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
-                    <div className="font-semibold text-gray-700">ເຄື່ອງທີ່ຈະຮັບ ({scannedTags().length})</div>
+                    <div className="font-semibold text-gray-700">ເຄື່ອງທີ່ຈະຮັບ ({scannedTags().length}{consumablePlan.some((p) => confirmedItems[p.k]) ? ` + ຂອງສິ້ນເປືອງ ${consumablePlan.filter((p) => confirmedItems[p.k]).length}` : ''})</div>
                     <div className="text-xs text-gray-600 break-all font-mono">{scannedTags().join(', ')}</div>
+                    {consumablePlan.filter((p) => confirmedItems[p.k]).map((p) => (
+                      <div key={p.k} className="text-xs text-gray-600">• {p.it.name} x{p.qty} (ຂອງສິ້ນເປືອງ)</div>
+                    ))}
                     <div className="pt-1">
                       <label className="block text-xs text-gray-500 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບ *</label>
                       <input
@@ -713,6 +848,15 @@ useEffect(() => {
                       <p className="text-xs text-gray-400 mt-1">
                         ຄ່າເລີ່ມຕົ້ນ = ຜູ້ຂໍຂອງຄຳຂໍນີ້ — ແກ້ໄດ້ຖ້າໃຫ້ຄົນອື່ນຮັບ (ຖ້າບໍ່ມີສິດ assets:assign Backend ຈະປະຕິເສດ)
                       </p>
+                      {assigneeInfo.state === 'found' && assigneeInfo.user && (
+                        <div className={`mt-2 text-xs rounded-lg px-3 py-2 border ${assigneeInfo.user.isActive === false ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                          ຜູ້ຮັບ: <b>{`${assigneeInfo.user.firstName || ''} ${assigneeInfo.user.lastName || ''}`.trim()}</b> ({assigneeInfo.user.employeeCode})
+                          {assigneeInfo.user.isActive === false ? ' — ບັນຊີຖືກປິດໃຊ້ງານ' : ' — ກວດຊື່ກັບບັດພະນັກງານກ່ອນຢືນຢັນ'}
+                        </div>
+                      )}
+                      {assigneeInfo.state === 'notfound' && (
+                        <div className="mt-2 text-xs rounded-lg px-3 py-2 border bg-red-50 border-red-200 text-red-700">ບໍ່ພົບລະຫັດພະນັກງານນີ້</div>
+                      )}
                     </div>
                   </div>
 
@@ -721,7 +865,7 @@ useEffect(() => {
                   )}
                   {receiveResult?.ok && (
                     <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                      ✓ ບັນທຶກສຳເລັດ — ຜູກ {receiveResult.assetTags.length} ຊິ້ນ ກັບຜູ້ຮັບ {receiveResult.assigneeCode} ແລະ ຂຶ້ນທະບຽນຊັບສິນແລ້ວ
+                      ✓ ບັນທຶກສຳເລັດ — ຜູກ {receiveResult.assetTags.length} ຊິ້ນ ກັບຜູ້ຮັບ {receiveResult.assigneeCode} ແລະ ຂຶ້ນທະບຽນຊັບສິນແລ້ວ{receiveResult.consumables > 0 ? ` (ຂອງສິ້ນເປືອງ ${receiveResult.consumables} ລາຍການ ຕັດສະຕ໊ອກແລ້ວ)` : ''}
                     </div>
                   )}
 

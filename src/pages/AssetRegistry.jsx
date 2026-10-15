@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Plus, X, AlertCircle, Search, UserCheck, Undo2,
@@ -49,10 +49,31 @@ export default function AssetRegistry() {
   const [statusFilter, setStatusFilter] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
 
+  // ເພີ່ມຊັບສິນ (ຫຼາຍລາຍການພ້ອມກັນ) — ໃຊ້ໜ້າຕ່າງດຽວກັນທັງ "ເພີ່ມປົກກະຕິ" ແລະ "ເພີ່ມຕາມໃບຂໍ" (/asset-registry?fromRequest=SR028)
+  const MAX_BATCH = 50;
+  const rowSeq = useRef(0);
+  const newRow = (over = {}) => ({
+    id: ++rowSeq.current, catalogSearch: '', catalogItemId: '', name: '', qty: 1,
+    assetTag: '', purchaseDate: '', warrantyExpiry: '', showDates: false, ...over,
+  });
+  const fromRequestId = searchParams.get('fromRequest') || '';
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ assetTag: '', catalogSearch: '', catalogItemId: '', type: '', branchId: '', purchaseDate: '', warrantyExpiry: '' });
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [createError, setCreateError] = useState('');
+  const [batchRows, setBatchRows] = useState([]);
+  const [batchBranch, setBatchBranch] = useState('');
+  const [batchPurchase, setBatchPurchase] = useState('');
+  const [batchWarranty, setBatchWarranty] = useState('');
+  const [batchAddStock, setBatchAddStock] = useState(false);
+  const [batchDone, setBatchDone] = useState({});       // rowId → ຈຳນວນທີ່ສ້າງແລ້ວ (ກົດບັນທຶກຊ້ຳ = ຂ້າມສ່ວນທີ່ສ້າງແລ້ວ)
+  const [batchResult, setBatchResult] = useState(null);
+  const [batchError, setBatchError] = useState('');
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [batchFinished, setBatchFinished] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerSelected, setPickerSelected] = useState(() => new Set());
+  const [reqData, setReqData] = useState(null);
+  const [reqError, setReqError] = useState('');
+  const prefilledFor = useRef('');
 
   const [assignModalAsset, setAssignModalAsset] = useState(null);
   const [assignUserId, setAssignUserId] = useState('');
@@ -124,6 +145,26 @@ export default function AssetRegistry() {
       .catch(() => setCatalog([]));
   }
 
+  const resetBatch = () => {
+    setBatchRows([newRow()]);
+    setBatchBranch('');
+    setBatchPurchase('');
+    setBatchWarranty('');
+    setBatchAddStock(false);
+    setBatchDone({});
+    setBatchResult(null);
+    setBatchError('');
+    setBatchFinished(false);
+    setPickerOpen(false);
+    setPickerSearch('');
+    setPickerSelected(new Set());
+  };
+
+  const openCreate = () => {
+    resetBatch();
+    setShowCreateModal(true);
+  };
+
   function fetchOverdue() {
     setLoadingOverdue(true);
     setOverdueError('');
@@ -150,10 +191,46 @@ export default function AssetRegistry() {
   useEffect(() => {
     if (searchParams.get('create') === '1') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setShowCreateModal(true);
+      openCreate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('create')]);
+
+  // ເປີດຈາກໃບຂໍ: ໂຫຼດໃບຂໍ ແລ້ວເຕີມແຖວທີ່ຂາດໃຫ້ອັດຕະໂນມັດ (ເມື່ອທະບຽນ + Catalog ໂຫຼດແລ້ວ)
+  useEffect(() => {
+    if (!fromRequestId || !canCreate) return;
+    prefilledFor.current = '';
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReqData(null);
+    setReqError('');
+    openCreate();
+    fetch(`${API_BASE_URL}/supply-requests/${encodeURIComponent(fromRequestId)}`, { headers })
+      .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດໃບຂໍໄດ້');
+        setReqData(unwrap(body));
+      })
+      .catch((err) => setReqError(err.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromRequestId]);
+
+  useEffect(() => {
+    if (!fromRequestId || !reqData || loadingAssets || catalog.length === 0 || prefilledFor.current === fromRequestId) return;
+    prefilledFor.current = fromRequestId;
+    const rows = [];
+    (reqData.items || []).forEach((it) => {
+      const nm = (it.name || '').toLowerCase();
+      const cat = catalog.find((c) => (it.catalogItemId && c._id === it.catalogItemId) || (nm && (c.name || '').toLowerCase() === nm));
+      const available = assets.filter((a) => {
+        if (a.status !== 'AVAILABLE') return false;
+        const t = (a.type || '').toLowerCase();
+        return (cat && a.catalogItemId === cat._id) || (nm && t && (nm.includes(t) || t.includes(nm)));
+      }).length;
+      const missing = Math.max(0, (Number(it.quantity) || 0) - available);
+      if (missing > 0) rows.push(newRow({ catalogSearch: cat?.name || it.name || '', catalogItemId: cat?._id || '', name: cat?.name || it.name || '', qty: missing }));
+    });
+    setBatchRows(rows.length > 0 ? rows : [newRow()]);
+  }, [fromRequestId, reqData, loadingAssets, catalog, assets]);
 
   useEffect(() => {
     if (activeTab === 'overdue') {
@@ -194,49 +271,125 @@ export default function AssetRegistry() {
     return true;
   });
 
-  // ຂໍວະລັບຈາກ Catalog — ເລືອກລາຍການແລ້ວເຊື່ອມກັບ catalogItemId (ເພື່ອ Backend ສ້າງ Asset Tag ໃຫ້: SC002-001)
-  const handleCatalogSearchChange = (value) => {
-    const clean = value.trim().toLowerCase();
-    const matched = catalog.find(
-      (c) => (c.name || '').toLowerCase() === clean || (c._id || '').toLowerCase() === clean,
-    );
-    setCreateForm((f) => ({
-      ...f,
-      catalogSearch: value,
-      catalogItemId: matched ? matched._id : '',
-      ...(matched && !f.type ? { type: matched.name } : {}),
-    }));
+  const closeCreate = () => {
+    setShowCreateModal(false);
+    if (fromRequestId) navigate('/asset-registry', { replace: true });
   };
 
-  const submitCreate = (e) => {
+  const updateRow = (id, patch) => setBatchRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const removeRow = (id) => setBatchRows((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
+  const isBlankRow = (r) => !r.catalogItemId && !(r.name || '').trim() && !(r.assetTag || '').trim();
+
+  // ພິມຊື່/ລະຫັດ Catalog ກົງ → ເຊື່ອມ catalogItemId (ເພື່ອ Backend ສ້າງ Asset Tag ໃຫ້: SC002-001)
+  const handleRowCatalog = (id, value) => {
+    const clean = value.trim().toLowerCase();
+    const matched = catalog.find((c) => (c.name || '').toLowerCase() === clean || (c._id || '').toLowerCase() === clean);
+    updateRow(id, { catalogSearch: value, catalogItemId: matched ? matched._id : '', ...(matched ? { name: matched.name } : {}) });
+  };
+
+  const assetCountsFor = (catalogItemId) => {
+    const list = assets.filter((a) => a.catalogItemId === catalogItemId && a.status !== 'RETIRED');
+    return { total: list.length, available: list.filter((a) => a.status === 'AVAILABLE').length };
+  };
+
+  const togglePicked = (cid) => setPickerSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(cid)) next.delete(cid); else next.add(cid);
+    return next;
+  });
+
+  const addPicked = () => {
+    setBatchRows((prev) => {
+      const have = new Set(prev.map((r) => r.catalogItemId).filter(Boolean));
+      const keep = prev.filter((r) => !isBlankRow(r));
+      const added = catalog
+        .filter((c) => pickerSelected.has(c._id) && !have.has(c._id))
+        .map((c) => newRow({ catalogSearch: c.name, catalogItemId: c._id, name: c.name }));
+      const merged = [...keep, ...added];
+      return merged.length > 0 ? merged : [newRow()];
+    });
+    setPickerSelected(new Set());
+    setPickerOpen(false);
+  };
+
+  const postAsset = async (payload) => {
+    const res = await fetch(`${API_BASE_URL}/assets`, { method: 'POST', headers, body: JSON.stringify(payload) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body?.msg || 'ບໍ່ສາມາດເພີ່ມຊັບສິນໄດ້');
+    return unwrap(body);
+  };
+
+  const activeRows = batchRows.filter((r) => !isBlankRow(r));
+  const batchTotal = activeRows.reduce((sum, r) => sum + Math.max(0, Math.floor(Number(r.qty) || 0)), 0);
+
+  const submitBatch = async (e) => {
     e.preventDefault();
-    if (!createForm.assetTag && !createForm.catalogItemId) {
-      setCreateError('ກະລຸນາກອກ Asset Tag ຫຼື ເລືອກລາຍການ Catalog ເພື່ອສ້າງ Tag ອັດຕະໂນມັດ (SC002-001)');
-      return;
+    if (!batchBranch) { setBatchError('ກະລຸນາເລືອກສາຂາ'); return; }
+    if (activeRows.length === 0) { setBatchError('ກະລຸນາເພີ່ມຢ່າງໜ້ອຍ 1 ລາຍການ'); return; }
+    for (let i = 0; i < activeRows.length; i += 1) {
+      const r = activeRows[i];
+      const qty = Math.floor(Number(r.qty) || 0);
+      const label = `ແຖວທີ່ ${i + 1}`;
+      if (!(r.name || '').trim()) { setBatchError(`${label}: ກະລຸນາໃສ່ຊື່/ປະເພດ`); return; }
+      if (!r.catalogItemId && !(r.assetTag || '').trim()) { setBatchError(`${label}: ເລືອກລາຍການ Catalog (ສ້າງ Tag ອັດຕະໂນມັດ) ຫຼືໃສ່ Asset Tag`); return; }
+      if (qty < 1) { setBatchError(`${label}: ຈຳນວນຕ້ອງຢ່າງໜ້ອຍ 1`); return; }
+      if ((r.assetTag || '').trim() && qty > 1) { setBatchError(`${label}: ໃສ່ Asset Tag ເອງໄດ້ສະເພາະ 1 ຊິ້ນ — ຖ້າຫຼາຍຊິ້ນໃຫ້ປ່ອຍວ່າງ ແລ້ວເລືອກ Catalog`); return; }
     }
-    setCreateSubmitting(true);
-    setCreateError('');
-    fetch(`${API_BASE_URL}/assets`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        assetTag: createForm.assetTag || undefined,
-        catalogItemId: createForm.catalogItemId || undefined,
-        type: createForm.type,
-        branchId: createForm.branchId,
-        purchaseDate: createForm.purchaseDate || undefined,
-        warrantyExpiry: createForm.warrantyExpiry || undefined,
-      }),
-    })
-      .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດເພີ່ມຊັບສິນໄດ້');
-        setShowCreateModal(false);
-        setCreateForm({ assetTag: '', catalogSearch: '', catalogItemId: '', type: '', branchId: '', purchaseDate: '', warrantyExpiry: '' });
-        fetchAssets();
-      })
-      .catch((err) => setCreateError(err.message))
-      .finally(() => setCreateSubmitting(false));
+    if (batchTotal > MAX_BATCH) { setBatchError(`ສ້າງໄດ້ສູງສຸດ ${MAX_BATCH} ຊິ້ນຕໍ່ຄັ້ງ (ຕອນນີ້ ${batchTotal})`); return; }
+
+    setBatchSubmitting(true);
+    setBatchError('');
+    const done = { ...batchDone };
+    const results = [];
+    let failed = false;
+    for (const r of activeRows) {
+      const want = Math.floor(Number(r.qty) || 1);
+      const startOk = done[r.id] || 0;
+      let ok = startOk;
+      let errMsg = '';
+      while (ok < want) {
+        try {
+          await postAsset({
+            assetTag: (r.assetTag || '').trim() || undefined,
+            catalogItemId: r.catalogItemId || undefined,
+            type: r.name.trim(),
+            branchId: batchBranch,
+            purchaseDate: r.purchaseDate || batchPurchase || undefined,
+            warrantyExpiry: r.warrantyExpiry || batchWarranty || undefined,
+          });
+          ok += 1;
+          done[r.id] = ok;
+        } catch (err) {
+          errMsg = err.message;
+          failed = true;
+          break;
+        }
+      }
+      let stockMsg = '';
+      const created = ok - startOk;
+      if (batchAddStock && r.catalogItemId && created > 0) {
+        try {
+          const res = await fetch(`${API_BASE_URL}/supply-catalog/${encodeURIComponent(r.catalogItemId)}/adjust-stock`, {
+            method: 'PATCH', headers, body: JSON.stringify({ delta: created }),
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body?.msg || 'ບໍ່ມີສິດ ຫຼືເກີດຂໍ້ຜິດພາດ');
+          }
+        } catch (err) {
+          stockMsg = `ສ້າງຊັບສິນແລ້ວ ແຕ່ເພີ່ມສະຕ໊ອກ Catalog ບໍ່ສຳເລັດ: ${err.message}`;
+        }
+      }
+      results.push({ name: r.name || r.assetTag, ok, want, errMsg, stockMsg });
+      if (failed) break;
+    }
+    setBatchDone(done);
+    setBatchResult(results);
+    if (failed) setBatchError('ມີບາງລາຍການສ້າງບໍ່ສຳເລັດ — ເບິ່ງສະຫຼຸບດ້ານລຸ່ມ, ແກ້ແລ້ວກົດບັນທຶກອີກຄັ້ງ (ສ່ວນທີ່ສ້າງແລ້ວຈະບໍ່ຖືກສ້າງຊ້ຳ)');
+    else setBatchFinished(true);
+    fetchAssets();
+    fetchCatalog();
+    setBatchSubmitting(false);
   };
 
   const openAssignModal = (asset) => {
@@ -292,7 +445,8 @@ export default function AssetRegistry() {
   const handleDelete = (a) => callAction(a._id, '', 'DELETE', null, `ລຶບຊັບສິນ ${a.assetTag} ຖາວອນ? ບໍ່ສາມາດກູ້ຄືນໄດ້`);
 
   // ເລືອກໄດ້ສະເພາະ asset ທີ່ວ່າງ (AVAILABLE) — ຕົວທີ່ຢູ່ໃນລາຍການທີ່ເຫັນຕາມ filter
-  const selectableAssets = filteredAssets.filter((a) => a.status === 'AVAILABLE');
+  // ເລືອກຮັບຫຼາຍລາຍການໄດ້ສະເພາະຜູ້ມີສິດ assets:assign (ພະນັກງານທົ່ວໄປຮັບຜ່ານໃບຮັບເຄື່ອງ/QR ຂອງໃບຂໍ)
+  const selectableAssets = canAssign ? filteredAssets.filter((a) => a.status === 'AVAILABLE') : [];
   const allVisibleSelected =
     selectableAssets.length > 0 && selectableAssets.every((a) => selectedIds.has(a._id));
   const someVisibleSelected = selectableAssets.some((a) => selectedIds.has(a._id));
@@ -401,7 +555,7 @@ export default function AssetRegistry() {
               />
               {canCreate && (
                 <button
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={openCreate}
                   className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
                 >
                   <Plus size={18} /> <span>ເພີ່ມຊັບສິນ</span>
@@ -493,7 +647,7 @@ export default function AssetRegistry() {
                 <thead className="bg-gray-50 text-gray-500">
                   <tr>
                     <th className="p-3 w-10">
-                      <input
+                      {canAssign && <input
                         type="checkbox"
                         aria-label="ເລືອກທັງໝົດ"
                         checked={allVisibleSelected}
@@ -501,7 +655,7 @@ export default function AssetRegistry() {
                         onChange={toggleSelectAllVisible}
                         disabled={selectableAssets.length === 0}
                         className="rounded"
-                      />
+                      />}
                     </th>
                     <th className="p-3 font-medium">Asset Tag</th>
                     <th className="p-3 font-medium">ສາຂາ</th>
@@ -527,7 +681,7 @@ export default function AssetRegistry() {
                     return (
                       <tr key={a._id} className="hover:bg-gray-50">
                         <td className="p-3">
-                          {a.status === 'AVAILABLE' && (
+                          {canAssign && a.status === 'AVAILABLE' && (
                             <input
                               type="checkbox"
                               aria-label={`ເລືອກ ${a.assetTag}`}
@@ -644,56 +798,187 @@ export default function AssetRegistry() {
 
         {showCreateModal && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <form onSubmit={submitCreate} className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-3">
+            <form onSubmit={submitBatch} className="bg-white rounded-2xl p-6 w-full max-w-2xl space-y-4 max-h-[92vh] overflow-y-auto">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-gray-800">ເພີ່ມຊັບສິນໃໝ່</h2>
+                <h2 className="text-lg font-bold text-gray-800">
+                  {fromRequestId ? `ເພີ່ມຊັບສິນຕາມໃບຂໍ ${fromRequestId}` : 'ເພີ່ມຊັບສິນໃໝ່'}
+                </h2>
+                <button type="button" onClick={closeCreate} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ຈາກ Supply Catalog (ທາງເລືອກ)</label>
-                <input
-                  type="text"
-                  list="asset-catalog-options"
-                  value={createForm.catalogSearch}
-                  onChange={(e) => handleCatalogSearchChange(e.target.value)}
-                  placeholder="ພິມຊື່ອຸປະກອນ ຫຼື SC001, SC002..."
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
-                />
-                <datalist id="asset-catalog-options">
-                  {catalog.map((c) => (
-                    <option key={c._id} value={c.name}>{c._id} — {c.category}</option>
+
+              {fromRequestId && (
+                <p className="text-xs text-gray-500">
+                  {reqError ? <span className="text-red-600">{reqError}</span> : reqData ? 'ເຕີມສະເພາະລາຍການທີ່ຂາດໃນທະບຽນໃຫ້ແລ້ວ (ຂໍ − ວ່າງ) — ແກ້ຈຳນວນໄດ້.' : 'ກຳລັງໂຫຼດໃບຂໍ...'}
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">ສາຂາ * (ໃຊ້ກັບທຸກແຖວ)</label>
+                  <select value={batchBranch} onChange={(e) => setBatchBranch(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
+                    <option value="">-- ເລືອກສາຂາ --</option>
+                    {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">ວັນທີຊື້ (ທາງເລືອກ)</label>
+                  <input type="date" value={batchPurchase} onChange={(e) => setBatchPurchase(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">ໝົດປະກັນ (ທາງເລືອກ)</label>
+                  <input type="date" value={batchWarranty} onChange={(e) => setBatchWarranty(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-gray-700">ລາຍການຊັບສິນ</div>
+                <div className="flex items-center gap-3 text-xs">
+                  <button type="button" onClick={() => setPickerOpen((v) => !v)} className="text-blue-600 hover:underline">
+                    {pickerOpen ? 'ປິດການເລືອກຈາກ Catalog' : '☑ ເລືອກຫຼາຍລາຍການຈາກ Catalog'}
+                  </button>
+                  <button type="button" onClick={() => setBatchRows((rows) => [...rows, newRow()])} className="text-amber-600 hover:underline">+ ເພີ່ມລາຍການອື່ນ</button>
+                </div>
+              </div>
+
+              {pickerOpen && (
+                <div className="border border-blue-200 bg-blue-50/40 rounded-xl p-3 space-y-2">
+                  <input
+                    type="text"
+                    value={pickerSearch}
+                    onChange={(e) => setPickerSearch(e.target.value)}
+                    placeholder="ຄົ້ນຫາຊື່ ຫຼື ລະຫັດ..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                  />
+                  <div className="max-h-48 overflow-y-auto bg-white border border-gray-100 rounded-lg divide-y divide-gray-100">
+                    {catalog
+                      .filter((c) => {
+                        const q = pickerSearch.trim().toLowerCase();
+                        return !q || (c.name || '').toLowerCase().includes(q) || (c._id || '').toLowerCase().includes(q) || (c.category || '').toLowerCase().includes(q);
+                      })
+                      .map((c) => {
+                        const cnt = assetCountsFor(c._id);
+                        return (
+                          <label key={c._id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50">
+                            <input type="checkbox" checked={pickerSelected.has(c._id)} onChange={() => togglePicked(c._id)} />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-gray-800">{c.name} <span className="text-xs text-gray-400">({c._id})</span></div>
+                              <div className="text-xs text-gray-500">ໃນທະບຽນ {cnt.total} (ວ່າງ {cnt.available}) · ສະຕ໊ອກ Catalog {c.stockQty}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    {catalog.length === 0 && <div className="px-3 py-3 text-xs text-gray-400">ບໍ່ມີລາຍການໃນ Catalog</div>}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">ເລືອກແລ້ວ {pickerSelected.size} ລາຍການ</span>
+                    <button type="button" disabled={pickerSelected.size === 0} onClick={addPicked} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium disabled:opacity-40">ເພີ່ມເຂົ້າລາຍການ</button>
+                  </div>
+                </div>
+              )}
+
+              <datalist id="asset-catalog-options">
+                {catalog.map((c) => (
+                  <option key={c._id} value={c.name}>{c._id} — {c.category}</option>
+                ))}
+              </datalist>
+
+              <div className="space-y-3">
+                {batchRows.map((r, idx) => {
+                  const cat = r.catalogItemId ? catalog.find((c) => c._id === r.catalogItemId) : null;
+                  const qty = Math.max(0, Math.floor(Number(r.qty) || 0));
+                  const cnt = cat ? assetCountsFor(cat._id) : null;
+                  const availAfter = cnt ? cnt.available + qty : 0;
+                  const doneN = batchDone[r.id] || 0;
+                  return (
+                    <div key={r.id} className="border border-gray-200 bg-gray-50 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-600">ແຖວທີ່ {idx + 1}{doneN > 0 && <span className="ml-2 text-emerald-600">✓ ສ້າງແລ້ວ {doneN}</span>}</span>
+                        {batchRows.length > 1 && (
+                          <button type="button" onClick={() => removeRow(r.id)} className="text-xs text-red-500 hover:underline">ລຶບ</button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                        <div className="sm:col-span-3">
+                          <label className="block text-xs text-gray-500 mb-1">ຄົ້ນຫາ/ເລືອກຈາກ Supply Catalog</label>
+                          <input
+                            type="text"
+                            list="asset-catalog-options"
+                            value={r.catalogSearch}
+                            onChange={(e) => handleRowCatalog(r.id, e.target.value)}
+                            placeholder="ພິມຊື່ອຸປະກອນ ຫຼື SC001, SC002..."
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">ຈຳນວນ *</label>
+                          <input type="number" min={1} max={MAX_BATCH} value={r.qty} onChange={(e) => updateRow(r.id, { qty: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white" />
+                        </div>
+                      </div>
+                      {cat ? (
+                        <div className="text-xs text-gray-500">
+                          ✓ {cat.name} ({cat._id}) — Asset Tag ສ້າງໃຫ້ອັດຕະໂນມັດ · ໃນທະບຽນ {cnt.total} (ວ່າງ {cnt.available}) · ສະຕ໊ອກ Catalog {cat.stockQty}
+                          {!batchAddStock && availAfter > cat.stockQty && (
+                            <span className="block text-amber-600">ຫຼັງສ້າງ ວ່າງ {availAfter} ເກີນສະຕ໊ອກ Catalog {cat.stockQty} — ຖ້າເປັນເຄື່ອງຊື້ໃໝ່ ໃຫ້ຕິກ "ເຄື່ອງຊື້ໃໝ່" ດ້ານລຸ່ມ</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">ຊື່/ປະເພດ *</label>
+                            <input type="text" value={r.name} onChange={(e) => updateRow(r.id, { name: e.target.value })} placeholder="Laptop, ຈໍ, ບັດພະນັກງານ..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Asset Tag (ບໍ່ມີ Catalog = ຕ້ອງໃສ່, ຊິ້ນດຽວ)</label>
+                            <input type="text" value={r.assetTag} onChange={(e) => updateRow(r.id, { assetTag: e.target.value })} placeholder="A-1042" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white" />
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <button type="button" onClick={() => updateRow(r.id, { showDates: !r.showDates })} className="text-xs text-blue-600 hover:underline">
+                          {r.showDates ? 'ໃຊ້ວັນທີຮ່ວມ' : 'ປັບວັນທີຊື້/ປະກັນຂອງແຖວນີ້'}
+                        </button>
+                        {r.showDates && (
+                          <div className="grid grid-cols-2 gap-2 mt-1">
+                            <input type="date" value={r.purchaseDate} onChange={(e) => updateRow(r.id, { purchaseDate: e.target.value })} className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white" />
+                            <input type="date" value={r.warrantyExpiry} onChange={(e) => updateRow(r.id, { warrantyExpiry: e.target.value })} className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {hasPermission('supplies', 'update') && (
+                <label className="flex items-start gap-2 text-xs text-gray-600 bg-amber-50/60 border border-amber-100 rounded-lg px-3 py-2">
+                  <input type="checkbox" className="mt-0.5" checked={batchAddStock} onChange={(e) => setBatchAddStock(e.target.checked)} />
+                  <span>ເຄື່ອງຊື້ໃໝ່ — ເພີ່ມສະຕ໊ອກ Catalog ນຳ (+ຈຳນວນທີ່ສ້າງ). ປ່ອຍວ່າງຖ້າເປັນການລົງທະບຽນເຄື່ອງທີ່ມີຢູ່ແລ້ວ ເພື່ອບໍ່ນັບຊ້ຳ.</span>
+                </label>
+              )}
+
+              <div className="text-xs text-gray-500">ລວມ {batchTotal} ຊິ້ນ (ສູງສຸດ {MAX_BATCH} ຕໍ່ຄັ້ງ)</div>
+
+              {batchResult && (
+                <div className="text-xs bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 space-y-1">
+                  {batchResult.map((r, i) => (
+                    <div key={i}>
+                      <div className={r.errMsg ? 'text-red-600' : 'text-emerald-700'}>
+                        {r.errMsg ? '✕' : '✓'} {r.name}: ສ້າງແລ້ວ {r.ok}/{r.want}{r.errMsg ? ` — ${r.errMsg}` : ''}
+                      </div>
+                      {r.stockMsg && <div className="text-amber-600">{r.stockMsg}</div>}
+                    </div>
                   ))}
-                </datalist>
-                <p className="text-xs text-gray-400 mt-1">ເລືອກແລ້ວ Backend ຈະສ້າງ Asset Tag ໃຫ້ອັດຕະໂນມັດ (SC002-001, SC002-002...)</p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Asset Tag (ບໍ່ບັງຄັບ)</label>
-                <input type="text" value={createForm.assetTag} onChange={(e) => setCreateForm({ ...createForm, assetTag: e.target.value })} placeholder="A-1042 (ຫວ່າງ = ລະບົບສ້າງໃຫ້ອັດຕະໂນມັດ)" className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ປະເພດ</label>
-                <input type="text" required value={createForm.type} onChange={(e) => setCreateForm({ ...createForm, type: e.target.value })} placeholder="Laptop, ຈໍ, ບັດພະນັກງານ..." className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ສາຂາ</label>
-                <select required value={createForm.branchId} onChange={(e) => setCreateForm({ ...createForm, branchId: e.target.value })} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
-                  <option value="">-- ເລືອກສາຂາ --</option>
-                  {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ວັນທີຊື້ (ບໍ່ບັງຄັບ)</label>
-                <input type="date" value={createForm.purchaseDate} onChange={(e) => setCreateForm({ ...createForm, purchaseDate: e.target.value })} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ໝົດປະກັນ (ບໍ່ບັງຄັບ)</label>
-                <input type="date" value={createForm.warrantyExpiry} onChange={(e) => setCreateForm({ ...createForm, warrantyExpiry: e.target.value })} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
-              </div>
-              {createError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{createError}</div>}
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="px-4 py-2 text-sm text-gray-600">ຍົກເລີກ</button>
-                <button type="submit" disabled={createSubmitting} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
-                  {createSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ບັນທຶກ'}
-                </button>
+                </div>
+              )}
+              {batchError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{batchError}</div>}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={closeCreate} className="px-4 py-2 text-sm text-gray-600">{batchFinished ? 'ປິດ' : 'ຍົກເລີກ'}</button>
+                {!batchFinished && (
+                  <button type="submit" disabled={batchSubmitting || batchTotal < 1} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                    {batchSubmitting ? 'ກຳລັງບັນທຶກ...' : `ບັນທຶກທັງໝົດ (${batchTotal} ຊິ້ນ)`}
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -788,6 +1073,26 @@ export default function AssetRegistry() {
                 </div>
                 <div className="text-[11px] text-gray-400">Barcode — CODE128 ຮອງຮັບສະເພາະຕົວອັກສອນ ASCII (A-Z, 0-9, ສັນຍາລັກ)</div>
               </div>
+
+              {(() => {
+                const a = barcodeModalAsset;
+                const holder = a.currentAssigneeId ? users.find((u) => u._id === a.currentAssigneeId || u.employeeCode === a.currentAssigneeId) : null;
+                if (!holder) return null;
+                const b = branches.find((br) => br._id === holder.branchId);
+                const loc = b?.location;
+                const locText = loc ? `${loc.address || ''}${loc.city ? `, ${loc.city}` : ''}${loc.country ? `, ${loc.country}` : ''}`.replace(/^, /, '') : '';
+                return (
+                  <div className="border-t border-gray-100 pt-3 text-left space-y-1">
+                    <div className="text-xs font-semibold text-gray-600">ຜູ້ຖືຢູ່ປັດຈຸບັນ</div>
+                    <div className="text-sm font-medium text-gray-800">
+                      {`${holder.firstName || ''} ${holder.lastName || ''}`.trim() || holder.employeeCode}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {b ? (locText ? `${b.name} — ${locText}` : b.name) : holder.branchId || '—'}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="pt-2 space-y-2">
                 <button 
                   type="button" 
