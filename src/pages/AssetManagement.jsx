@@ -6,6 +6,7 @@ import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import PoprWorkflow from '../components/PoprWorkflow';
 
 export default function AssetManagement() {
   const [searchParams] = useSearchParams();
@@ -293,6 +294,12 @@ export default function AssetManagement() {
               </span>
             )}
           </button>
+          <button
+            onClick={() => setActiveTab('popr')}
+            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'popr' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+          >
+            POPR — ຈັດຊື້/ນຳເຂົ້າອຸປະກອນ
+          </button>
         </div>
 
         {/* TAB: PENDING SUPPLY REQUESTS — ຄຳຂໍທີ່ລໍຖ້າອະນຸມັດ */}
@@ -524,6 +531,11 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
           </div>
         </div>
         </div>
+        )}
+
+        {/* TAB: POPR — ຂະບວນການຈັດຊື້/ນຳເຂົ້າອຸປະກອນ */}
+        {activeTab === 'popr' && (
+          <PoprWorkflow catalog={assets} canManage={canCreateCatalog} />
         )}
       </div>
 
