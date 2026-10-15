@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
+import MfaSettings from '../components/MfaSettings';
 import { hasPermission } from '../utils/permissions';
 import { cacheOrgSettings, applySystemName } from '../utils/orgSettings';
 import { API_BASE_URL } from '../config';
@@ -286,6 +287,9 @@ export default function Settings() {
             <div className="py-6 text-center text-sm text-gray-400">ບໍ່ສາມາດດຶງຂໍ້ມູນໄດ້</div>
           )}
         </div>
+
+        {/* ການຢືນຢັນຕົວຕົນ 2 ຊັ້ນ (MFA) */}
+        <MfaSettings />
 
         {/* ອຸປະກອນທີ່ເຂົ້າສູ່ລະບົບ */}
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">

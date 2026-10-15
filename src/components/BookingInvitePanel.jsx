@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { QrCode, Lock, Globe, UserPlus, Trash2, FileDown, FileSpreadsheet, Printer, CheckCircle2, XCircle, Loader2, Search } from 'lucide-react';
+import { QrCode, Lock, Globe, UserPlus, Trash2, FileDown, FileSpreadsheet, Printer, CheckCircle2, XCircle, Loader2, Search, Users } from 'lucide-react';
 import { API_BASE_URL } from '../config';
 
 // ແຜງ "ເຊີນຄົນເຂົ້າຫ້ອງ" ໃນ popup ລາຍລະອຽດການຈອງ
@@ -38,23 +38,57 @@ export default function BookingInvitePanel({ booking, past = false }) {
   const [tab, setTab] = useState('account');
   const [q, setQ] = useState('');
   const [results, setResults] = useState([]);
+  const [total, setTotal] = useState(0);
   const [searching, setSearching] = useState(false);
+  // ຕົວກອງ ສາຂາ / ພະແນກ / ສິດ + ລາຍຊື່ທີ່ຕິກເລືອກ (ຈື່ໄວ້ຂ້າມການປ່ຽນຕົວກອງ ເພື່ອລວມຫຼາຍກຸ່ມໄດ້)
+  const [filters, setFilters] = useState({ branchId: '', departmentId: '', role: '' });
+  const [filterOptions, setFilterOptions] = useState({ branches: [], departments: [], roles: [] });
+  const [selected, setSelected] = useState(() => new Set());
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [notice, setNotice] = useState('');
+
+  const inviteMode = data?.inviteMode || null;
+
+  // ໂຫຼດຕົວເລືອກຕົວກອງ ຄັ້ງດຽວ ເມື່ອເປີດແຖບ "ບັນຊີໃນລະບົບ" ຂອງໂໝດສ່ວນຕົວ
+  useEffect(() => {
+    if (tab !== 'account' || inviteMode !== 'PRIVATE') return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${base}/invite/account-filters`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error(await parseError(res));
+        const json = await res.json();
+        if (!cancelled) setFilterOptions(json.data || { branches: [], departments: [], roles: [] });
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tab, inviteMode, base, token]);
 
   useEffect(() => {
     const term = q.trim();
-    if (tab !== 'account' || term.length < 2) {
+    const hasFilter = !!(filters.branchId || filters.departmentId || filters.role);
+    if (tab !== 'account' || (term.length < 2 && !hasFilter)) {
       setResults([]);
+      setTotal(0);
       return undefined;
     }
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`${base}/invite/accounts?q=${encodeURIComponent(term)}`, {
+        const params = new URLSearchParams();
+        if (term.length >= 2) params.set('q', term);
+        if (filters.branchId) params.set('branchId', filters.branchId);
+        if (filters.departmentId) params.set('departmentId', filters.departmentId);
+        if (filters.role) params.set('role', filters.role);
+        const res = await fetch(`${base}/invite/accounts?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error(await parseError(res));
         const json = await res.json();
-        setResults(json.data || []);
+        setResults(json.data?.items || []);
+        setTotal(json.data?.total || 0);
       } catch (e) {
         setError(e.message);
       } finally {
@@ -62,7 +96,7 @@ export default function BookingInvitePanel({ booking, past = false }) {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [q, tab, base, token]);
+  }, [q, tab, base, token, filters.branchId, filters.departmentId, filters.role, refreshKey]);
 
   const load = useCallback(async () => {
     try {
@@ -129,11 +163,63 @@ export default function BookingInvitePanel({ booking, past = false }) {
     if (ok) setForm({ name: '', email: '', phone: '' });
   };
 
-  const addAccount = async (u) => {
-    const ok = await act('add', `${base}/invitees`, { method: 'POST', body: JSON.stringify({ userId: u.userId }) });
-    if (ok) {
-      setQ('');
-      setResults([]);
+  const selectable = results.filter((u) => !u.alreadyInvited);
+  const allSelected = selectable.length > 0 && selectable.every((u) => selected.has(u.userId));
+
+  const toggleOne = (userId) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+
+  // ເລືອກ/ຍົກເລີກທຸກຄົນທີ່ກຳລັງສະແດງ (ຫຼັງກອງ) — ຂ້າມຄົນທີ່ຢູ່ໃນລາຍຊື່ແລ້ວ
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) selectable.forEach((u) => next.delete(u.userId));
+      else selectable.forEach((u) => next.add(u.userId));
+      return next;
+    });
+
+  const setBranchFilter = (branchId) =>
+    setFilters((f) => {
+      const stillValid = !f.departmentId || !branchId || filterOptions.departments.some((d) => d.id === f.departmentId && d.branchId === branchId);
+      return { ...f, branchId, departmentId: stillValid ? f.departmentId : '' };
+    });
+
+  const clearFilters = () => {
+    setFilters({ branchId: '', departmentId: '', role: '' });
+    setQ('');
+  };
+
+  const inviteSelected = async () => {
+    const userIds = [...selected];
+    if (userIds.length === 0) return;
+    setBusy('bulk');
+    setError('');
+    setNotice('');
+    try {
+      const res = await fetch(`${base}/invitees/bulk`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userIds }),
+      });
+      if (!res.ok) throw new Error(await parseError(res));
+      const r = (await res.json()).data || {};
+      const parts = [`ເພີ່ມແລ້ວ ${r.added ?? 0} ຄົນ`];
+      if (r.alreadyOnList) parts.push(`ຢູ່ໃນລາຍຊື່ແລ້ວ ${r.alreadyOnList}`);
+      if (r.overLimit) parts.push(`ເກີນຈຳນວນສູງສຸດ ${r.limit} ຄົນ: ${r.overLimit}`);
+      if (r.unavailable) parts.push(`ເພີ່ມບໍ່ໄດ້ ${r.unavailable}`);
+      setNotice(parts.join(' • '));
+      setSelected(new Set());
+      setRefreshKey((k) => k + 1);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy('');
     }
   };
 
@@ -216,7 +302,7 @@ export default function BookingInvitePanel({ booking, past = false }) {
 
           {mode === 'PRIVATE' && (
             <div className="space-y-3">
-              <p className="text-xs text-gray-600">ເພີ່ມຄົນເທື່ອລະຄົນ — ແຕ່ລະຄົນຈະມີ QR ສ່ວນຕົວ. ຄົນທີ່ບໍ່ຢູ່ໃນລາຍຊື່ຈະຖືກປະຕິເສດ.</p>
+              <p className="text-xs text-gray-600">ເພີ່ມຄົນ (ກອງຕາມສາຂາ/ພະແນກ/ສິດ ແລ້ວຕິກເລືອກຫຼາຍຄົນໄດ້) — ແຕ່ລະຄົນຈະມີ QR ສ່ວນຕົວ. ຄົນທີ່ບໍ່ຢູ່ໃນລາຍຊື່ຈະຖືກປະຕິເສດ.</p>
               <div className="flex gap-2">
                 <TabButton value="account" label="ບັນຊີໃນລະບົບ" />
                 <TabButton value="external" label="ແຂກພາຍນອກ" />
@@ -228,36 +314,111 @@ export default function BookingInvitePanel({ booking, past = false }) {
                     <input
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
-                      placeholder="ຄົ້ນຫາຊື່ ຫຼື Account ID (ຢ່າງໜ້ອຍ 2 ຕົວອັກສອນ)"
+                      placeholder="ຄົ້ນຫາຊື່ ຫຼື Account ID (ບໍ່ບັງຄັບ ຖ້າໃຊ້ຕົວກອງ)"
                       maxLength={60}
                       className="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm"
                     />
                   </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <select
+                      value={filters.branchId}
+                      onChange={(e) => setBranchFilter(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-2 py-2 text-xs bg-white"
+                    >
+                      <option value="">ທຸກສາຂາ</option>
+                      {filterOptions.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                    <select
+                      value={filters.departmentId}
+                      onChange={(e) => setFilters((f) => ({ ...f, departmentId: e.target.value }))}
+                      className="border border-gray-300 rounded-lg px-2 py-2 text-xs bg-white"
+                    >
+                      <option value="">ທຸກພະແນກ</option>
+                      {filterOptions.departments
+                        .filter((d) => !filters.branchId || d.branchId === filters.branchId)
+                        .map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                    <select
+                      value={filters.role}
+                      onChange={(e) => setFilters((f) => ({ ...f, role: e.target.value }))}
+                      className="border border-gray-300 rounded-lg px-2 py-2 text-xs bg-white"
+                    >
+                      <option value="">ທຸກສິດ (Role)</option>
+                      {filterOptions.roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                  {(filters.branchId || filters.departmentId || filters.role || q) && (
+                    <button type="button" onClick={clearFilters} className="text-[11px] text-amber-700 underline">ລ້າງຕົວກອງ</button>
+                  )}
+
                   {searching && <p className="text-[11px] text-gray-400">ກຳລັງຄົ້ນຫາ...</p>}
-                  {!searching && q.trim().length >= 2 && results.length === 0 && <p className="text-[11px] text-gray-400">ບໍ່ພົບບັນຊີ</p>}
+                  {!searching && results.length === 0 && (q.trim().length >= 2 || filters.branchId || filters.departmentId || filters.role) && (
+                    <p className="text-[11px] text-gray-400">ບໍ່ພົບບັນຊີ</p>
+                  )}
+
                   {results.length > 0 && (
-                    <ul className="divide-y divide-gray-100 bg-white border border-gray-200 rounded-lg max-h-48 overflow-y-auto">
-                      {results.map((u) => (
-                        <li key={u.userId} className="flex items-center gap-2 px-3 py-2 text-sm">
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-gray-800">{u.name}</p>
-                            <p className="truncate text-[11px] text-gray-400">ID: {u.employeeCode}</p>
-                          </div>
-                          {u.alreadyInvited ? (
-                            <span className="text-[11px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full whitespace-nowrap">ຢູ່ໃນລາຍຊື່ແລ້ວ</span>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={!!busy}
-                              onClick={() => addAccount(u)}
-                              className="flex items-center gap-1 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg px-2.5 py-1 text-xs font-medium"
-                            >
-                              {busy === 'add' ? <Loader2 size={12} className="animate-spin" /> : <UserPlus size={12} />} ເພີ່ມ
-                            </button>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            disabled={selectable.length === 0 || !!busy}
+                            onChange={toggleAll}
+                            className="accent-amber-500"
+                          />
+                          <span className="font-medium text-gray-700">ເລືອກທັງໝົດ ({selectable.length})</span>
+                        </label>
+                        <span className="ml-auto text-gray-400">ເລືອກແລ້ວ {selected.size}</span>
+                        {selected.size > 0 && (
+                          <button type="button" onClick={() => setSelected(new Set())} className="text-gray-500 underline">ລ້າງ</button>
+                        )}
+                      </div>
+                      <ul className="divide-y divide-gray-100 max-h-64 overflow-y-auto">
+                        {results.map((u) => (
+                          <li key={u.userId}>
+                            <label className={`flex items-center gap-2 px-3 py-2 text-sm ${u.alreadyInvited ? 'opacity-60' : 'cursor-pointer hover:bg-amber-50/60'}`}>
+                              <input
+                                type="checkbox"
+                                checked={u.alreadyInvited || selected.has(u.userId)}
+                                disabled={u.alreadyInvited || !!busy}
+                                onChange={() => toggleOne(u.userId)}
+                                className="accent-amber-500"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-gray-800">{u.name}</p>
+                                <p className="truncate text-[11px] text-gray-400">
+                                  {[`ID: ${u.employeeCode}`, u.branch, u.department, u.role].filter(Boolean).join(' • ')}
+                                </p>
+                              </div>
+                              {u.alreadyInvited && (
+                                <span className="text-[11px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full whitespace-nowrap">ຢູ່ໃນລາຍຊື່ແລ້ວ</span>
+                              )}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {total > results.length && (
+                    <p className="text-[11px] text-gray-500">ສະແດງ {results.length} ຈາກ {total} ຄົນ — ກອງໃຫ້ແຄບລົງເພື່ອເຫັນຄົບ</p>
+                  )}
+
+                  {(selected.size > 0 || notice) && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {selected.size > 0 && (
+                        <button
+                          type="button"
+                          disabled={!!busy}
+                          onClick={inviteSelected}
+                          className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg px-3 py-2 text-sm font-medium"
+                        >
+                          {busy === 'bulk' ? <Loader2 size={14} className="animate-spin" /> : <Users size={14} />} ເຊີນ {selected.size} ຄົນ
+                        </button>
+                      )}
+                      {notice && <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">{notice}</span>}
+                    </div>
                   )}
                 </div>
               )}

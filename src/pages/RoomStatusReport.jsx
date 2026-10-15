@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X, Search, Filter } from 'lucide-react';
+import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X, Search, Filter, QrCode, ChevronDown } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CsvExportButton from '../components/CsvExportButton';
+import BookingInvitePanel from '../components/BookingInvitePanel';
 import { hasPermission } from '../utils/permissions';
 import { useBranch } from '../contexts/BranchContext';
 import { API_BASE_URL } from '../config';
@@ -28,6 +29,7 @@ export default function RoomStatusReport() {
   const [extendError, setExtendError] = useState('');
   const [extendSubmitting, setExtendSubmitting] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(10);
+  const [openInviteId, setOpenInviteId] = useState(null); // booking ທີ່ເປີດແຜງ "ເຊີນຄົນດ້ວຍ QR" ຢູ່ (ເປີດໄດ້ເທື່ອລະອັນ)
   const [activeTab, setActiveTab] = useState('status'); // 'status' | 'my-meetings' | 'history'
 
   // Search & Filter (ສຳລັບແຖບສະຖານະຫ້ອງ)
@@ -404,6 +406,24 @@ export default function RoomStatusReport() {
                           <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500 font-medium">
                             ອອກຈາກຫ້ອງແລ້ວ {new Date(b.checkedOutAt).toLocaleTimeString()}
                           </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ເຊີນຄົນເຂົ້າຫ້ອງດ້ວຍ QR — ໃຊ້ແຜງດຽວກັນກັບ ຈອງຫ້ອງປະຊຸມ → ການຈອງຂອງຂ້ອຍ (ສະເພາະການຈອງທີ່ອະນຸມັດແລ້ວ) */}
+                    {b.status === 'CONFIRMED' && (
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => setOpenInviteId((cur) => (cur === b._id ? null : b._id))}
+                          aria-expanded={openInviteId === b._id}
+                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-medium transition flex items-center gap-1"
+                        >
+                          <QrCode size={14} /> ເຊີນຄົນເຂົ້າຫ້ອງດ້ວຍ QR
+                          <ChevronDown size={14} className={`transition-transform ${openInviteId === b._id ? 'rotate-180' : ''}`} />
+                        </button>
+                        {openInviteId === b._id && (
+                          <BookingInvitePanel key={b._id} booking={b} past={new Date(b.endAt).getTime() <= now.getTime()} />
                         )}
                       </div>
                     )}
