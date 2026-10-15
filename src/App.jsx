@@ -29,6 +29,7 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import TicketTypesManagement from './pages/TicketTypesManagement';
 import TicketDetail from './pages/TicketDetail';
 import TicketChat from './pages/TicketChat';
+import JoinRoom from './pages/JoinRoom';
 
 export default function App() {
   return (
@@ -37,6 +38,9 @@ export default function App() {
         <Routes>
         {/* ໜ້າ Login ບໍ່ຕ້ອງປ້ອງກັນ */}
         <Route path="/login" element={<Login />} />
+
+        {/* ແຂກສະແກນ QR ເຂົ້າຫ້ອງປະຊຸມ — ສາທາລະນະ ບໍ່ຕ້ອງ login (backend ກວດ token ເອງ) */}
+        <Route path="/join/:token" element={<JoinRoom />} />
 
         {/* Dashboard: ຕ້ອງ login ຢ່າງດຽວ, ບໍ່ຮຽກຮ້ອງ permission ສະເພາະໂມດູນ */}
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
