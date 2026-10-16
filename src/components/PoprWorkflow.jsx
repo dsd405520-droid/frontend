@@ -4,7 +4,7 @@ import {
   ClipboardList, PackageCheck, Settings2, Send,
 } from 'lucide-react';
 import { POPR_STEPS, POPR_STATUS, POPR_ORDER_STATUS, POPR_DELIVERY_STATUS, POPR_ITEM_TYPE } from '../constants/poprSteps';
-import { getCurrentUser } from '../utils/permissions';
+import { getCurrentUser, hasPermission } from '../utils/permissions';
 import api from '../services/api';
 
 const STEP_ICONS = [ClipboardList, PackageCheck, Settings2, Send];
@@ -37,8 +37,10 @@ const emptyForm = () => ({
   serialNumber: '',
   snMatch: false,
   assetTag: '',
+  assetId: '',
   assetRegistered: false,
   receivedBy: '',
+  receivedByUserId: '',
   custodian: '',
   location: '',
   // 3) P — ການຕຽມ/ກຳນົດຄ່າ
@@ -55,11 +57,13 @@ const emptyForm = () => ({
   securityPolicy: false,
   // 4) R — ການປ່ອຍ/ລົງທະບຽນ
   deliveredTo: '',
+  deliveredToUserId: '',
   deliveryDate: '',
   signedHandover: false,
   userOrientation: false,
   assetStatus: 'IN_USE',
   assignedUser: '',
+  assignedUserId: '',
 });
 
 const BOX_CONDITIONS = [
@@ -104,8 +108,10 @@ function toForm(rec = {}) {
     serialNumber: o.serialNumber || '',
     snMatch: !!o.snMatch,
     assetTag: o.assetTag || '',
+    assetId: o.assetId?._id || o.assetId || '',
     assetRegistered: !!o.assetRegistered,
     receivedBy: o.receivedBy || '',
+    receivedByUserId: o.receivedByUserId?._id || o.receivedByUserId || '',
     custodian: o.custodian || '',
     location: o.location || '',
     os: c.os || '',
@@ -120,11 +126,13 @@ function toForm(rec = {}) {
     diskEncryption: !!c.diskEncryption,
     securityPolicy: !!c.securityPolicy,
     deliveredTo: r.deliveredTo || '',
+    deliveredToUserId: r.deliveredToUserId?._id || r.deliveredToUserId || '',
     deliveryDate: day(r.deliveryDate),
     signedHandover: !!r.signedHandover,
     userOrientation: !!r.userOrientation,
     assetStatus: r.assetStatus || 'IN_USE',
     assignedUser: r.assignedUser || '',
+    assignedUserId: r.assignedUserId?._id || r.assignedUserId || '',
   };
 }
 
@@ -156,8 +164,10 @@ function toPayload(form, status, stage) {
       serialNumber: form.serialNumber || undefined,
       snMatch: form.snMatch,
       assetTag: form.assetTag || undefined,
+      assetId: form.assetId || null,
       assetRegistered: form.assetRegistered,
       receivedBy: form.receivedBy || undefined,
+      receivedByUserId: form.receivedByUserId || null,
       custodian: form.custodian || undefined,
       location: form.location || undefined,
       deliveryStatus: form.deliveryStatus,
@@ -177,7 +187,9 @@ function toPayload(form, status, stage) {
     },
     release: {
       deliveredTo: form.deliveredTo || undefined,
+      deliveredToUserId: form.deliveredToUserId || null,
       assignedUser: form.assignedUser || undefined,
+      assignedUserId: form.assignedUserId || null,
       deliveryDate: form.deliveryDate || undefined,
       assetStatus: form.assetStatus,
       signedHandover: form.signedHandover,
@@ -269,6 +281,97 @@ function Toggle({ checked, onChange, children }) {
   );
 }
 
+/** ຄົ້ນຊັບສິນໃນທະບຽນດ້ວຍ Asset Tag / _id → ຜູກ assetId (additive) */
+function AssetCodeLookup({ onResolved, linkedLabel }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async () => {
+    const c = code.trim();
+    if (!c) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await api.get(`/popr-records/lookup/asset/${encodeURIComponent(c)}`);
+      const a = unwrap(res.data);
+      onResolved({ assetId: a._id, assetTag: a.assetTag });
+      setCode('');
+    } catch (err) {
+      setError(apiErr(err, 'ບໍ່ພົບຊັບສິນນີ້ໃນທະບຽນ'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <input
+        type="text"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } }}
+        placeholder="Asset Tag ຫຼື AS001"
+        className="w-52 px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500"
+      />
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy || !code.trim()}
+        className="text-xs px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+      >
+        {busy ? '...' : 'ຜູກກັບທະບຽນ'}
+      </button>
+      {linkedLabel && <span className="text-xs text-emerald-600">ຜູກແລ້ວ: {linkedLabel}</span>}
+      {error && <span className="text-xs text-red-500">{error}</span>}
+    </div>
+  );
+}
+
+/** ຄົ້ນພະນັກງານດ້ວຍລະຫັດ → ຜູກ userId (additive) */
+function EmployeeCodeLookup({ onResolved, linkedLabel }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async () => {
+    const c = code.trim();
+    if (!c) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await api.get(`/popr-records/lookup/employee/${encodeURIComponent(c)}`);
+      const u = unwrap(res.data);
+      const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+      onResolved({ userId: u._id, name: name || u.employeeCode });
+      setCode('');
+    } catch (err) {
+      setError(apiErr(err, 'ບໍ່ພົບລະຫັດພະນັກງານນີ້'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <input
+        type="text"
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } }}
+        placeholder="ລະຫັດພະນັກງານ"
+        className="w-52 px-2 py-1 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-500"
+      />
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy || !code.trim()}
+        className="text-xs px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+      >
+        {busy ? '...' : 'ຄົ້ນຫາ'}
+      </button>
+      {linkedLabel && <span className="text-xs text-emerald-600">ຜູກແລ້ວ: {linkedLabel}</span>}
+      {error && <span className="text-xs text-red-500">{error}</span>}
+    </div>
+  );
+}
+
 export default function PoprWorkflow({ catalog = [], canManage = false }) {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -289,6 +392,9 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
   const operatorName = currentUser
     ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email || ''
     : '';
+  // ການປິດສຳເລັດ ແລະ ການລຶບ ເປັນສິດແຍກຕ່າງຫາກ (approve / delete) ບໍ່ໃຊ້ manage ດຽວ
+  const canApprove = hasPermission('supplies', 'approve');
+  const canDelete = hasPermission('supplies', 'delete');
 
   const fetchRecords = async () => {
     try {
@@ -581,9 +687,13 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               <input
                 type="text"
                 value={form.assetTag}
-                onChange={(e) => set({ assetTag: e.target.value })}
+                onChange={(e) => set({ assetTag: e.target.value, assetId: '' })}
                 placeholder="SC002-001"
                 className={inputCls}
+              />
+              <AssetCodeLookup
+                onResolved={(a) => set({ assetId: a.assetId, assetTag: a.assetTag })}
+                linkedLabel={form.assetId ? form.assetTag : ''}
               />
             </Field>
           </div>
@@ -600,7 +710,16 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
           {errors.snMatch && <p className="text-xs text-red-500">{errors.snMatch}</p>}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="ຜູ້ຮັບເຄື່ອງ">
-              <input type="text" value={form.receivedBy} onChange={(e) => set({ receivedBy: e.target.value })} className={inputCls} />
+              <input
+                type="text"
+                value={form.receivedBy}
+                onChange={(e) => set({ receivedBy: e.target.value, receivedByUserId: '' })}
+                className={inputCls}
+              />
+              <EmployeeCodeLookup
+                onResolved={(u) => set({ receivedBy: u.name, receivedByUserId: u.userId })}
+                linkedLabel={form.receivedByUserId ? form.receivedBy : ''}
+              />
             </Field>
             <Field label="ຜູ້ດູແລ/ຜູ້ຄຸ້ມຄອງ">
               <input type="text" value={form.custodian} onChange={(e) => set({ custodian: e.target.value })} className={inputCls} />
@@ -704,10 +823,28 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
       <div className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="ສົ່ງມອບໃຫ້ (ພະນັກງານ/ພະແນກ)" required error={errors.deliveredTo}>
-            <input type="text" value={form.deliveredTo} onChange={(e) => set({ deliveredTo: e.target.value })} className={inputCls} />
+            <input
+              type="text"
+              value={form.deliveredTo}
+              onChange={(e) => set({ deliveredTo: e.target.value, deliveredToUserId: '' })}
+              className={inputCls}
+            />
+            <EmployeeCodeLookup
+              onResolved={(u) => set({ deliveredTo: u.name, deliveredToUserId: u.userId })}
+              linkedLabel={form.deliveredToUserId ? form.deliveredTo : ''}
+            />
           </Field>
           <Field label="ຊື່ຜູ້ໃຊ້ທີ່ມອບໃຫ້" required error={errors.assignedUser}>
-            <input type="text" value={form.assignedUser} onChange={(e) => set({ assignedUser: e.target.value })} className={inputCls} />
+            <input
+              type="text"
+              value={form.assignedUser}
+              onChange={(e) => set({ assignedUser: e.target.value, assignedUserId: '' })}
+              className={inputCls}
+            />
+            <EmployeeCodeLookup
+              onResolved={(u) => set({ assignedUser: u.name, assignedUserId: u.userId })}
+              linkedLabel={form.assignedUserId ? form.assignedUser : ''}
+            />
           </Field>
           <Field label="ວັນທີສົ່ງມອບ">
             <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
@@ -868,7 +1005,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                               <Pencil size={15} />
                             </button>
                           )}
-                          {canManage && (
+                          {canDelete && (
                             <button
                               onClick={() => removeRecord(r._id)}
                               className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
@@ -990,7 +1127,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                   >
                     ຕໍ່ໄປ <ChevronRight size={16} />
                   </button>
-                ) : (
+                ) : canApprove ? (
                   <button
                     type="button"
                     onClick={submitAll}
@@ -999,6 +1136,10 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                   >
                     <Check size={16} /> {saving ? 'ກຳລັງບັນທຶກ...' : 'ສຳເລັດ'}
                   </button>
+                ) : (
+                  <span className="text-xs text-gray-400 max-w-[16rem] text-right">
+                    ບັນທຶກເປັນຮ່າງໄດ້ — ການປິດສຳເລັດຕ້ອງມີສິດອະນຸມັດ (supplies:approve)
+                  </span>
                 )}
               </div>
             </div>
@@ -1038,7 +1179,8 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                     ['ວັນທີຮັບ', f.receivedDate], ['ສະພາບກ່ອງ', f.boxCondition],
                     ['ສະພາບອຸປະກອນ', f.equipmentCondition], ['S/N', f.serialNumber],
                     ['S/N ກົງ', f.snMatch ? 'ແມ່ນ' : 'ບໍ່'], ['Asset Tag', f.assetTag],
-                    ['ລົງທະບຽນ', f.assetRegistered ? 'ແມ່ນ' : 'ບໍ່'], ['ຜູ້ຮັບ', f.receivedBy],
+                    ['ຜູກທະບຽນຊັບສິນ', f.assetId ? 'ຜູກແລ້ວ' : 'ບໍ່'], ['ລົງທະບຽນ', f.assetRegistered ? 'ແມ່ນ' : 'ບໍ່'],
+                    ['ຜູ້ຮັບ', f.receivedBy], ['ຜູ້ຮັບ (ບັນຊີ)', f.receivedByUserId ? 'ຜູກແລ້ວ' : 'ບໍ່'],
                     ['ຜູ້ດູແລ', f.custodian], ['ສະຖານທີ່', f.location],
                     ['ສະຖານະສົ່ງຮັບ', (POPR_DELIVERY_STATUS[f.deliveryStatus] || {}).label],
                   ],
@@ -1050,7 +1192,9 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                     ['BitLocker', f.diskEncryption ? 'ແມ່ນ' : 'ບໍ່'], ['ນະໂຍບາຍ', f.securityPolicy ? 'ແມ່ນ' : 'ບໍ່'],
                   ],
                   [
-                    ['ສົ່ງໃຫ້', f.deliveredTo], ['ຜູ້ໃຊ້', f.assignedUser], ['ວັນມອບ', f.deliveryDate],
+                    ['ສົ່ງໃຫ້', f.deliveredTo], ['ຜູ້ມອບ (ບັນຊີ)', f.deliveredToUserId ? 'ຜູກແລ້ວ' : 'ບໍ່'],
+                    ['ຜູ້ໃຊ້', f.assignedUser], ['ຜູ້ໃຊ້ (ບັນຊີ)', f.assignedUserId ? 'ຜູກແລ້ວ' : 'ບໍ່'],
+                    ['ວັນມອບ', f.deliveryDate],
                     ['ສະຖານະ', f.assetStatus], ['ລົງນາມ', f.signedHandover ? 'ແມ່ນ' : 'ບໍ່'],
                     ['ແນະນຳ', f.userOrientation ? 'ແມ່ນ' : 'ບໍ່'],
                   ],

@@ -26,10 +26,8 @@ export default function Login() {
   const [resending, setResending] = useState(false);
 
   const [setupToken, setSetupToken] = useState('');
-  const [mfaSetupStep, setMfaSetupStep] = useState(null); // null | 'choose' | 'totp' | 'email' | 'pin'
-  const [setupPin, setSetupPin] = useState('');
-  const [setupPinConfirm, setSetupPinConfirm] = useState('');
-  const [setupQr, setSetupQr] = useState('');
+  // ການຕັ້ງຄ່າ MFA ຄັ້ງທຳອິດ: null | 'choose' | 'email' (ບັງຄັບຢືນຢັນອີເມວເທົ່ານັ້ນ)
+  const [mfaSetupStep, setMfaSetupStep] = useState(null);
   const [setupCode, setSetupCode] = useState('');
   const [setupSubmitting, setSetupSubmitting] = useState(false);
   const [resendingSetup, setResendingSetup] = useState(false);
@@ -53,15 +51,9 @@ export default function Login() {
     return () => { cancelled = true; };
   }, []);
 
+  // ການຕັ້ງຄ່າ MFA ຄັ້ງທຳອິດຕ້ອງໃຊ້ອີເມວເທົ່ານັ້ນ (backend ບລັອກ pin/totp ຖ້າຍັງບໍ່ມີວິທີໃດເປີດຢູ່)
   const handleChooseSetupMethod = async (method) => {
     setError('');
-    if (method === 'pin') {
-      // PIN: ໃຫ້ຜູ້ໃຊ້ພິມເອງກ່ອນ ຈຶ່ງສົ່ງໄປ server
-      setSetupPin('');
-      setSetupPinConfirm('');
-      setMfaSetupStep('pin');
-      return;
-    }
     setSetupSubmitting(true);
     try {
       const response = await fetch(`${API_BASE_URL}/auth/mfa/setup`, {
@@ -75,12 +67,7 @@ export default function Login() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.msg || 'ຕັ້ງຄ່າ MFA ບໍ່ສຳເລັດ');
 
-      if (method === 'totp') {
-        setSetupQr(result.data.qrCodeDataUrl);
-        setMfaSetupStep('totp');
-      } else {
-        setMfaSetupStep('email');
-      }
+      setMfaSetupStep('email');
     } catch (err) {
       setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
     } finally {
@@ -105,45 +92,6 @@ export default function Login() {
       if (!response.ok) throw new Error(result.msg || 'ລະຫັດບໍ່ຖືກຕ້ອງ');
 
       completeLoginWithToken(result.data.accessToken);
-    } catch (err) {
-      setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
-    } finally {
-      setSetupSubmitting(false);
-    }
-  };
-
-  // ຕັ້ງ PIN ທີ່ຜູ້ໃຊ້ເລືອກເອງ: setup (ເກັບ PIN ແບບ hash) → enable (ຢືນຢັນ) → ເຂົ້າສູ່ລະບົບ
-  const handleSetupPin = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!/^\d{6,8}$/.test(setupPin)) {
-      setError('PIN ຕ້ອງເປັນຕົວເລກ 6–8 ຫຼັກ');
-      return;
-    }
-    if (setupPin !== setupPinConfirm) {
-      setError('PIN ທັງສອງຊ່ອງບໍ່ກົງກັນ');
-      return;
-    }
-    setSetupSubmitting(true);
-    try {
-      const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${setupToken}` };
-      const setupRes = await fetch(`${API_BASE_URL}/auth/mfa/setup`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ method: 'pin', pin: setupPin, confirmPin: setupPinConfirm }),
-      });
-      const setupBody = await setupRes.json();
-      if (!setupRes.ok) throw new Error(Array.isArray(setupBody.msg) ? setupBody.msg.join(', ') : setupBody.msg || 'ຕັ້ງ PIN ບໍ່ສຳເລັດ');
-
-      const enableRes = await fetch(`${API_BASE_URL}/auth/mfa/enable`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ code: setupPin }),
-      });
-      const enableBody = await enableRes.json();
-      if (!enableRes.ok) throw new Error(enableBody.msg || 'ເປີດໃຊ້ MFA ບໍ່ສຳເລັດ');
-
-      completeLoginWithToken(enableBody.data.accessToken);
     } catch (err) {
       setError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
     } finally {
@@ -505,108 +453,19 @@ export default function Login() {
           <div className="space-y-4">
             {mfaSetupStep === 'choose' && (
               <>
-                <p className="text-sm text-yellow-200/90">ບັນຊີນີ້ຕ້ອງການຕັ້ງຄ່າ MFA ກ່ອນເຂົ້າສູ່ລະບົບ — ເລືອກວິທີ:</p>
-                <button
-                  type="button"
-                  disabled={setupSubmitting}
-                  onClick={() => handleChooseSetupMethod('totp')}
-                  className="w-full bg-emerald-950/80 border border-emerald-600/60 hover:border-yellow-400 text-white py-3 rounded-xl text-sm transition disabled:opacity-50"
-                >
-                  ແອັບ Authenticator (Google Authenticator, Authy...)
-                </button>
+                <p className="text-sm text-yellow-200/90">
+                  ບັນຊີນີ້ຕ້ອງການຕັ້ງຄ່າ MFA ກ່ອນເຂົ້າສູ່ລະບົບ. ເພື່ອຄວາມປອດໄພ ຄັ້ງທຳອິດ
+                  ຕ້ອງຢືນຢັນດ້ວຍລະຫັດທີ່ສົ່ງໄປອີເມວຂອງທ່ານ (PIN ຫຼືແອັບ Authenticator ເພີ່ມພາຍຫຼັງໄດ້ໃນໜ້າຕັ້ງຄ່າ).
+                </p>
                 <button
                   type="button"
                   disabled={setupSubmitting}
                   onClick={() => handleChooseSetupMethod('email')}
                   className="w-full bg-emerald-950/80 border border-emerald-600/60 hover:border-yellow-400 text-white py-3 rounded-xl text-sm transition disabled:opacity-50"
                 >
-                  ອີເມວ
-                </button>
-                <button
-                  type="button"
-                  disabled={setupSubmitting}
-                  onClick={() => handleChooseSetupMethod('pin')}
-                  className="w-full bg-emerald-950/80 border border-emerald-600/60 hover:border-yellow-400 text-white py-3 rounded-xl text-sm transition disabled:opacity-50"
-                >
-                  PIN ທີ່ຕັ້ງເອງ (ຕົວເລກ 6–8 ຫຼັກ)
+                  ຢືນຢັນດ້ວຍອີເມວ
                 </button>
               </>
-            )}
-
-            {mfaSetupStep === 'totp' && (
-              <form onSubmit={handleEnableMfa} className="space-y-4">
-                <p className="text-sm text-yellow-200/90">ສະແກນ QR ນີ້ດ້ວຍແອັບ Authenticator ຂອງທ່ານ:</p>
-                {setupQr && (
-                  <img src={setupQr} alt="MFA QR code" className="mx-auto rounded-xl bg-white p-2" style={{ width: 200, height: 200 }} />
-                )}
-                <input
-                  type="text"
-                  required
-                  maxLength={6}
-                  value={setupCode}
-                  onChange={(e) => setSetupCode(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
-                  className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
-                />
-                <button
-                  type="submit"
-                  disabled={setupSubmitting || setupCode.length !== 6}
-                  className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50"
-                >
-                  {setupSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>ຢືນຢັນ ແລະ ເປີດໃຊ້ MFA</span>}
-                </button>
-              </form>
-            )}
-
-            {mfaSetupStep === 'pin' && (
-              <form onSubmit={handleSetupPin} className="space-y-4">
-                <p className="text-sm text-yellow-200/90">
-                  ຕັ້ງ PIN ຂອງທ່ານເອງ (ຕົວເລກ 6–8 ຫຼັກ) — ຈະຖືກຖາມທຸກຄັ້ງທີ່ເຂົ້າສູ່ລະບົບ. ຢ່າໃຊ້ເລກຊ້ຳ ຫຼື ເລກລຽງ ເຊັ່ນ 123456
-                </p>
-                <div>
-                  <label className="block text-xs font-medium text-yellow-200/90 mb-1">PIN ໃໝ່</label>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="new-password"
-                    required
-                    maxLength={8}
-                    value={setupPin}
-                    onChange={(e) => setSetupPin(e.target.value.replace(/\D/g, ''))}
-                    placeholder="••••••"
-                    className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-yellow-200/90 mb-1">ຢືນຢັນ PIN</label>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="new-password"
-                    required
-                    maxLength={8}
-                    value={setupPinConfirm}
-                    onChange={(e) => setSetupPinConfirm(e.target.value.replace(/\D/g, ''))}
-                    placeholder="••••••"
-                    className="w-full bg-emerald-950/80 border border-emerald-600/60 rounded-xl px-4 py-2.5 text-center tracking-[0.5em] text-lg text-white placeholder-emerald-400/50 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 transition"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  disabled={setupSubmitting || setupPin.length < 6 || setupPin !== setupPinConfirm}
-                  className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-400 hover:to-amber-400 text-emerald-950 font-bold py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/20 disabled:opacity-50"
-                >
-                  {setupSubmitting ? <Loader2 className="animate-spin" size={18} /> : <span>ຕັ້ງ PIN ແລະ ເປີດໃຊ້ MFA</span>}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setError(''); setMfaSetupStep('choose'); }}
-                  disabled={setupSubmitting}
-                  className="w-full text-yellow-300 text-xs underline disabled:opacity-50"
-                >
-                  ກັບຄືນ
-                </button>
-              </form>
             )}
 
             {mfaSetupStep === 'email' && (

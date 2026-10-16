@@ -294,12 +294,14 @@ export default function AssetManagement() {
               </span>
             )}
           </button>
-          <button
-            onClick={() => setActiveTab('popr')}
-            className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'popr' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-          >
-            POPR — ຈັດຊື້/ນຳເຂົ້າອຸປະກອນ
-          </button>
+          {canCreateCatalog && (
+            <button
+              onClick={() => setActiveTab('popr')}
+              className={`pb-3 text-sm font-medium transition border-b-2 ${activeTab === 'popr' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              POPR — ຈັດຊື້/ນຳເຂົ້າອຸປະກອນ
+            </button>
+          )}
         </div>
 
         {/* TAB: PENDING SUPPLY REQUESTS — ຄຳຂໍທີ່ລໍຖ້າອະນຸມັດ */}
@@ -534,8 +536,8 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
         )}
 
         {/* TAB: POPR — ຂະບວນການຈັດຊື້/ນຳເຂົ້າອຸປະກອນ */}
-        {activeTab === 'popr' && (
-          <PoprWorkflow catalog={assets} canManage={canCreateCatalog} />
+          {activeTab === 'popr' && canCreateCatalog && (
+            <PoprWorkflow catalog={assets} canManage={canCreateCatalog} />
         )}
       </div>
 
