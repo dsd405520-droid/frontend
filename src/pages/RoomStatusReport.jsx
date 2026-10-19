@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X, Search, Filter, QrCode, ChevronDown } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { DoorClosed, LogIn, LogOut, Users, Clock, AlertTriangle, Plus, X, Search, Filter, QrCode, FileSpreadsheet, FileDown } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CsvExportButton from '../components/CsvExportButton';
 import BookingInvitePanel from '../components/BookingInvitePanel';
 import { hasPermission } from '../utils/permissions';
 import { useBranch } from '../contexts/BranchContext';
 import { API_BASE_URL } from '../config';
+import { getSocket } from '../utils/socket';
 
 // ໜ້າລາຍງານສະຖານະຫ້ອງປະຊຸມ "ຕົວຈິງ" — ບໍ່ແມ່ນແຄ່ອີງ booking (ຄາດເດົາ) ແຕ່ໃຫ້ຄົນທີ່ຢູ່ໃນຫ້ອງແທ້ໆ
 // ຢືນຢັນເອງ (check-in / check-out), ບັນທຶກລາຍຊື່ຄົນເຂົ້າຮ່ວມ, ແລະ ຕໍ່ເວລາໄດ້ຖ້າໃກ້ໝົດ (ຜ່ານ endpoint reschedule ທີ່ມີແລ້ວ)
 export default function RoomStatusReport() {
   const { selectedBranchId } = useBranch();
+  const [searchParams, setSearchParams] = useSearchParams();
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
@@ -29,8 +32,13 @@ export default function RoomStatusReport() {
   const [extendError, setExtendError] = useState('');
   const [extendSubmitting, setExtendSubmitting] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(10);
-  const [openInviteId, setOpenInviteId] = useState(null); // booking ທີ່ເປີດແຜງ "ເຊີນຄົນດ້ວຍ QR" ຢູ່ (ເປີດໄດ້ເທື່ອລະອັນ)
-  const [activeTab, setActiveTab] = useState('status'); // 'status' | 'my-meetings' | 'history'
+  const [checkoutConfirm, setCheckoutConfirm] = useState(null); // booking ທີ່ກຳລັງລໍຖ້າຢືນຢັນ check-out
+  const [reportBusy, setReportBusy] = useState(''); // `${bookingId}:${csv|pdf}`
+  const [reportError, setReportError] = useState('');
+  const [, setNowTick] = useState(0); // ບັງຄັບ render ໃໝ່ຕາມເວລາ ເພື່ອໃຫ້ "ກຳລັງໃຊ້ງານ / ໃກ້ໝົດເວລາ" ອັບເດດເອງ
+  // booking ທີ່ເປີດ popup "ເຊີນຄົນດ້ວຍ QR" ຢູ່ — ມາຈາກປຸ່ມໃນກາດ ຫຼື ຈາກລິ້ງ /room-status?invite=<bookingId> (ຈາກໜ້າ ຈອງຫ້ອງປະຊຸມ)
+  const [openInviteId, setOpenInviteId] = useState(() => searchParams.get('invite'));
+  const [activeTab, setActiveTab] = useState(() => (searchParams.get('invite') ? 'my-meetings' : 'status')); // 'status' | 'my-meetings' | 'history'
 
   // Search & Filter (ສຳລັບແຖບສະຖານະຫ້ອງ)
   const [searchQuery, setSearchQuery] = useState('');
@@ -56,31 +64,40 @@ export default function RoomStatusReport() {
     return body?.data !== undefined ? body.data : body;
   }
 
-  function fetchRooms() {
-    setLoadingRooms(true);
+  // silent = true → ດຶງຂໍ້ມູນງຽບໆ (real-time / polling) ບໍ່ສະແດງ "ກຳລັງໂຫຼດ..." ກະພິບ
+  // ຄຳຂໍທີ່ຕອບກັບມາຊ້າກວ່າຄຳຂໍທີ່ໃໝ່ກວ່າຈະຖືກຖິ້ມ ເພື່ອບໍ່ໃຫ້ຂໍ້ມູນເກົ່າຂຽນທັບຂໍ້ມູນໃໝ່
+  const roomsSeq = useRef(0);
+  const bookingsSeq = useRef(0);
+
+  function fetchRooms(silent = false) {
+    const seq = ++roomsSeq.current;
+    if (!silent) setLoadingRooms(true);
     setRoomsError('');
     const branchParam = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
-    fetch(`${API_BASE_URL}/rooms${branchParam}`, { headers })
+    fetch(`${API_BASE_URL}/rooms${branchParam}`, { headers, cache: 'no-store' })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
+        if (seq !== roomsSeq.current) return;
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດຂໍ້ມູນຫ້ອງໄດ້');
         setRooms(unwrap(body) || []);
       })
-      .catch((err) => setRoomsError(err.message))
-      .finally(() => setLoadingRooms(false));
+      .catch((err) => { if (seq === roomsSeq.current) setRoomsError(err.message); })
+      .finally(() => { if (seq === roomsSeq.current) setLoadingRooms(false); });
   }
 
-  function fetchMyBookings() {
-    setLoadingBookings(true);
+  function fetchMyBookings(silent = false) {
+    const seq = ++bookingsSeq.current;
+    if (!silent) setLoadingBookings(true);
     setBookingsError('');
-    fetch(`${API_BASE_URL}/room-bookings/my`, { headers })
+    fetch(`${API_BASE_URL}/room-bookings/my`, { headers, cache: 'no-store' })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
+        if (seq !== bookingsSeq.current) return;
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດການຈອງຂອງທ່ານໄດ້');
         setMyBookings(unwrap(body) || []);
       })
-      .catch((err) => setBookingsError(err.message))
-      .finally(() => setLoadingBookings(false));
+      .catch((err) => { if (seq === bookingsSeq.current) setBookingsError(err.message); })
+      .finally(() => { if (seq === bookingsSeq.current) setLoadingBookings(false); });
   }
 
   useEffect(() => {
@@ -89,6 +106,69 @@ export default function RoomStatusReport() {
     fetchMyBookings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
+
+  // Real-time: ມີການຈອງ/ອະນຸມັດ/ຍົກເລີກ/ເລື່ອນເວລາ/check-in/check-out ຫຼື ແກ້ໄຂຫ້ອງ → ດຶງໃໝ່ທັນທີ (ຜ່ານ WebSocket)
+  // ບວກ polling ທຸກ 15 ວິ (ສະຖານະທີ່ປ່ຽນຕາມເວລາ ເຊັ່ນ ຫ້ອງວ່າງ/no-show ບໍ່ມີເຫດການຈາກ Backend) ແລະ ດຶງໃໝ່ຕອນກັບມາເບິ່ງ tab
+  const refreshRef = useRef(null);
+  refreshRef.current = () => { fetchRooms(true); fetchMyBookings(true); };
+  useEffect(() => {
+    let debounceTimer = null;
+    const run = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => refreshRef.current && refreshRef.current(), 150);
+    };
+    const socket = getSocket();
+    if (socket) {
+      socket.on('room-bookings:changed', run);
+      socket.on('room:changed', run);
+      socket.on('connect', run);
+    }
+    const poll = setInterval(() => { if (document.visibilityState === 'visible') run(); }, 15000);
+    const tick = setInterval(() => setNowTick((n) => n + 1), 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') run(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', run);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      if (socket) {
+        socket.off('room-bookings:changed', run);
+        socket.off('room:changed', run);
+        socket.off('connect', run);
+      }
+      clearTimeout(debounceTimer);
+      clearInterval(poll);
+      clearInterval(tick);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', run);
+      window.removeEventListener('focus', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId]);
+
+  const closeInvite = () => {
+    setOpenInviteId(null);
+    if (searchParams.has('invite')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('invite');
+      setSearchParams(next, { replace: true }); // ກັນບໍ່ໃຫ້ popup ເດັ້ງຄືນເມື່ອ refresh
+    }
+  };
+
+  // ປິດ popup ດ້ວຍປຸ່ມ Esc
+  useEffect(() => {
+    if (!openInviteId) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') closeInvite(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openInviteId]);
+
+  // ຖ້າລິ້ງຊີ້ໄປຫາ booking ທີ່ບໍ່ມີ/ບໍ່ແມ່ນຂອງເຮົາ — ປິດ popup ໂດຍບໍ່ສະແດງຫຍັງ
+  useEffect(() => {
+    if (!openInviteId || loadingBookings) return;
+    if (!myBookings.some((b) => b._id === openInviteId && b.status === 'CONFIRMED')) closeInvite();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openInviteId, loadingBookings, myBookings]);
 
   const roomStatusInfo = (liveStatus) => {
     switch (liveStatus) {
@@ -99,6 +179,7 @@ export default function RoomStatusReport() {
   };
 
   const now = new Date();
+  const inviteBooking = openInviteId ? myBookings.find((b) => b._id === openInviteId && b.status === 'CONFIRMED') : null;
 
   const roomStatusKey = (room) => room.liveStatus || room.status || 'AVAILABLE';
 
@@ -110,14 +191,16 @@ export default function RoomStatusReport() {
     return matchesSearch && matchesStatus;
   });
   // ການຈອງມື້ນີ້ຂອງຂ້ອຍ ທີ່ຍັງບໍ່ຈົບ (ບໍ່ນັບ CANCELLED/REJECTED) ແລະ ຍັງບໍ່ຫລົ້ນເວລາໄປໝົດ — ໂຊລຽນຕາມເວລາເລີ່ມ
+  // check-out ແລ້ວ → ອອກຈາກລາຍການນີ້ທັນທີ (ໄປຢູ່ "ປະຫວັດການປະຊຸມ" ແທນ)
   const relevantBookings = myBookings
     .filter((b) => b.status === 'CONFIRMED' || b.status === 'PENDING')
+    .filter((b) => !b.checkedOutAt)
     .filter((b) => new Date(b.endAt) >= new Date(now.getTime() - 60 * 60000)) // ຍັງບໍ່ຈົບເກີນ 1 ຊົ່ວໂມງ
     .sort((a, b) => new Date(a.startAt) - new Date(b.startAt));
 
   // ປະຫວັດການປະຊຸມທີ່ຈົບໄປແລ້ວ (CONFIRMED ແລະ ຮອດ endAt ແລ້ວ) — ໂຊລ້າສຸດກ່ອນ
   const pastBookings = myBookings
-    .filter((b) => b.status === 'CONFIRMED' && new Date(b.endAt) < now)
+    .filter((b) => b.status === 'CONFIRMED' && (new Date(b.endAt) < now || !!b.checkedOutAt))
     .sort((a, b) => new Date(b.startAt) - new Date(a.startAt));
 
   function isActiveNow(b) {
@@ -138,15 +221,52 @@ export default function RoomStatusReport() {
       .then(({ ok, responseBody }) => {
         if (!ok) throw new Error(responseBody?.msg || 'ດຳເນີນການບໍ່ສຳເລັດ');
         onDone && onDone();
-        fetchMyBookings();
-        fetchRooms();
+        fetchMyBookings(true);
+        fetchRooms(true);
       })
       .catch((err) => alert(err.message))
       .finally(() => setBusyId(null));
   }
 
   const handleCheckIn = (b) => callAction(`/${b._id}/checkin`, 'PATCH');
-  const handleCheckOut = (b) => callAction(`/${b._id}/checkout`, 'PATCH');
+  // ກົດ Check-out → ສະແດງຄຳເຕືອນກ່ອນ; ຢືນຢັນແລ້ວຈຶ່ງ check-out ແທ້
+  const handleCheckOut = (b) => setCheckoutConfirm(b);
+  const confirmCheckOut = () => {
+    const b = checkoutConfirm;
+    if (!b) return;
+    setCheckoutConfirm(null);
+    callAction(`/${b._id}/checkout`, 'PATCH');
+  };
+
+  // ດາວໂຫຼດລາຍງານສະຫຼຸບການປະຊຸມ (CSV / PDF)
+  const downloadReport = async (b, kind) => {
+    setReportBusy(`${b._id}:${kind}`);
+    setReportError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/room-bookings/${b._id}/invite/attendance.${kind}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const m = j.msg ?? j.message;
+        throw new Error((Array.isArray(m) ? m.join(', ') : m) || 'ດາວໂຫຼດລາຍງານບໍ່ສຳເລັດ');
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = `meeting-summary-${b._id}.${kind}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+    } catch (err) {
+      setReportError(err.message);
+    } finally {
+      setReportBusy('');
+    }
+  };
 
   const handleSaveAttendees = (b) => {
     const raw = attendeeDrafts[b._id] ?? (b.attendees || []).join(', ');
@@ -410,21 +530,17 @@ export default function RoomStatusReport() {
                       </div>
                     )}
 
-                    {/* ເຊີນຄົນເຂົ້າຫ້ອງດ້ວຍ QR — ໃຊ້ແຜງດຽວກັນກັບ ຈອງຫ້ອງປະຊຸມ → ການຈອງຂອງຂ້ອຍ (ສະເພາະການຈອງທີ່ອະນຸມັດແລ້ວ) */}
+                    {/* ເຊີນຄົນເຂົ້າຫ້ອງດ້ວຍ QR — ເປີດເປັນ popup (ລາຍຊື່ຍາວ ບໍ່ໃຫ້ເຮັດໃຫ້ກາດຮົກ) ສະເພາະການຈອງທີ່ອະນຸມັດແລ້ວ */}
                     {b.status === 'CONFIRMED' && (
-                      <div className="space-y-2">
+                      <div>
                         <button
                           type="button"
-                          onClick={() => setOpenInviteId((cur) => (cur === b._id ? null : b._id))}
-                          aria-expanded={openInviteId === b._id}
+                          onClick={() => setOpenInviteId(b._id)}
+                          aria-haspopup="dialog"
                           className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-medium transition flex items-center gap-1"
                         >
                           <QrCode size={14} /> ເຊີນຄົນເຂົ້າຫ້ອງດ້ວຍ QR
-                          <ChevronDown size={14} className={`transition-transform ${openInviteId === b._id ? 'rotate-180' : ''}`} />
                         </button>
-                        {openInviteId === b._id && (
-                          <BookingInvitePanel key={b._id} booking={b} past={new Date(b.endAt).getTime() <= now.getTime()} />
-                        )}
                       </div>
                     )}
 
@@ -458,6 +574,7 @@ export default function RoomStatusReport() {
         {activeTab === 'history' && (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 font-bold text-gray-800">ປະຫວັດການປະຊຸມຂອງທ່ານ</div>
+          {reportError && <div className="p-3 text-xs text-red-600 bg-red-50 border-b border-red-200">{reportError}</div>}
           {pastBookings.length === 0 ? (
             <div className="p-8 text-center text-sm text-gray-400">ຍັງບໍ່ມີປະຫວັດການປະຊຸມທີ່ຈົບແລ້ວ</div>
           ) : (
@@ -478,6 +595,12 @@ export default function RoomStatusReport() {
                           {!b.checkedInAt && (
                             <div className="text-xs text-amber-600 mt-1">⚠ ບໍ່ໄດ້ check-in ຄັ້ງນີ້ — ອາດບໍ່ໄດ້ໃຊ້ຫ້ອງແທ້ໆ</div>
                           )}
+                          {b.checkedInAt && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              ເຂົ້າຫ້ອງ {new Date(b.checkedInAt).toLocaleTimeString()}
+                              {b.checkedOutAt ? ` · Check-out ${new Date(b.checkedOutAt).toLocaleTimeString()}` : ''}
+                            </div>
+                          )}
                         </div>
                         <span className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 font-medium shrink-0 flex items-center gap-1">
                           <Users size={12} /> {attendeeCount} ຄົນ
@@ -492,6 +615,26 @@ export default function RoomStatusReport() {
                           ))}
                         </div>
                       )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={!!reportBusy}
+                          onClick={() => downloadReport(b, 'csv')}
+                          className="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <FileSpreadsheet size={14} />
+                          {reportBusy === `${b._id}:csv` ? 'ກຳລັງສ້າງ...' : 'ສະຫຼຸບ CSV'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!!reportBusy}
+                          onClick={() => downloadReport(b, 'pdf')}
+                          className="px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 rounded-lg text-xs font-medium flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <FileDown size={14} />
+                          {reportBusy === `${b._id}:pdf` ? 'ກຳລັງສ້າງ...' : 'ສະຫຼຸບ PDF'}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -509,6 +652,77 @@ export default function RoomStatusReport() {
             </>
           )}
         </div>
+        )}
+
+        {/* Popup ເຊີນຄົນເຂົ້າຫ້ອງດ້ວຍ QR */}
+        {inviteBooking && (
+          <div
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) closeInvite(); }}
+          >
+            <div role="dialog" aria-modal="true" className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-xl">
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-bold text-gray-800">ເຊີນຄົນເຂົ້າຫ້ອງ</h2>
+                  <p className="text-xs text-gray-500 truncate">
+                    {inviteBooking.roomId?.name || ''} — {new Date(inviteBooking.startAt).toLocaleString()}
+                  </p>
+                </div>
+                <button type="button" onClick={closeInvite} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="ປິດ">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-5 overflow-y-auto">
+                <BookingInvitePanel key={inviteBooking._id} booking={inviteBooking} past={new Date(inviteBooking.endAt).getTime() <= now.getTime()} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal ຢືນຢັນ Check-out — ເຕືອນກ່ອນວ່າເວລາທີ່ເຫຼືອຈະຖືກປ່ອຍໃຫ້ຄົນອື່ນຈອງ */}
+        {checkoutConfirm && (
+          <div
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setCheckoutConfirm(null); }}
+          >
+            <div role="alertdialog" aria-modal="true" className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 shadow-xl">
+              <div className="flex items-start gap-3">
+                <div className="shrink-0 w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
+                  <AlertTriangle size={20} />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-lg font-bold text-gray-800">ຢືນຢັນ Check-out?</h2>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {checkoutConfirm.title || 'ການປະຊຸມ'} — {checkoutConfirm.roomId?.name || checkoutConfirm.roomId}
+                  </p>
+                </div>
+              </div>
+              <div className="text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 space-y-1.5">
+                <p>ຖ້າ Check-out ແລ້ວ:</p>
+                <ul className="list-disc pl-5 space-y-1 text-gray-600">
+                  <li>ຄົນອື່ນຈະສາມາດຈອງຫ້ອງໃນເວລາທີ່ເຫຼືອຂອງທ່ານໄດ້ທັນທີ</li>
+                  <li>ຖ້າຕ້ອງການໃຊ້ຫ້ອງຕໍ່ ທ່ານຕ້ອງ <b>ຈອງໃໝ່</b> ອີກຄັ້ງ</li>
+                  <li>ການປະຊຸມນີ້ຈະອອກຈາກລາຍການ "ການປະຊຸມຂອງທ່ານ" ແລະ ໄປຢູ່ໃນ "ປະຫວັດການປະຊຸມ"</li>
+                </ul>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setCheckoutConfirm(null)}
+                  className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-xl"
+                >
+                  ຍົກເລີກ
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmCheckOut}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium flex items-center gap-1.5"
+                >
+                  <LogOut size={14} /> ຢືນຢັນ Check-out
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Modal ຕໍ່ເວລາ */}
