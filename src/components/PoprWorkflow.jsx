@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Plus, X, Search, Trash2, Check, ChevronLeft, ChevronRight, Info, Pencil,
-  ClipboardList, PackageCheck, Settings2, Send,
+  ClipboardList, PackageCheck, Settings2, Send, RotateCcw,
 } from 'lucide-react';
 import { POPR_STEPS, POPR_STATUS, POPR_ORDER_STATUS, POPR_DELIVERY_STATUS, POPR_ITEM_TYPE } from '../constants/poprSteps';
+
+// ເກນມູນຄ່າຕໍ່ໜ່ວຍ (ກີບ) ທີ່ຕ່ຳກວ່າ ມັກເປັນຂອງສິ້ນເປືອງ — ປັບໄດ້ຕາມນະໂຍບາຍບໍລິສັດ
+const ASSET_PRICE_THRESHOLD = 500000;
 import { getCurrentUser, hasPermission } from '../utils/permissions';
 import api from '../services/api';
 
@@ -19,7 +22,13 @@ const emptyForm = () => ({
   // 1) P — ການຈັດຫາ/ຈັດຊື້
   catalogItemId: '',
   itemName: '',
-  quantity: 1,
+  quantity: 1, // ຈຳນວນຂອງງວດນີ້
+  poTotalQuantity: '', // ຈຳນວນສັ່ງທັງໝົດຕາມ PO (ວ່າງ = ເທົ່າກັບຈຳນວນງວດນີ້)
+  lotNo: 1,
+  // ໃຊ້ສ້າງລາຍການ Catalog ໃໝ່ຕອນປິດ POPR (ຖ້າຊື່ບໍ່ມີໃນ Catalog)
+  category: '',
+  unit: '',
+  lowStockThreshold: '',
   spec: '',
   budget: '',
   price: '',
@@ -28,17 +37,20 @@ const emptyForm = () => ({
   warrantyAgreement: false,
   poNumber: '',
   goodsReceiptNo: '',
+  orderedBy: '', // ຜູ້ສັ່ງຊື້ — ຖ້າວ່າງ = ຜູ້ບັນທຶກ POPR
+  orderedByUserId: '',
   orderStatus: 'PENDING',
   // 2) O — ການຮັບເຂົ້າ/ຕ້ອນຮັບ
   receivedDate: '',
+  receivedQuantity: '', // ສະເພາະ CONSUMABLE
+  boxCount: '', // ຕົວຊ່ວຍຄຳນວນ (UI ເທົ່ານັ້ນ ບໍ່ສົ່ງໄປ backend): ຈຳນວນກ່ອງ
+  perBox: '', // ຈຳນວນຕໍ່ກ່ອງ
+  // ຕໍ່ໜ່ວຍ (ELECTRONIC/GENERAL): { serialNumber, assetId (ຜູກຊັບສິນເດີມ), assetTag }
+  units: [],
   deliveryStatus: 'SHIPPING',
   boxCondition: 'good',
   equipmentCondition: 'good',
-  serialNumber: '',
   snMatch: false,
-  assetTag: '',
-  assetId: '',
-  assetRegistered: false,
   receivedBy: '',
   receivedByUserId: '',
   custodian: '',
@@ -61,6 +73,7 @@ const emptyForm = () => ({
   deliveryDate: '',
   signedHandover: false,
   userOrientation: false,
+  storeInStock: false, // true = ເຂົ້າຄັງ (ຊັບສິນວ່າງ, ບວກສະຕ໊ອກ, ບໍ່ຕ້ອງມີຜູ້ຮັບ)
   assetStatus: 'IN_USE',
   assignedUser: '',
   assignedUserId: '',
@@ -81,17 +94,40 @@ const ASSET_STATUSES = [
 
 const day = (v) => (v ? String(v).slice(0, 10) : '');
 
+const blankUnit = () => ({ serialNumber: '', assetId: '', assetTag: '' });
+
+/** ປັບລາຍການໜ່ວຍໃຫ້ມີຈຳນວນແຖວເທົ່າກັບຈຳນວນທີ່ຈັດຊື້ */
+const padUnits = (units, qty) =>
+  Array.from({ length: Math.max(0, qty) }, (_, i) => ({ ...blankUnit(), ...(units[i] || {}) }));
+
 /** API record (nested) → flat form ຂອງ UI */
 function toForm(rec = {}) {
   const p = rec.procurement || {};
   const o = rec.receiving || {};
   const c = rec.preparation || {};
   const r = rec.release || {};
+  // ຂໍ້ມູນເກົ່າ (ໜ່ວຍດຽວ): ແປງ serialNumber/assetId ເປັນໜຶ່ງແຖວ
+  const rawUnits =
+    o.units && o.units.length > 0
+      ? o.units
+      : o.serialNumber || o.assetId
+        ? [{ serialNumber: o.serialNumber, assetId: o.assetId }]
+        : [];
+  const units = rawUnits.map((u) => ({
+    serialNumber: u.serialNumber || u.assetId?.serialNumber || '',
+    assetId: u.assetId?._id || u.assetId || '',
+    assetTag: u.assetId?.assetTag || '',
+  }));
   return {
     itemType: rec.itemType || 'ELECTRONIC',
     catalogItemId: p.catalogItemId || '',
     itemName: p.itemName || '',
     quantity: p.quantity ?? 1,
+    poTotalQuantity: p.poTotalQuantity ?? '',
+    lotNo: p.lotNo ?? 1,
+    category: p.category || '',
+    unit: p.unit || '',
+    lowStockThreshold: p.lowStockThreshold ?? '',
     spec: p.spec || '',
     budget: p.budget ?? '',
     price: p.price ?? '',
@@ -100,16 +136,22 @@ function toForm(rec = {}) {
     warrantyAgreement: !!p.warrantyAgreement,
     poNumber: p.poNumber || '',
     goodsReceiptNo: p.goodsReceiptNo || '',
+    orderedBy: p.orderedByUserId
+      ? `${p.orderedByUserId.firstName || ''} ${p.orderedByUserId.lastName || ''}`.trim() ||
+        p.orderedByUserId.employeeCode || p.orderedBy || ''
+      : p.orderedBy || '',
+    orderedByUserId: p.orderedByUserId?._id || p.orderedByUserId || '',
     orderStatus: p.orderStatus || 'PENDING',
     receivedDate: day(o.receivedDate),
     deliveryStatus: o.deliveryStatus || 'SHIPPING',
     boxCondition: o.boxCondition || 'good',
     equipmentCondition: o.equipmentCondition || 'good',
-    serialNumber: o.serialNumber || '',
+    receivedQuantity: o.receivedQuantity ?? '',
+    units,
+    // ສະແດງໃນຕາຕະລາງ/ຄົ້ນຫາ
+    serialNumber: units.map((u) => u.serialNumber).filter(Boolean).join(', '),
+    assetTag: o.assetTag || units.map((u) => u.assetTag).filter(Boolean).join(', '),
     snMatch: !!o.snMatch,
-    assetTag: o.assetTag || '',
-    assetId: o.assetId?._id || o.assetId || '',
-    assetRegistered: !!o.assetRegistered,
     receivedBy: o.receivedBy || '',
     receivedByUserId: o.receivedByUserId?._id || o.receivedByUserId || '',
     custodian: o.custodian || '',
@@ -130,6 +172,7 @@ function toForm(rec = {}) {
     deliveryDate: day(r.deliveryDate),
     signedHandover: !!r.signedHandover,
     userOrientation: !!r.userOrientation,
+    storeInStock: !!r.storeInStock,
     assetStatus: r.assetStatus || 'IN_USE',
     assignedUser: r.assignedUser || '',
     assignedUserId: r.assignedUserId?._id || r.assignedUserId || '',
@@ -139,6 +182,18 @@ function toForm(rec = {}) {
 /** flat form → API payload (nested) */
 function toPayload(form, status, stage) {
   const num = (v) => (v === '' || v === null || v === undefined ? undefined : Number(v));
+  const qty = Number(form.quantity) || 1;
+  const isConsumable = form.itemType === 'CONSUMABLE';
+  // ໜ່ວຍທີ່ຜູກຊັບສິນເດີມ ສົ່ງສະເພາະ assetId; ໜ່ວຍໃໝ່ສົ່ງ S/N; ຕັດແຖວຫວ່າງທ້າຍລາຍການ
+  const units = isConsumable
+    ? []
+    : padUnits(form.units || [], qty).map((u) => ({
+        assetId: u.assetId || undefined,
+        serialNumber: u.assetId ? undefined : u.serialNumber.trim() || undefined,
+      }));
+  while (units.length > 0 && !units[units.length - 1].assetId && !units[units.length - 1].serialNumber) {
+    units.pop();
+  }
   return {
     status,
     stage,
@@ -146,26 +201,31 @@ function toPayload(form, status, stage) {
     procurement: {
       catalogItemId: form.catalogItemId || undefined,
       itemName: form.itemName,
-      quantity: Number(form.quantity) || 1,
+      quantity: qty,
+      poTotalQuantity: num(form.poTotalQuantity) ?? qty,
+      lotNo: Number(form.lotNo) || 1,
+      category: form.catalogItemId ? undefined : form.category.trim() || undefined,
+      unit: form.catalogItemId ? undefined : form.unit.trim() || undefined,
+      lowStockThreshold: form.catalogItemId ? undefined : num(form.lowStockThreshold),
       spec: form.spec,
       budget: num(form.budget),
       price: num(form.price),
       vendor: form.vendor,
       vendorStandard: form.vendorStandard,
       warrantyAgreement: form.warrantyAgreement,
-      poNumber: form.poNumber,
+      poNumber: form.poNumber.trim() || undefined, // ຫວ່າງ = ບໍ່ສົ່ງ (ບໍ່ໃຫ້ຊົນ unique index)
       goodsReceiptNo: form.goodsReceiptNo || undefined,
+      orderedBy: form.orderedBy || undefined,
+      orderedByUserId: form.orderedByUserId || undefined,
       orderStatus: form.orderStatus,
     },
     receiving: {
       receivedDate: form.receivedDate || undefined,
       boxCondition: form.boxCondition,
       equipmentCondition: form.equipmentCondition,
-      serialNumber: form.serialNumber || undefined,
+      receivedQuantity: isConsumable ? num(form.receivedQuantity) ?? qty : undefined,
+      units,
       snMatch: form.snMatch,
-      assetTag: form.assetTag || undefined,
-      assetId: form.assetId || null,
-      assetRegistered: form.assetRegistered,
       receivedBy: form.receivedBy || undefined,
       receivedByUserId: form.receivedByUserId || null,
       custodian: form.custodian || undefined,
@@ -194,6 +254,7 @@ function toPayload(form, status, stage) {
       assetStatus: form.assetStatus,
       signedHandover: form.signedHandover,
       userOrientation: form.userOrientation,
+      storeInStock: form.itemType !== 'CONSUMABLE' && !!form.storeInStock,
     },
   };
 }
@@ -214,6 +275,8 @@ function normalize(rec) {
     stage: rec.stage,
     createdAt: rec.createdAt,
     createdBy: creatorName(rec.createdBy),
+    poClosedShort: !!rec.poClosedShort,
+    poClosedReason: rec.poClosedReason || '',
     form: toForm(rec),
   };
 }
@@ -223,32 +286,69 @@ const apiErr = (err, fallback) =>
 
 function validateStep(step, form) {
   const err = {};
+  const type = form.itemType;
+  const qty = Number(form.quantity) || 1;
   if (step === 0) {
     if (!form.itemName.trim()) err.itemName = 'ກະລຸນາລະບຸຊື່/ລາຍການອຸປະກອນ';
     if (!(Number(form.quantity) >= 1)) err.quantity = 'ຈຳນວນຕ້ອງຢ່າງໜ້ອຍ 1';
+    // ລາຍການທີ່ບໍ່ມີໃນ Catalog ຈະຖືກສ້າງໃໝ່ຕອນປິດ POPR → ຕ້ອງມີໝວດໝູ່ ແລະ ຫົວໜ່ວຍ
+    if (!form.catalogItemId) {
+      if (!form.category.trim()) err.category = 'ກະລຸນາລະບຸໝວດໝູ່ (ລາຍການໃໝ່)';
+      if (!form.unit.trim()) err.unit = 'ກະລຸນາລະບຸຫົວໜ່ວຍ (ລາຍການໃໝ່)';
+    }
+    if (form.poTotalQuantity !== '' && Number(form.poTotalQuantity) < Number(form.quantity)) {
+      err.poTotalQuantity = 'ຈຳນວນສັ່ງທັງ PO ຕ້ອງບໍ່ໜ້ອຍກວ່າຈຳນວນຂອງງວດນີ້';
+    }
     if (!form.spec.trim()) err.spec = 'ກະລຸນາລະບຸຂໍ້ກຳນົດ/ຂໍ້ມູນຈຳເພາະ';
     if (form.budget === '' || Number(form.budget) < 0) err.budget = 'ກະລຸນາລະບຸງົບປະມານ';
     if (!form.vendor.trim()) err.vendor = 'ກະລຸນາລະບຸຜູ້ຂາຍ';
     if (!form.poNumber.trim()) err.poNumber = 'ກະລຸນາລະບຸເລກໃບສັ່ງຊື້ (PO)';
   }
   if (step === 1) {
-    const isGeneral = form.itemType === 'GENERAL';
     if (!form.receivedDate) err.receivedDate = 'ກະລຸນາລະບຸວັນທີຮັບ';
-    if (!form.assetTag.trim()) err.assetTag = 'ກະລຸນາລະບຸ Asset Tag / ບາໂຄດ';
-    if (!isGeneral) {
-      if (!form.serialNumber.trim()) err.serialNumber = 'ກະລຸນາລະບຸ Serial Number (S/N)';
+    if (type === 'CONSUMABLE') {
+      if (form.receivedQuantity === '' || !(Number(form.receivedQuantity) >= 0)) {
+        err.receivedQuantity = 'ກະລຸນາລະບຸຈຳນວນທີ່ຮັບເຂົ້າຄັງຈິງ';
+      }
+    } else if (type === 'ELECTRONIC') {
+      const units = padUnits(form.units || [], qty);
+      const missing = [];
+      const seenSn = new Set();
+      const seenAsset = new Set();
+      let dup = '';
+      units.forEach((u, i) => {
+        const sn = u.serialNumber.trim().toLowerCase();
+        if (u.assetId) {
+          if (seenAsset.has(u.assetId)) dup = `ຊັບສິນ ${u.assetTag || u.assetId} ຖືກຜູກຊ້ຳ`;
+          seenAsset.add(u.assetId);
+        } else if (!sn) {
+          missing.push(i + 1);
+        } else {
+          if (seenSn.has(sn)) dup = `S/N "${u.serialNumber.trim()}" ຊ້ຳກັນ`;
+          seenSn.add(sn);
+        }
+      });
+      if (missing.length > 0) {
+        err.units = `ຕ້ອງໃສ່ S/N ຫຼື ຜູກຊັບສິນເດີມ ໃຫ້ຄົບທຸກໜ່ວຍ — ຍັງຂາດໜ່ວຍທີ: ${missing.slice(0, 15).join(', ')}${missing.length > 15 ? ' ...' : ''}`;
+      } else if (dup) {
+        err.units = dup;
+      }
       if (!form.snMatch) err.snMatch = 'ຕ້ອງຢືນຢັນວ່າ S/N ກົງກັບເອກະສານ';
     }
   }
-  if (step === 2 && form.itemType !== 'GENERAL') {
+  if (step === 2 && type === 'ELECTRONIC') {
     if (!form.os.trim()) err.os = 'ກະລຸນາລະບຸລະບົບປະຕິບັດການ (OS)';
     if (!form.secAntivirus && !form.secEdr && !form.secFirewall) {
       err.security = 'ເລືອກຢ່າງໜ້ອຍ 1 ຊອບແວຄວາມປອດໄພ';
     }
   }
-  if (step === 3) {
+  // ວັດສະດຸສິ້ນເປືອງເຂົ້າຄັງ — ບໍ່ຕ້ອງມີຜູ້ຮັບ/ລາຍເຊັນ
+  if (step === 3 && type !== 'CONSUMABLE' && form.storeInStock && !form.location.trim()) {
+    err.location = 'ເຂົ້າຄັງ: ກະລຸນາລະບຸສະຖານທີ່ເກັບ (ກັບໄປຂັ້ນ O ແລ້ວໃສ່ຊ່ອງ "ສະຖານທີ່")';
+  }
+  if (step === 3 && type !== 'CONSUMABLE' && !form.storeInStock) {
     if (!form.deliveredTo.trim()) err.deliveredTo = 'ກະລຸນາລະບຸຜູ້ຮັບມອບ/ພະແນກ';
-    if (!form.assignedUser.trim()) err.assignedUser = 'ກະລຸນາລະບຸຊື່ຜູ້ໃຊ້ທີ່ມອບໃຫ້';
+    if (!form.assignedUserId) err.assignedUser = 'ຕ້ອງເລືອກຜູ້ຮັບດ້ວຍລະຫັດພະນັກງານ (ກົດ "ຄົ້ນຫາ")';
     if (!form.signedHandover) err.signedHandover = 'ຕ້ອງຢືນຢັນການລົງນາມຮັບມອບ';
   }
   return err;
@@ -294,7 +394,11 @@ function AssetCodeLookup({ onResolved, linkedLabel }) {
     try {
       const res = await api.get(`/popr-records/lookup/asset/${encodeURIComponent(c)}`);
       const a = unwrap(res.data);
-      onResolved({ assetId: a._id, assetTag: a.assetTag });
+      if (a.status !== 'AVAILABLE') {
+        setError(`ຊັບສິນ ${a.assetTag} ບໍ່ວ່າງ (ສະຖານະ ${a.status}) — ຜູກບໍ່ໄດ້`);
+        return;
+      }
+      onResolved({ assetId: a._id, assetTag: a.assetTag, serialNumber: a.serialNumber || '' });
       setCode('');
     } catch (err) {
       setError(apiErr(err, 'ບໍ່ພົບຊັບສິນນີ້ໃນທະບຽນ'));
@@ -368,6 +472,145 @@ function EmployeeCodeLookup({ onResolved, linkedLabel }) {
       </button>
       {linkedLabel && <span className="text-xs text-emerald-600">ຜູກແລ້ວ: {linkedLabel}</span>}
       {error && <span className="text-xs text-red-500">{error}</span>}
+    </div>
+  );
+}
+
+const fmtMoney = (v) => Number(v || 0).toLocaleString('en-US');
+
+/** ຈຳນວນທີ່ຮັບໃນງວດ (ສິ້ນເປືອງ = ຈຳນວນຮັບຈິງ) */
+const lotQtyOf = (r) =>
+  r.itemType === 'CONSUMABLE' && r.form.receivedQuantity !== '' && r.form.receivedQuantity != null
+    ? Number(r.form.receivedQuantity) || 0
+    : Number(r.form.quantity) || 0;
+
+/** ສະຫຼຸບ PO ຈາກທຸກງວດ (ນັບສະເພາະງວດທີ່ປິດແລ້ວເປັນ "ຮັບແລ້ວ"); ບໍ່ນັບ excludeId (ງວດທີ່ກຳລັງແກ້) */
+function computePo(records, po, excludeId) {
+  const key = (po || '').trim();
+  if (!key) return null;
+  const lots = records.filter((r) => r._id !== excludeId && (r.form.poNumber || '').trim() === key);
+  if (lots.length === 0) return null;
+  const done = lots.filter((r) => r.status === 'COMPLETED');
+  return {
+    lots: lots.length,
+    maxLot: Math.max(...lots.map((r) => Number(r.form.lotNo) || 1)),
+    received: done.reduce((sum, r) => sum + lotQtyOf(r), 0),
+    cost: done.reduce((sum, r) => sum + (Number(r.form.price) || 0) * lotQtyOf(r), 0),
+    total: Math.max(...lots.map((r) => Number(r.form.poTotalQuantity) || Number(r.form.quantity) || 0)),
+    budget: lots[0].form.budget,
+    closedShort: lots.some((r) => r.poClosedShort),
+    first: lots[0].form, // ງວດຫຼ້າສຸດ (ລາຍການຮຽງໃໝ່ → ເກົ່າ)
+  };
+}
+
+/** ຕາຕະລາງຕໍ່ໜ່ວຍ: S/N ຕໍ່ໜ່ວຍ ຫຼື ຜູກຊັບສິນເດີມ (ເລືອກທາງດຽວຕໍ່ໜ່ວຍ) */
+function UnitsTable({ units, qty, onChange, required }) {
+  const rows = padUnits(units, qty);
+  const [linkRow, setLinkRow] = useState(null);
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulk, setBulk] = useState('');
+
+  const update = (i, patch) => {
+    const next = padUnits(units, qty);
+    next[i] = { ...next[i], ...patch };
+    onChange(next);
+  };
+
+  const applyBulk = () => {
+    const lines = bulk.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const next = padUnits(units, qty);
+    let li = 0;
+    for (let i = 0; i < next.length && li < lines.length; i += 1) {
+      if (next[i].assetId) continue; // ຂ້າມໜ່ວຍທີ່ຜູກຊັບສິນເດີມແລ້ວ
+      next[i] = { ...next[i], serialNumber: lines[li] };
+      li += 1;
+    }
+    onChange(next);
+    setBulk('');
+    setShowBulk(false);
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between bg-gray-50 px-3 py-2 text-xs text-gray-500">
+        <span>
+          {rows.length} ໜ່ວຍ{required ? ' — ຕ້ອງມີ S/N ຫຼື ຜູກຊັບສິນ ທຸກໜ່ວຍ' : ' — S/N ບໍ່ບັງຄັບ'}
+          {required && (() => {
+            const filled = rows.filter((u) => (u.serialNumber || '').trim() || u.assetId).length;
+            return (
+              <b className={`ml-2 ${filled === rows.length ? 'text-emerald-600' : 'text-amber-600'}`}>
+                ໃສ່ແລ້ວ {filled}/{rows.length}
+              </b>
+            );
+          })()}
+        </span>
+        <button type="button" onClick={() => setShowBulk((v) => !v)} className="text-amber-600 hover:underline">
+          ວາງ S/N ຫຼາຍໜ່ວຍ
+        </button>
+      </div>
+      {showBulk && (
+        <div className="p-3 border-b border-gray-100 space-y-2">
+          <textarea
+            rows={4}
+            value={bulk}
+            onChange={(e) => setBulk(e.target.value)}
+            placeholder={'1 ບັນທັດ = 1 ໜ່ວຍ (ຈະຕື່ມໃສ່ແຖວທີ່ຍັງບໍ່ຜູກຊັບສິນຕາມລຳດັບ)\nSN-0001\nSN-0002'}
+            className={inputCls}
+          />
+          <button type="button" onClick={applyBulk} className="text-xs px-3 py-1 rounded-lg bg-amber-500 text-white hover:bg-amber-600">
+            ຕື່ມລົງຕາຕະລາງ
+          </button>
+        </div>
+      )}
+      <div className="max-h-72 overflow-y-auto divide-y divide-gray-100">
+        {rows.map((u, i) => (
+          <div key={i} className="px-3 py-2 flex flex-wrap items-center gap-2 text-sm">
+            <span className="w-8 text-xs text-gray-400">#{i + 1}</span>
+            {u.assetId ? (
+              <>
+                <span className="text-emerald-600 text-xs">
+                  ຜູກຊັບສິນເດີມ: <b>{u.assetTag || u.assetId}</b>
+                  {u.serialNumber ? ` · S/N ${u.serialNumber}` : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => update(i, { assetId: '', assetTag: '' })}
+                  className="text-xs px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50"
+                >
+                  ຍົກເລີກການຜູກ
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={u.serialNumber}
+                  onChange={(e) => update(i, { serialNumber: e.target.value })}
+                  placeholder="Serial Number (S/N)"
+                  className="flex-1 min-w-[10rem] px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setLinkRow(linkRow === i ? null : i)}
+                  className="text-xs px-2 py-1 rounded-lg border border-gray-200 hover:bg-gray-50"
+                >
+                  ຜູກຊັບສິນເດີມ
+                </button>
+                {linkRow === i && (
+                  <AssetCodeLookup
+                    onResolved={(a) => {
+                      update(i, { assetId: a.assetId, assetTag: a.assetTag, serialNumber: a.serialNumber });
+                      setLinkRow(null);
+                    }}
+                    linkedLabel=""
+                  />
+                )}
+              </>
+            )}
+          </div>
+        ))}
+        {rows.length === 0 && <p className="p-3 text-xs text-gray-400">ບໍ່ມີໜ່ວຍ</p>}
+      </div>
     </div>
   );
 }
@@ -461,6 +704,10 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
       return;
     }
     setErrors({});
+    // ຂອງສິ້ນເປືອງ: ຕື່ມຈຳນວນຮັບເລີ່ມຕົ້ນ = ຈຳນວນທີ່ຈັດຊື້
+    if (step === 0 && form.itemType === 'CONSUMABLE' && form.receivedQuantity === '') {
+      set({ receivedQuantity: String(form.quantity) });
+    }
     setStep((s) => Math.min(s + 1, POPR_STEPS.length - 1));
   };
 
@@ -505,8 +752,84 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     persist('COMPLETED');
   };
 
+  // ສ້າງງວດຕໍ່ໄປ: ກັອບຂໍ້ມູນ PO ຈາກງວດກ່ອນ
+  const openNextLot = (r) => {
+    const stat = computePo(records, r.form.poNumber);
+    const remaining = stat ? Math.max(stat.total - stat.received, 1) : 1;
+    setEditingId(null);
+    setForm({
+      ...emptyForm(),
+      itemType: r.itemType,
+      catalogItemId: r.form.catalogItemId,
+      itemName: r.form.itemName,
+      category: r.form.category,
+      unit: r.form.unit,
+      lowStockThreshold: r.form.lowStockThreshold,
+      spec: r.form.spec,
+      budget: r.form.budget,
+      price: r.form.price,
+      vendor: r.form.vendor,
+      vendorStandard: r.form.vendorStandard,
+      warrantyAgreement: r.form.warrantyAgreement,
+      poNumber: r.form.poNumber,
+      poTotalQuantity: stat ? stat.total : r.form.poTotalQuantity,
+      lotNo: (stat ? stat.maxLot : Number(r.form.lotNo) || 1) + 1,
+      quantity: remaining,
+      orderedBy: r.form.orderedBy,
+      orderedByUserId: r.form.orderedByUserId,
+      receivedBy: operatorName,
+      receivedDate: new Date().toISOString().slice(0, 10),
+      deliveryDate: new Date().toISOString().slice(0, 10),
+    });
+    setStep(0);
+    setErrors({});
+    setSubmitError('');
+    setIsOpen(true);
+  };
+
+  const closePoShort = async (r) => {
+    const stat = computePo(records, r.form.poNumber);
+    const reason = window.prompt(
+      `ປິດ PO ${r.form.poNumber} ແບບບໍ່ຄົບ? (ຮັບແລ້ວ ${stat?.received ?? '?'}/${stat?.total ?? '?'} — ຍົກເລີກສ່ວນທີ່ເຫຼືອ)\nເຫດຜົນ (ຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ):`,
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      alert('ກະລຸນາລະບຸເຫດຜົນຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ');
+      return;
+    }
+    try {
+      await api.patch(`/popr-records/${r._id}/close-po-short`, { reason: reason.trim() });
+      await fetchRecords();
+    } catch (err) {
+      alert(apiErr(err, 'ປິດ PO ບໍ່ສຳເລັດ'));
+    }
+  };
+
+  const reopenRecord = async (r) => {
+    const reason = window.prompt(
+      `ເປີດ ${r._id} ຄືນ? ລະບົບຈະຍ້ອນກັບຊັບສິນ/ສະຕ໊ອກທີ່ເກີດຕອນປິດ (ຖ້າຊັບສິນຖືກໃຊ້ແລ້ວຈະປະຕິເສດ).\nເຫດຜົນ (ຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ):`,
+    );
+    if (reason === null) return;
+    if (reason.trim().length < 3) {
+      alert('ກະລຸນາລະບຸເຫດຜົນຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ');
+      return;
+    }
+    try {
+      await api.patch(`/popr-records/${r._id}/reopen`, { reason: reason.trim() });
+      if (detail?._id === r._id) setDetail(null);
+      await fetchRecords();
+    } catch (err) {
+      alert(apiErr(err, 'ເປີດຄືນບໍ່ສຳເລັດ'));
+    }
+  };
+
   const removeRecord = async (id) => {
-    if (!window.confirm('ລຶບບັນທຶກ POPR ນີ້?')) return;
+    const rec = records.find((x) => x._id === id);
+    const msg =
+      rec?.status === 'COMPLETED'
+        ? 'ລຶບ POPR ທີ່ປິດແລ້ວ? ລະບົບຈະຍ້ອນກັບຊັບສິນ/ສະຕ໊ອກກ່ອນ (ຖ້າຊັບສິນຖືກໃຊ້ແລ້ວ ຈະປະຕິເສດ).'
+        : 'ລຶບບັນທຶກ POPR ນີ້?';
+    if (!window.confirm(msg)) return;
     try {
       await api.delete(`/popr-records/${id}`);
       if (detail?._id === id) setDetail(null);
@@ -528,10 +851,26 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     });
   }, [records, search, statusFilter]);
 
+  const poStats = useMemo(() => {
+    const m = {};
+    records.forEach((r) => {
+      const po = (r.form.poNumber || '').trim();
+      if (po && !m[po]) m[po] = computePo(records, po);
+    });
+    return m;
+  }, [records]);
+
   const completedCount = records.filter((r) => r.status === 'COMPLETED').length;
 
   const stepContent = () => {
-    const isGeneral = form.itemType === 'GENERAL';
+    const isConsumable = form.itemType === 'CONSUMABLE';
+    const isElectronic = form.itemType === 'ELECTRONIC';
+    const qty = Number(form.quantity) || 1;
+    const categories = [...new Set(catalog.map((c) => c.category).filter(Boolean))];
+    const poInfo = computePo(records, form.poNumber, editingId);
+    const thisCost = (Number(form.price) || 0) * (Number(form.quantity) || 0);
+    const poOver = !!poInfo && poInfo.total > 0 && poInfo.received + (Number(form.quantity) || 0) > poInfo.total;
+    const costOver = !!poInfo && form.budget !== '' && poInfo.cost + thisCost > Number(form.budget);
     if (step === 0) {
       return (
         <div className="space-y-4">
@@ -556,6 +895,46 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               />
             </Field>
           </div>
+          {form.itemName.trim() &&
+            (form.catalogItemId ? (
+              <p className="text-xs text-emerald-600">ໃຊ້ລາຍການ Catalog ເດີມ: {form.catalogItemId}</p>
+            ) : (
+              <div className="rounded-xl border border-amber-100 bg-amber-50/50 p-3 space-y-2">
+                <p className="text-xs text-amber-700">
+                  ລາຍການນີ້ຍັງບໍ່ມີໃນ Catalog — ລະບົບຈະສ້າງໃໝ່ຕອນປິດ POPR (ຕ້ອງລະບຸໝວດໝູ່ ແລະ ຫົວໜ່ວຍ)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <Field label="ໝວດໝູ່" required error={errors.category}>
+                    <input
+                      type="text"
+                      list="popr-category-options"
+                      value={form.category}
+                      onChange={(e) => set({ category: e.target.value })}
+                      placeholder="ເຊັ່ນ ຄອມພິວເຕີ"
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="ຫົວໜ່ວຍ" required error={errors.unit}>
+                    <input
+                      type="text"
+                      value={form.unit}
+                      onChange={(e) => set({ unit: e.target.value })}
+                      placeholder="ເຊັ່ນ ເຄື່ອງ / ອັນ / ກ່ອງ"
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="ຂັ້ນຕ່ຳສະຕ໊ອກ (ແຈ້ງເຕືອນ)">
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.lowStockThreshold}
+                      onChange={(e) => set({ lowStockThreshold: e.target.value })}
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+              </div>
+            ))}
           <Field label="ຂໍ້ກຳນົດ / ຂໍ້ມູນຈຳເພາະ" required error={errors.spec}>
             <textarea
               rows={2}
@@ -566,7 +945,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
             />
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="ງົບປະມານ (ກີບ)" required error={errors.budget}>
+            <Field label="ງົບປະມານທັງ PO (ກີບ)" required error={errors.budget}>
               <input
                 type="number"
                 min="0"
@@ -575,7 +954,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 className={inputCls}
               />
             </Field>
-            <Field label="ລາຄາຕົວຈິງ (ກີບ)">
+            <Field label="ລາຄາຊື້ ຕໍ່ 1 ໜ່ວຍ (ກີບ)">
               <input
                 type="number"
                 min="0"
@@ -583,6 +962,11 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 onChange={(e) => set({ price: e.target.value })}
                 className={inputCls}
               />
+              {form.price !== '' && (
+                <p className="text-xs text-gray-500 mt-1">
+                  ລວມງວດນີ້: <b>{fmtMoney(Number(form.price) * (Number(form.quantity) || 0))}</b> ກີບ
+                </p>
+              )}
             </Field>
           </div>
           <Field label="ຜູ້ຂາຍ / ຜູ້ສະໜອງ" required error={errors.vendor}>
@@ -622,6 +1006,81 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               />
             </Field>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="ຈຳນວນສັ່ງທັງໝົດຕາມ PO" error={errors.poTotalQuantity}>
+              <input
+                type="number"
+                min="1"
+                value={form.poTotalQuantity}
+                onChange={(e) => set({ poTotalQuantity: e.target.value })}
+                placeholder={`ວ່າງ = ${form.quantity} (PO ງວດດຽວ)`}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="ງວດທີ (ຮັບເປັນລອດ)">
+              <input
+                type="number"
+                min="1"
+                value={form.lotNo}
+                onChange={(e) => set({ lotNo: e.target.value })}
+                className={inputCls}
+              />
+            </Field>
+          </div>
+          {poInfo && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-800 space-y-1">
+              <p>
+                PO ນີ້ມີແລ້ວ {poInfo.lots} ງວດ — ຮັບແລ້ວ <b>{poInfo.received}/{poInfo.total}</b>
+                {poInfo.closedShort ? ' (ປິດແບບບໍ່ຄົບ)' : ''}
+              </p>
+              {!form.vendor.trim() && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    set({
+                      itemType: poInfo.first.itemType,
+                      catalogItemId: poInfo.first.catalogItemId,
+                      itemName: poInfo.first.itemName,
+                      category: poInfo.first.category,
+                      unit: poInfo.first.unit,
+                      spec: poInfo.first.spec,
+                      budget: poInfo.first.budget,
+                      price: poInfo.first.price,
+                      vendor: poInfo.first.vendor,
+                      poTotalQuantity: poInfo.total,
+                      lotNo: poInfo.maxLot + 1,
+                    })
+                  }
+                  className="px-2 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  ໃຊ້ຂໍ້ມູນຂອງ PO ນີ້ (ງວດທີ {poInfo.maxLot + 1})
+                </button>
+              )}
+              {poOver && (
+                <p className="text-red-600">
+                  ⚠ ງວດນີ້ ({Number(form.quantity) || 0}) ເຮັດໃຫ້ຮັບເກີນຈຳນວນສັ່ງ ({poInfo.total}) — ບັນທຶກໄດ້ ແຕ່ຈະມີການເຕືອນໃນ audit
+                </p>
+              )}
+              {costOver && (
+                <p className="text-amber-700">
+                  ⚠ ຍອດຊື້ສະສົມ {fmtMoney(poInfo.cost + thisCost)} ກີບ ເກີນງົບ {fmtMoney(form.budget)} ກີບ
+                </p>
+              )}
+            </div>
+          )}
+          <Field label="ຜູ້ສັ່ງຊື້">
+            <input
+              type="text"
+              value={form.orderedBy}
+              readOnly
+              placeholder="ບໍ່ລະບຸ = ຜູ້ບັນທຶກ POPR (ທ່ານ) — ກົດຄົ້ນຫາເພື່ອປ່ຽນ"
+              className={`${inputCls} bg-gray-50`}
+            />
+            <EmployeeCodeLookup
+              onResolved={(u) => set({ orderedBy: u.name, orderedByUserId: u.userId })}
+              linkedLabel={form.orderedByUserId ? form.orderedBy : ''}
+            />
+          </Field>
           <Field label="ສະຖານະການສັ່ງຊື້" error={errors.orderStatus}>
             <select
               value={form.orderStatus}
@@ -640,6 +1099,54 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     if (step === 1) {
       return (
         <div className="space-y-4">
+          {(() => {
+            const po = (form.poNumber || '').trim();
+            if (!po) return null;
+            const others = records
+              .filter((r) => r._id !== editingId && (r.form.poNumber || '').trim() === po)
+              .sort((x, y) => (Number(x.form.lotNo) || 1) - (Number(y.form.lotNo) || 1));
+            const thisQty = isConsumable
+              ? (form.receivedQuantity !== '' ? Number(form.receivedQuantity) || 0 : Number(form.quantity) || 0)
+              : Number(form.quantity) || 0;
+            const doneQty = others.filter((r) => r.status === 'COMPLETED').reduce((sum, r) => sum + lotQtyOf(r), 0);
+            const total = Math.max(
+              Number(form.poTotalQuantity) || 0,
+              ...others.map((r) => Number(r.form.poTotalQuantity) || 0),
+            ) || Number(form.quantity) || 0;
+            const running = doneQty + thisQty;
+            const remain = total - running;
+            return (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs space-y-2">
+                <p className="font-medium text-amber-800">
+                  ການຮັບແຕ່ລະງວດຂອງ PO {po} — ຮັບສະສົມ <b>{running}/{total}</b>{' '}
+                  {remain > 0 ? `(ຍັງເຫຼືອ ${remain})` : remain === 0 ? '(ຄົບແລ້ວ)' : `(ເກີນ ${-remain})`}
+                </p>
+                <table className="w-full text-left">
+                  <thead className="text-gray-500">
+                    <tr><th className="py-1">ງວດ</th><th>ວັນທີຮັບ</th><th>ເລກໃບຮັບ/ໃບສົ່ງ</th><th className="text-right">ຈຳນວນ</th><th className="text-right">ສະຖານະ</th></tr>
+                  </thead>
+                  <tbody>
+                    {others.map((r) => (
+                      <tr key={r._id} className="border-t border-amber-100">
+                        <td className="py-1">{r.form.lotNo || 1}</td>
+                        <td>{r.form.receivedDate || '-'}</td>
+                        <td>{r.form.goodsReceiptNo || '-'}</td>
+                        <td className="text-right">{lotQtyOf(r)}</td>
+                        <td className="text-right">{r.status === 'COMPLETED' ? 'ຮັບແລ້ວ' : 'ລໍຖ້າ'}</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-amber-200 font-medium">
+                      <td className="py-1">{form.lotNo || 1} (ງວດນີ້)</td>
+                      <td>{form.receivedDate || '-'}</td>
+                      <td>{form.goodsReceiptNo || '-'}</td>
+                      <td className="text-right">{thisQty}</td>
+                      <td className="text-right">ກຳລັງບັນທຶກ</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="ວັນທີຮັບ" required error={errors.receivedDate}>
               <input
@@ -671,42 +1178,99 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               </select>
             </Field>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {!isGeneral && (
-              <Field label="Serial Number (S/N)" required error={errors.serialNumber}>
+          {isConsumable ? (
+            <div className="space-y-2">
+              <div className="rounded-xl border border-purple-100 bg-purple-50/50 p-3 space-y-2">
+                <p className="text-xs font-medium text-purple-700">ຕົວຊ່ວຍນັບເປັນກ່ອງ (ບໍ່ບັງຄັບ)</p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <Field label="ຈຳນວນກ່ອງ" className="w-28">
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.boxCount ?? ''}
+                      onChange={(e) => {
+                        const boxCount = e.target.value;
+                        const total = (Number(boxCount) || 0) * (Number(form.perBox) || 0);
+                        set({ boxCount, ...(boxCount !== '' && form.perBox !== '' ? { receivedQuantity: String(total) } : {}) });
+                      }}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <span className="pb-2 text-gray-400">×</span>
+                  <Field label="ຈຳນວນຕໍ່ກ່ອງ" className="w-28">
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.perBox ?? ''}
+                      onChange={(e) => {
+                        const perBox = e.target.value;
+                        const total = (Number(form.boxCount) || 0) * (Number(perBox) || 0);
+                        set({ perBox, ...(perBox !== '' && form.boxCount !== '' ? { receivedQuantity: String(total) } : {}) });
+                      }}
+                      className={inputCls}
+                    />
+                  </Field>
+                  {form.boxCount !== '' && form.perBox !== '' && (
+                    <span className="pb-2 text-sm text-gray-600">
+                      = <b>{(Number(form.boxCount) || 0) * (Number(form.perBox) || 0)}</b> {form.unit || 'ໜ່ວຍ'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500">
+                  ຕົວຢ່າງ 5 ກ່ອງ × 10 ແທ່ງ = 50. ລາຄາຊື້ ໃສ່ເປັນລາຄາຕໍ່ 1 ໜ່ວຍ (ບໍ່ແມ່ນຕໍ່ກ່ອງ).
+                </p>
+              </div>
+              <Field label="ຈຳນວນທີ່ຮັບເຂົ້າຄັງຈິງ" required error={errors.receivedQuantity} className="sm:w-1/2">
                 <input
-                  type="text"
-                  value={form.serialNumber}
-                  onChange={(e) => set({ serialNumber: e.target.value })}
-                  placeholder="S/N ຂອງເຄື່ອງ"
+                  type="number"
+                  min="0"
+                  value={form.receivedQuantity}
+                  onChange={(e) => set({ receivedQuantity: e.target.value })}
+                  placeholder={`ຈັດຊື້ ${form.quantity}`}
                   className={inputCls}
                 />
               </Field>
-            )}
-            <Field label="Asset Tag / ບາໂຄດສິນຊັບ" required error={errors.assetTag}>
-              <input
-                type="text"
-                value={form.assetTag}
-                onChange={(e) => set({ assetTag: e.target.value, assetId: '' })}
-                placeholder="SC002-001"
-                className={inputCls}
+              <p className="text-xs text-gray-500">
+                ວັດສະດຸສິ້ນເປືອງ: ສະຕ໊ອກຈະບວກຕາມຈຳນວນນີ້ຕອນປິດ POPR — ບໍ່ສ້າງຊັບສິນ/Asset Tag ແລະ ບໍ່ຕ້ອງມີຜູ້ຮັບ.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-gray-700">
+                ຂໍ້ມູນຕໍ່ໜ່ວຍ ({qty} ໜ່ວຍ){isElectronic && <span className="text-red-500"> *</span>}
+              </p>
+              <UnitsTable
+                units={form.units || []}
+                qty={qty}
+                required={isElectronic}
+                onChange={(units) => {
+                  set({ units });
+                  // ຖ້າມີ error ຄ້າງ: ຄຳນວນໃໝ່ທັນທີທີ່ແກ້ ເພື່ອບໍ່ໃຫ້ຂຶ້ນແດງຄ້າງຕອນໃສ່ຄົບແລ້ວ
+                  if (errors.units) {
+                    const e = validateStep(1, { ...form, units });
+                    setErrors((prev) => {
+                      const c = { ...prev };
+                      if (e.units) c.units = e.units;
+                      else delete c.units;
+                      return c;
+                    });
+                  }
+                }}
               />
-              <AssetCodeLookup
-                onResolved={(a) => set({ assetId: a.assetId, assetTag: a.assetTag })}
-                linkedLabel={form.assetId ? form.assetTag : ''}
-              />
-            </Field>
-          </div>
-          <div className="flex flex-wrap gap-5">
-            {!isGeneral && (
+              {errors.units && <p className="text-xs text-red-500">{errors.units}</p>}
+              <p className="text-xs text-gray-500">
+                ແຕ່ລະໜ່ວຍເລືອກທາງດຽວ: ໃສ່ S/N (ລະບົບສ້າງຊັບສິນ + Asset Tag ໃຫ້ຕອນປິດ) ຫຼື ຜູກຊັບສິນທີ່ລົງທະບຽນໄວ້ແລ້ວ
+                (ຈະບໍ່ສ້າງຊ້ຳ). ຊັບສິນບໍ່ບວກສະຕ໊ອກ.
+              </p>
+            </div>
+          )}
+          {isElectronic && (
+            <div className="flex flex-wrap gap-5">
               <Toggle checked={form.snMatch} onChange={(v) => set({ snMatch: v })}>
                 S/N ກົງກັບເອກະສານ
               </Toggle>
-            )}
-            <Toggle checked={form.assetRegistered} onChange={(v) => set({ assetRegistered: v })}>
-              ລົງທະບຽນໃນລະບົບຈັດການສິນຊັບແລ້ວ
-            </Toggle>
-          </div>
+            </div>
+          )}
           {errors.snMatch && <p className="text-xs text-red-500">{errors.snMatch}</p>}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="ຜູ້ຮັບເຄື່ອງ">
@@ -721,7 +1285,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 linkedLabel={form.receivedByUserId ? form.receivedBy : ''}
               />
             </Field>
-            <Field label="ຜູ້ດູແລ/ຜູ້ຄຸ້ມຄອງ">
+            <Field label="ຜູ້ເກັບຮັກສາ (ບໍ່ບັງຄັບ)">
               <input type="text" value={form.custodian} onChange={(e) => set({ custodian: e.target.value })} className={inputCls} />
             </Field>
             <Field label="ສະຖານທີ່">
@@ -739,10 +1303,10 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     }
 
     if (step === 2) {
-      if (isGeneral) {
+      if (!isElectronic) {
         return (
           <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 text-sm text-gray-600">
-            ອຸປະກອນທົ່ວໄປ ບໍ່ຈຳເປັນຕ້ອງຕິດຕັ້ງ OS ຫຼື ຊອບແວຄວາມປອດໄພ — ກົດ "ຕໍ່ໄປ" ໄດ້ເລີຍ.
+            ອຸປະກອນທົ່ວໄປ/ວັດສະດຸສິ້ນເປືອງ ບໍ່ຈຳເປັນຕ້ອງຕິດຕັ້ງ OS ຫຼື ຊອບແວຄວາມປອດໄພ — ກົດ "ຕໍ່ໄປ" ໄດ້ເລີຍ.
           </div>
         );
       }
@@ -819,8 +1383,48 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
       );
     }
 
+    if (isConsumable) {
+      return (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-purple-100 bg-purple-50/60 p-4 text-sm text-purple-800">
+            ວັດສະດຸສິ້ນເປືອງເຂົ້າຄັງ — ບໍ່ຕ້ອງລະບຸຜູ້ຮັບ/ລາຍເຊັນ. ເມື່ອປິດ POPR ສະຕ໊ອກຂອງ "{form.itemName || '—'}" ຈະເພີ່ມ{' '}
+            <b>{form.receivedQuantity === '' ? form.quantity : form.receivedQuantity}</b> {form.unit || 'ໜ່ວຍ'}.
+          </div>
+          <Field label="ວັນທີເຂົ້າຄັງ">
+            <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
+          </Field>
+        </div>
+      );
+    }
+
+    const modeBox = (
+      <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+        <p className="text-xs font-medium text-gray-700">ປ່ອຍແບບໃດ?</p>
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input type="radio" checked={!form.storeInStock} onChange={() => set({ storeInStock: false })} className="mt-1" />
+          <span><b>ມອບໃຫ້ຜູ້ໃຊ້ທັນທີ</b> — ຊັບສິນຢູ່ກັບຜູ້ຮັບ, ສະຕ໊ອກບໍ່ເພີ່ມ</span>
+        </label>
+        <label className="flex items-start gap-2 text-sm cursor-pointer">
+          <input type="radio" checked={!!form.storeInStock} onChange={() => set({ storeInStock: true })} className="mt-1" />
+          <span><b>ເຂົ້າຄັງ</b> — ຊັບສິນ "ວ່າງ", ສະຕ໊ອກ +{qty}, ບໍ່ຕ້ອງເລືອກຜູ້ຮັບ (ຜູ້ຂໍມາເບີກພາຍຫຼັງຕາມໃບຂໍ)</span>
+        </label>
+      </div>
+    );
+    if (form.storeInStock) {
+      return (
+        <div className="space-y-4">
+          {modeBox}
+          {errors.location && <p className="text-xs text-red-500">{errors.location}</p>}
+          <Field label="ວັນທີເຂົ້າຄັງ">
+            <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
+          </Field>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-4">
+        {modeBox}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="ສົ່ງມອບໃຫ້ (ພະນັກງານ/ພະແນກ)" required error={errors.deliveredTo}>
             <input
@@ -834,12 +1438,13 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               linkedLabel={form.deliveredToUserId ? form.deliveredTo : ''}
             />
           </Field>
-          <Field label="ຊື່ຜູ້ໃຊ້ທີ່ມອບໃຫ້" required error={errors.assignedUser}>
+          <Field label="ຜູ້ຮັບ/ຜູ້ໃຊ້ (ເລືອກດ້ວຍລະຫັດພະນັກງານ)" required error={errors.assignedUser}>
             <input
               type="text"
               value={form.assignedUser}
-              onChange={(e) => set({ assignedUser: e.target.value, assignedUserId: '' })}
-              className={inputCls}
+              readOnly
+              placeholder="ກົດຄົ້ນຫາດ້ວຍລະຫັດພະນັກງານ"
+              className={`${inputCls} bg-gray-50`}
             />
             <EmployeeCodeLookup
               onResolved={(u) => set({ assignedUser: u.name, assignedUserId: u.userId })}
@@ -871,7 +1476,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
           <p className="font-semibold text-gray-700">ສະຫຼຸບການຕັ້ງຄ່າ</p>
           <p>ລາຍການ: {form.itemName || '—'} (x{form.quantity})</p>
           <p>ຜູ້ຂາຍ: {form.vendor || '—'} · PO: {form.poNumber || '—'}</p>
-          <p>S/N: {form.serialNumber || '—'} · Asset Tag: {form.assetTag || '—'}</p>
+          <p>ຈຳນວນໜ່ວຍ: {qty} · ຜູກຊັບສິນເດີມ: {(form.units || []).filter((u) => u.assetId).length}</p>
           <p>OS: {form.os || '—'} · AD: {form.domainJoined ? 'ເຊື່ອມແລ້ວ' : 'ຍັງ'} · BitLocker: {form.diskEncryption ? 'ເປີດ' : 'ຍັງ'}</p>
         </div>
       </div>
@@ -935,6 +1540,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 <th className="p-4 font-medium">ລະຫັດ</th>
                 <th className="p-4 font-medium">ລາຍການ</th>
                 <th className="p-4 font-medium">ຜູ້ຂາຍ</th>
+                <th className="p-4 font-medium">ຜູ້ສັ່ງຊື້</th>
                 <th className="p-4 font-medium">ເລກ PO</th>
                 <th className="p-4 font-medium">S/N</th>
                 <th className="p-4 font-medium">Asset Tag</th>
@@ -946,15 +1552,15 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
             <tbody className="divide-y divide-gray-100 text-gray-600">
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="py-12 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td>
+                  <td colSpan="10" className="py-12 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td>
                 </tr>
               ) : loadError ? (
                 <tr>
-                  <td colSpan="9" className="py-12 text-center text-sm text-red-500 px-4">⚠️ {loadError}</td>
+                  <td colSpan="10" className="py-12 text-center text-sm text-red-500 px-4">⚠️ {loadError}</td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="py-12 text-center text-sm text-gray-400">
+                  <td colSpan="10" className="py-12 text-center text-sm text-gray-400">
                     {records.length === 0 ? 'ຍັງບໍ່ມີບັນທຶກ POPR' : 'ບໍ່ພົບລາຍການທີ່ຄົ້ນຫາ'}
                   </td>
                 </tr>
@@ -967,7 +1573,16 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                       <td className="p-4 font-semibold text-gray-900">{r._id}</td>
                       <td className="p-4 font-medium text-gray-800">{f.itemName || '—'}{Number(f.quantity) > 1 ? ` (x${f.quantity})` : ''}</td>
                       <td className="p-4">{f.vendor || '—'}</td>
-                      <td className="p-4">{f.poNumber || '—'}</td>
+                      <td className="p-4">{f.orderedBy || r.createdBy || '—'}</td>
+                      <td className="p-4">
+                        <div>{f.poNumber || '—'}</div>
+                        {f.poNumber && poStats[f.poNumber] && (
+                          <div className="text-[11px] text-gray-400">
+                            ງວດ {f.lotNo || 1} · ຮັບແລ້ວ {poStats[f.poNumber].received}/{poStats[f.poNumber].total}
+                            {poStats[f.poNumber].closedShort ? ' · ປິດບໍ່ຄົບ' : ''}
+                          </div>
+                        )}
+                      </td>
                       <td className="p-4">{f.serialNumber || '—'}</td>
                       <td className="p-4">{f.assetTag || '—'}</td>
                       <td className="p-4">
@@ -1005,6 +1620,37 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                               <Pencil size={15} />
                             </button>
                           )}
+                          {canManage && r.status === 'COMPLETED' && f.poNumber && poStats[f.poNumber]
+                            && poStats[f.poNumber].received < poStats[f.poNumber].total
+                            && !poStats[f.poNumber].closedShort && (
+                            <button
+                              onClick={() => openNextLot(r)}
+                              className="text-xs px-2 py-1 rounded-lg text-blue-600 hover:bg-blue-50 whitespace-nowrap"
+                              title="ສ້າງງວດຮັບຕໍ່ໄປຂອງ PO ນີ້"
+                            >
+                              + ງວດຕໍ່ໄປ
+                            </button>
+                          )}
+                          {canApprove && r.status === 'COMPLETED' && f.poNumber && poStats[f.poNumber]
+                            && poStats[f.poNumber].received < poStats[f.poNumber].total
+                            && !poStats[f.poNumber].closedShort && (
+                            <button
+                              onClick={() => closePoShort(r)}
+                              className="text-xs px-2 py-1 rounded-lg text-gray-500 hover:bg-gray-100 whitespace-nowrap"
+                              title="ຍົກເລີກສ່ວນທີ່ເຫຼືອ ແລະ ປິດ PO"
+                            >
+                              ປິດ PO ບໍ່ຄົບ
+                            </button>
+                          )}
+                          {canApprove && r.status === 'COMPLETED' && (
+                            <button
+                              onClick={() => reopenRecord(r)}
+                              className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50"
+                              title="ເປີດຄືນ"
+                            >
+                              <RotateCcw size={15} />
+                            </button>
+                          )}
                           {canDelete && (
                             <button
                               onClick={() => removeRecord(r._id)}
@@ -1025,6 +1671,11 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
         </div>
       </div>
 
+      <datalist id="popr-category-options">
+        {[...new Set(catalog.map((c) => c.category).filter(Boolean))].map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
       <datalist id="popr-catalog-options">
         {catalog.map((c) => (
           <option key={c._id} value={c.name}>{c._id} — {c.category}</option>
@@ -1092,6 +1743,22 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                     <option key={key} value={key}>{t.label}</option>
                   ))}
                 </select>
+              </div>
+              <div className="mb-4 -mt-2 text-[11px] text-gray-500 space-y-1">
+                {form.itemType === 'ELECTRONIC' && (
+                  <p>ໄອທີ/ເອເລັກໂທຣນິກ: ຕ້ອງມີ S/N ທຸກໜ່ວຍກ່ອນປິດ POPR — ລະບົບສ້າງຊັບສິນ + Asset Tag ຕໍ່ໜ່ວຍ. ຖ້າຍັງບໍ່ມີ S/N ໃຫ້ບັນທຶກຮ່າງໄວ້ກ່ອນ.</p>
+                )}
+                {form.itemType === 'GENERAL' && (
+                  <p>ອຸປະກອນທົ່ວໄປ (ຊັບສິນ ເຊັ່ນ ຕູ້/ໂຕະ/ເກົ້າອີ້): ມີ Asset Tag ຕໍ່ຊິ້ນ ບໍ່ນັບເປັນກ່ອງ, S/N ບໍ່ບັງຄັບ.</p>
+                )}
+                {form.itemType === 'CONSUMABLE' && (
+                  <p>ວັດສະດຸສິ້ນເປືອງ (ປາກກາ/ເຈ້ຍ/ແຟ້ມ): ນັບເປັນກ່ອງ × ຕໍ່ກ່ອງ ເຂົ້າສະຕ໊ອກເປັນຈຳນວນ ບໍ່ມີ Asset Tag.</p>
+                )}
+                {form.itemType === 'GENERAL' && form.price !== '' && Number(form.price) > 0 && Number(form.price) < ASSET_PRICE_THRESHOLD && (
+                  <p className="text-amber-600">
+                    ລາຄາຕໍ່ໜ່ວຍຕ່ຳກວ່າ {fmtMoney(ASSET_PRICE_THRESHOLD)} ກີບ — ອາດເປັນຂອງສິ້ນເປືອງ, ຄວນພິຈາລະນາເລືອກປະເພດ "ວັດສະດຸສິ້ນເປືອງ".
+                  </p>
+                )}
               </div>
               {stepContent()}
             </div>
@@ -1168,18 +1835,23 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 const f = detail.form || {};
                 const rows = [
                   [
-                    ['ລາຍການ', f.itemName], ['ຈຳນວນ', f.quantity],
-                    ['ຂໍ້ກຳນົດ', f.spec], ['ງົບປະມານ', f.budget], ['ລາຄາ', f.price],
+                    ['ລາຍການ', f.itemName], ['ຈຳນວນ (ງວດນີ້)', f.quantity],
+                    ['ງວດທີ', f.lotNo], ['ຈຳນວນສັ່ງທັງ PO', f.poTotalQuantity],
+                    ['ໝວດໝູ່', f.category], ['ຫົວໜ່ວຍ', f.unit],
+                    ['ຂໍ້ກຳນົດ', f.spec], ['ງົບທັງ PO (ກີບ)', f.budget],
+                    ['ລາຄາຊື້/ໜ່ວຍ (ກີບ)', f.price],
+                    ['ລວມງວດນີ້ (ກີບ)', f.price !== '' ? fmtMoney(Number(f.price) * (Number(f.quantity) || 0)) : ''],
                     ['ຜູ້ຂາຍ', f.vendor], ['ຕົງມາດຕະຖານ', f.vendorStandard ? 'ແມ່ນ' : 'ບໍ່'],
                     ['ຮັບປະກັນ', f.warrantyAgreement ? 'ແມ່ນ' : 'ບໍ່'],
-                    ['ເລກ PO', f.poNumber], ['ເລກໃບຮັບ', f.goodsReceiptNo],
+                    ['ຜູ້ສັ່ງຊື້', f.orderedBy || detail.createdBy], ['ເລກ PO', f.poNumber], ['ເລກໃບຮັບ', f.goodsReceiptNo],
                     ['ສະຖານະສັ່ງຊື້', (POPR_ORDER_STATUS[f.orderStatus] || {}).label],
                   ],
                   [
                     ['ວັນທີຮັບ', f.receivedDate], ['ສະພາບກ່ອງ', f.boxCondition],
-                    ['ສະພາບອຸປະກອນ', f.equipmentCondition], ['S/N', f.serialNumber],
+                    ['ສະພາບອຸປະກອນ', f.equipmentCondition],
+                    ['ຈຳນວນຮັບ (ສິ້ນເປືອງ)', f.itemType === 'CONSUMABLE' ? f.receivedQuantity : ''],
                     ['S/N ກົງ', f.snMatch ? 'ແມ່ນ' : 'ບໍ່'], ['Asset Tag', f.assetTag],
-                    ['ຜູກທະບຽນຊັບສິນ', f.assetId ? 'ຜູກແລ້ວ' : 'ບໍ່'], ['ລົງທະບຽນ', f.assetRegistered ? 'ແມ່ນ' : 'ບໍ່'],
+                    ['ຕໍ່ໜ່ວຍ (S/N · Tag)', (f.units || []).map((u, i) => `${i + 1}. ${u.serialNumber || '—'}${u.assetTag ? ` · ${u.assetTag}` : ''}`).join('\n')],
                     ['ຜູ້ຮັບ', f.receivedBy], ['ຜູ້ຮັບ (ບັນຊີ)', f.receivedByUserId ? 'ຜູກແລ້ວ' : 'ບໍ່'],
                     ['ຜູ້ດູແລ', f.custodian], ['ສະຖານທີ່', f.location],
                     ['ສະຖານະສົ່ງຮັບ', (POPR_DELIVERY_STATUS[f.deliveryStatus] || {}).label],
@@ -1206,7 +1878,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                       {rows.map(([k, v]) => (
                         <div key={k} className="flex justify-between gap-2 border-b border-dashed border-gray-100 py-1">
                           <span className="text-gray-400">{k}</span>
-                          <span className="text-gray-700 text-right break-words">{v === '' || v === undefined || v === null ? '—' : v}</span>
+                          <span className="text-gray-700 text-right break-words whitespace-pre-line">{v === '' || v === undefined || v === null ? '—' : v}</span>
                         </div>
                       ))}
                     </div>

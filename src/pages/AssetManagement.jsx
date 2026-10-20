@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, AlertTriangle, X, Clock, CheckCircle, XCircle, Search, Filter } from 'lucide-react';
+import { Plus, AlertTriangle, X, Clock, CheckCircle, XCircle, Search, Filter, Pencil, ArrowUpDown, Ban } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
@@ -12,6 +12,8 @@ export default function AssetManagement() {
   const [searchParams] = useSearchParams();
   const canCreateCatalog = hasPermission('supplies', 'manage');
   const canImportCatalog = hasPermission('supplies', 'import');
+  const canUpdateCatalog = hasPermission('supplies', 'update');
+  const canDeleteCatalog = hasPermission('supplies', 'delete');
   const canApproveRequests = hasPermission('supplies', 'approve');
 
   const [activeTab, setActiveTab] = useState('catalog'); // 'catalog' | 'pending'
@@ -53,9 +55,97 @@ export default function AssetManagement() {
     name: '',
     category: '',
     unit: '',
+    itemType: '',
     stockQty: 0,
     lowStockThreshold: 5,
   });
+  const [editingId, setEditingId] = useState(null); // null = ສ້າງໃໝ່, ມີຄ່າ = ແກ້ໄຂ
+
+  // Modal ປັບສະຕ໊ອກ (ບັງຄັບໃສ່ເຫດຜົນ → ບັນທຶກໃນ audit log)
+  const [adjustItem, setAdjustItem] = useState(null);
+  const [adjustForm, setAdjustForm] = useState({ delta: '', reason: '' });
+  const [adjustError, setAdjustError] = useState('');
+  const [adjusting, setAdjusting] = useState(false);
+
+  const ITEM_TYPE_LABEL = { ASSET: 'ຊັບສິນ (ມີ Asset Tag)', CONSUMABLE: 'ສິ້ນເປືອງ' };
+  const apiMsg = (error, fallback) => {
+    const m = error.response?.data?.msg || error.response?.data?.message;
+    return Array.isArray(m) ? m.join(', ') : m || fallback;
+  };
+
+  const openCreate = () => {
+    setEditingId(null);
+    setErrorMsg('');
+    setFormData({ name: '', category: '', unit: '', itemType: '', stockQty: 0, lowStockThreshold: 5 });
+    setIsModalOpen(true);
+  };
+
+  const openEdit = (item) => {
+    setEditingId(item._id);
+    setErrorMsg('');
+    setFormData({
+      name: item.name || '',
+      category: item.category || '',
+      unit: item.unit || '',
+      itemType: item.itemType || '',
+      stockQty: item.stockQty ?? 0,
+      lowStockThreshold: item.lowStockThreshold ?? 5,
+    });
+    setIsModalOpen(true);
+  };
+
+  const openAdjust = (item) => {
+    setAdjustItem(item);
+    setAdjustForm({ delta: '', reason: '' });
+    setAdjustError('');
+  };
+
+  const handleRecalculateStock = async () => {
+    if (!window.confirm('ຄຳນວນສະຕ໊ອກໃໝ່ຈາກຈຳນວນຊັບສິນທີ່ "ວ່າງ" ຂອງທຸກລາຍການທີ່ມີຊັບສິນ? (ຂອງສິ້ນເປືອງບໍ່ຖືກແຕະ)')) return;
+    try {
+      const res = await api.post('/supply-catalog/recalculate-stock');
+      const body = res.data?.data ?? res.data;
+      const list = (body.changes || []).map((c) => `${c._id} ${c.name}: ${c.before} → ${c.after}`).join('\n');
+      alert(body.changed > 0 ? `ແກ້ສະຕ໊ອກ ${body.changed} ລາຍການ:\n${list}` : 'ສະຕ໊ອກຖືກຕ້ອງຢູ່ແລ້ວ ບໍ່ມີຫຍັງປ່ຽນ');
+      fetchCatalog();
+    } catch (error) {
+      alert(apiMsg(error, 'ຄຳນວນສະຕ໊ອກໃໝ່ບໍ່ສຳເລັດ'));
+    }
+  };
+
+  const handleAdjustSubmit = async (e) => {
+    e.preventDefault();
+    const delta = Number(adjustForm.delta);
+    if (!Number.isInteger(delta) || delta === 0) {
+      setAdjustError('ຈຳນວນປັບຕ້ອງເປັນຈຳນວນເຕັມ ແລະບໍ່ແມ່ນ 0 (ບວກ = ເພີ່ມ, ລົບ = ຫຼຸດ)');
+      return;
+    }
+    if (adjustForm.reason.trim().length < 3) {
+      setAdjustError('ກະລຸນາລະບຸເຫດຜົນ (ຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ)');
+      return;
+    }
+    try {
+      setAdjusting(true);
+      setAdjustError('');
+      await api.patch(`/supply-catalog/${adjustItem._id}/adjust-stock`, { delta, reason: adjustForm.reason.trim() });
+      setAdjustItem(null);
+      fetchCatalog();
+    } catch (error) {
+      setAdjustError(apiMsg(error, 'ປັບສະຕ໊ອກບໍ່ສຳເລັດ'));
+    } finally {
+      setAdjusting(false);
+    }
+  };
+
+  const handleDisable = async (item) => {
+    if (!window.confirm(`ປິດໃຊ້ງານລາຍການ "${item.name}"? (ບໍ່ລຶບຖາວອນ; ຖ້າຍັງມີຊັບສິນອ້າງອີງຈະຖືກປະຕິເສດ)`)) return;
+    try {
+      await api.delete(`/supply-catalog/${item._id}`);
+      fetchCatalog();
+    } catch (error) {
+      alert(apiMsg(error, 'ປິດໃຊ້ງານບໍ່ສຳເລັດ'));
+    }
+  };
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -189,13 +279,20 @@ export default function AssetManagement() {
     try {
       setSubmitting(true);
       setErrorMsg('');
-      await api.post('/supply-catalog', formData);
+      const { stockQty, itemType, ...rest } = formData;
+      const body = { ...rest, ...(itemType ? { itemType } : {}) };
+      if (editingId) {
+        // ສະຕ໊ອກບໍ່ແກ້ຜ່ານນີ້ — ໃຊ້ "ປັບສະຕ໊ອກ" (ມີ audit + ເຫດຜົນ)
+        await api.patch(`/supply-catalog/${editingId}`, body);
+      } else {
+        await api.post('/supply-catalog', { ...body, stockQty: itemType === 'ASSET' ? 0 : stockQty });
+      }
       setIsModalOpen(false);
-      // Reset form
-      setFormData({ name: '', category: '', unit: '', stockQty: 0, lowStockThreshold: 5 });
+      setEditingId(null);
+      setFormData({ name: '', category: '', unit: '', itemType: '', stockQty: 0, lowStockThreshold: 5 });
       fetchCatalog(); // Refresh list
     } catch (error) {
-      setErrorMsg(error.response?.data?.msg || error.response?.data?.message || 'ເກີດຂໍ້ຜິດພາດໃນການບັນທຶກຂໍ້ມູນ');
+      setErrorMsg(apiMsg(error, 'ເກີດຂໍ້ຜິດພາດໃນການບັນທຶກຂໍ້ມູນ'));
     } finally {
       setSubmitting(false);
     }
@@ -224,7 +321,7 @@ export default function AssetManagement() {
     if (searchParams.get('create') === '1') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab('catalog');
-      setIsModalOpen(true);
+      openCreate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('create')]);
@@ -264,11 +361,20 @@ export default function AssetManagement() {
               />
               {canCreateCatalog && (
                 <button
-                  onClick={() => setIsModalOpen(true)}
+                  onClick={handleRecalculateStock}
+                  title="ແກ້ສະຕ໊ອກທີ່ບໍ່ກົງກັບຈຳນວນຊັບສິນວ່າງ"
+                  className="border border-gray-200 text-gray-600 hover:bg-gray-50 px-4 py-2 rounded-xl text-sm font-medium transition"
+                >
+                  ຄຳນວນສະຕ໊ອກໃໝ່
+                </button>
+              )}
+              {canCreateCatalog && (
+                <button
+                  onClick={openCreate}
                   className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
                 >
                   <Plus size={18} />
-                  <span>ເພີ່ມລາຍການໃໝ່</span>
+                  <span>ເພີ່ມລາຍການ Catalog</span>
                 </button>
               )}
             </div>
@@ -327,6 +433,7 @@ export default function AssetManagement() {
             <div className="divide-y divide-gray-100">
               {pendingRequests.map((req) => {
                 const requesterName =
+                  [req.requestedBy?.firstName, req.requestedBy?.lastName].filter(Boolean).join(' ') ||
                   req.requestedBy?.name || req.requestedBy?.email ||
                   req.userId?.name || req.userId?.email ||
                   req.createdBy?.name || 'ບໍ່ລະບຸຜູ້ຂໍ';
@@ -480,16 +587,18 @@ export default function AssetManagement() {
                 <th className="p-4 font-medium">ລະຫັດ (_id)</th>
                 <th className="p-4 font-medium">ຊື່ລາຍການ</th>
                 <th className="p-4 font-medium">ໝວດໝູ່</th>
+                <th className="p-4 font-medium">ປະເພດ</th>
                 <th className="p-4 font-medium">ຫົວໜ່ວຍ</th>
                 <th className="p-4 font-medium">ຈຳນວນຄົງເຫຼືອ (Stock)</th>
                 <th className="p-4 font-medium">ຈຳນວນຂັ້ນຕ່ຳ</th>
                 <th className="p-4 font-medium">ສະຖານະ</th>
+                {(canUpdateCatalog || canDeleteCatalog) && <th className="p-4 font-medium text-center">ຈັດການ</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-gray-600">
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="py-12 text-center text-sm text-gray-400">
+                  <td colSpan="9" className="py-12 text-center text-sm text-gray-400">
                     ກຳລັງໂຫຼດຂໍ້ມູນ...
                   </td>
                 </tr>
@@ -502,6 +611,7 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                       <td className="p-4 font-semibold text-gray-900">{item._id}</td>
                       <td className="p-4 font-medium text-gray-800">{item.name}</td>
                       <td className="p-4">{item.category}</td>
+                      <td className="p-4 text-xs">{ITEM_TYPE_LABEL[item.itemType] || '—'}</td>
                       <td className="p-4">{item.unit}</td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
@@ -518,12 +628,33 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                           {item.isActive ? 'ເປີດໃຊ້ງານ' : 'ປິດໃຊ້ງານ'}
                         </span>
                       </td>
+                      {(canUpdateCatalog || canDeleteCatalog) && (
+                        <td className="p-4">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {canUpdateCatalog && (
+                              <button onClick={() => openEdit(item)} title="ແກ້ໄຂ" className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50">
+                                <Pencil size={15} />
+                              </button>
+                            )}
+                            {canUpdateCatalog && item.itemType !== 'ASSET' && (
+                              <button onClick={() => openAdjust(item)} title="ປັບສະຕ໊ອກ" className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50">
+                                <ArrowUpDown size={15} />
+                              </button>
+                            )}
+                            {canDeleteCatalog && item.isActive && (
+                              <button onClick={() => handleDisable(item)} title="ປິດໃຊ້ງານ" className="p-1.5 rounded-lg text-red-500 hover:bg-red-50">
+                                <Ban size={15} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan="7" className="py-12 text-center text-sm text-gray-400">
+                  <td colSpan="9" className="py-12 text-center text-sm text-gray-400">
                     {assets.length === 0 ? 'ບໍ່ມີຂໍ້ມູນລາຍການອຸປະກອນ' : 'ບໍ່ພົບລາຍການທີ່ກົງກັບການຄົ້ນຫາ'}
                   </td>
                 </tr>
@@ -537,7 +668,7 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
 
         {/* TAB: POPR — ຂະບວນການຈັດຊື້/ນຳເຂົ້າອຸປະກອນ */}
           {activeTab === 'popr' && canCreateCatalog && (
-            <PoprWorkflow catalog={assets} canManage={canCreateCatalog} />
+            <PoprWorkflow catalog={assets} canManage={canCreateCatalog} onChanged={fetchCatalog} />
         )}
       </div>
 
@@ -546,7 +677,7 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden animate-in fade-in duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h3 className="text-lg font-bold text-gray-800">ເພີ່ມລາຍການອຸປະກອນໃໝ່</h3>
+              <h3 className="text-lg font-bold text-gray-800">{editingId ? `ແກ້ໄຂລາຍການ ${editingId}` : 'ເພີ່ມລາຍການອຸປະກອນໃໝ່'}</h3>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="text-gray-400 hover:text-gray-600 transition"
@@ -601,7 +732,22 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">ປະເພດ</label>
+                <select
+                  name="itemType"
+                  value={formData.itemType}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 bg-white"
+                >
+                  <option value="">— ບໍ່ລະບຸ —</option>
+                  <option value="ASSET">ຊັບສິນ (ມີ Asset Tag — ສະຕ໊ອກນັບຈາກຊັບສິນວ່າງ)</option>
+                  <option value="CONSUMABLE">ວັດສະດຸສິ້ນເປືອງ (ສະຕ໊ອກປັບດ້ວຍຕົວເລກ)</option>
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {!editingId && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ຈຳນວນເລີ່ມຕົ້ນ (Stock Qty)</label>
                   <input
@@ -609,11 +755,13 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                     name="stockQty"
                     min="0"
                     required
-                    value={formData.stockQty}
+                    disabled={formData.itemType === 'ASSET'}
+                    value={formData.itemType === 'ASSET' ? 0 : formData.stockQty}
                     onChange={handleInputChange}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 disabled:bg-gray-50"
                   />
                 </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ຈຳນວນເຕືອນຂັ້ນຕຳ່ (Threshold)</label>
@@ -643,6 +791,50 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition shadow-sm disabled:opacity-50"
                 >
                   {submitting ? 'ກຳລັງບັນທຶກ...' : 'ບັນທຶກຂໍ້ມູນ'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Adjust Stock Modal */}
+      {adjustItem && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-800">ປັບສະຕ໊ອກ — {adjustItem.name}</h3>
+              <button onClick={() => setAdjustItem(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleAdjustSubmit} className="p-6 space-y-4">
+              {adjustError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">{adjustError}</div>
+              )}
+              <p className="text-xs text-gray-500">ສະຕ໊ອກປັດຈຸບັນ: <b>{adjustItem.stockQty}</b> {adjustItem.unit}</p>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">ຈຳນວນທີ່ປັບ (ບວກ = ເພີ່ມ, ລົບ = ຫຼຸດ)</label>
+                <input
+                  type="number"
+                  value={adjustForm.delta}
+                  onChange={(e) => setAdjustForm((f) => ({ ...f, delta: e.target.value }))}
+                  placeholder="ເຊັ່ນ -5 ຫຼື 20"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">ເຫດຜົນ <span className="text-red-500">*</span></label>
+                <textarea
+                  rows={2}
+                  value={adjustForm.reason}
+                  onChange={(e) => setAdjustForm((f) => ({ ...f, reason: e.target.value }))}
+                  placeholder="ເຊັ່ນ ນັບສະຕ໊ອກຈິງຕ່ຳກວ່າລະບົບ"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
+                <button type="button" onClick={() => setAdjustItem(null)} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50">ຍົກເລີກ</button>
+                <button type="submit" disabled={adjusting} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                  {adjusting ? 'ກຳລັງບັນທຶກ...' : 'ບັນທຶກ'}
                 </button>
               </div>
             </form>

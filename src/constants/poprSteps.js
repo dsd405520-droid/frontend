@@ -33,10 +33,13 @@ export const POPR_STATUS = {
     COMPLETED: { label: 'ສຳເລັດ', className: 'bg-emerald-100 text-emerald-700' },
 };
 
-// ປະເພດອຸປະກອນ: ELECTRONIC ຕ້ອງມີ S/N, OS, ຄວາມປອດໄພ · GENERAL ບໍ່ຈຳເປັນ
+// ປະເພດອຸປະກອນ:
+//  ELECTRONIC = ຕ້ອງມີ S/N ຕໍ່ໜ່ວຍ, OS, ຄວາມປອດໄພ · GENERAL = ຊັບສິນທົ່ວໄປ (ບໍ່ຕ້ອງ S/N/OS)
+//  CONSUMABLE = ວັດສະດຸສິ້ນເປືອງ — ເຂົ້າຄັງ (ບວກສະຕ໊ອກ) ບໍ່ສ້າງຊັບສິນ ແລະ ບໍ່ຕ້ອງມີຜູ້ຮັບ
 export const POPR_ITEM_TYPE = {
     ELECTRONIC: { label: 'ອຸປະກອນໄອທີ / ເອເລັກໂທຣນິກ', className: 'bg-blue-100 text-blue-700' },
     GENERAL: { label: 'ອຸປະກອນທົ່ວໄປ', className: 'bg-gray-100 text-gray-600' },
+    CONSUMABLE: { label: 'ວັດສະດຸສິ້ນເປືອງ (ເຂົ້າຄັງ)', className: 'bg-purple-100 text-purple-700' },
 };
 
 // ສະຖານະຍ່ອຍພາຍໃນໄລຍະ P (ຈັດຫາ/ຈັດຊື້): PENDING → PROCESS
