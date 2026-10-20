@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Bell, CheckCheck, Loader2, MailOpen } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { API_BASE_URL } from '../config';
+import { getNotificationPath } from '../utils/notificationRoute';
 
 export default function Notifications() {
   const [notifs, setNotifs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   const token = localStorage.getItem('token');
 
@@ -41,6 +44,12 @@ export default function Notifications() {
     fetchNotifications();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const openNotification = (item) => {
+    if (!item.isRead) handleMarkAsRead(item._id);
+    const path = getNotificationPath(item);
+    if (path) navigate(path);
+  };
 
   const handleMarkAsRead = async (id) => {
     try {
@@ -105,7 +114,7 @@ export default function Notifications() {
             notifs.map((item) => (
               <div 
                 key={item._id} 
-                onClick={() => !item.isRead && handleMarkAsRead(item._id)}
+                onClick={() => openNotification(item)}
                 className={`p-4 flex items-center justify-between transition cursor-pointer ${
                   !item.isRead ? 'bg-amber-50/40 hover:bg-amber-50/70' : 'hover:bg-gray-50'
                 }`}

@@ -6,7 +6,7 @@ import MainLayout from '../layouts/MainLayout';
 import { API_BASE_URL } from '../config';
 
 export default function Announcements() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canCreate = hasPermission('announcements', 'create');
   const canUpdate = hasPermission('announcements', 'update'); // pin/unpin ໃຊ້ action 'update' ຕາມ backend
   const canDelete = hasPermission('announcements', 'delete');
@@ -64,6 +64,18 @@ export default function Announcements() {
     fetchAnnouncements();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ກົດ notification ປະກາດ → ເປີດລາຍລະອຽດປະກາດນັ້ນທັນທີ (?open=<id>)
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || items.length === 0) return;
+    const target = items.find((a) => String(a._id) === openId);
+    if (target) {
+      handleOpenDetail(target);
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, searchParams.get('open')]);
 
   // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ສ້າງປະກາດ ອັດຕະໂນມັດ
   useEffect(() => {

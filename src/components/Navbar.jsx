@@ -8,6 +8,7 @@ import {
 import { canSeePage, canSeePath, canCreateFromMenu, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 import { getSocket } from '../utils/socket';
+import { getNotificationPath } from '../utils/notificationRoute';
 
 // ສີແຖບບອກສະຖານະ (role) ຂອງຜູ້ໃຊ້ — ອີງຕາມລະດັບຄວາມສ່ຽງ: ສິດຍິ່ງສູງ ສີຍິ່ງແຮງ/ເຕືອນ,
 // ສິດພື້ນຖານໃຊ້ສີສະຫງົບ. Role ໃດທີ່ບໍ່ຢູ່ໃນລາຍການນີ້ (ສ້າງເອງໃໝ່ຜ່ານໜ້າ "ສິດ ແລະ ບົດບາດ")
@@ -438,6 +439,16 @@ export default function Navbar({ onMenuClick }) {
     }
   };
 
+  // ກົດ notification → ໝາຍວ່າອ່ານ ແລະ ໄປຫາໜ້າ/popup ທີ່ກ່ຽວຂ້ອງ
+  const openNotification = (item) => {
+    if (!item.isRead) markNotifRead(item._id);
+    const path = getNotificationPath(item);
+    if (path) {
+      setNotifOpen(false);
+      navigate(path);
+    }
+  };
+
   const formatNotifTime = (dateStr) => {
     if (!dateStr) return '';
     return new Date(dateStr).toLocaleString(undefined, {
@@ -580,7 +591,7 @@ export default function Navbar({ onMenuClick }) {
                   notifs.map((item) => (
                     <button
                       key={item._id}
-                      onClick={() => !item.isRead && markNotifRead(item._id)}
+                      onClick={() => openNotification(item)}
                       className={`w-full text-left px-4 py-3 flex items-start gap-3 transition ${
                         !item.isRead ? 'bg-amber-50/50 hover:bg-amber-50' : 'hover:bg-gray-50'
                       }`}
