@@ -39,7 +39,7 @@ export function canView(moduleKey) {
 // ສິດ read ຍັງຄົງໄວ້ ເພື່ອໃຫ້ລະບົບດຶງຂໍ້ມູນ (dropdown, ຊື່ສາຂາ/ພະແນກ, ປະເພດບັນຫາ...) ໄດ້ປົກກະຕິ
 // ສະເພາະການສະແດງເມນູ / ໜ້າ / ປຸ່ມສ້າງ / ຜົນການຄົ້ນຫາ ເທົ່ານັ້ນທີ່ຖືກເຊື່ອງ
 const HIDDEN_PAGES_BY_ROLE = {
-    EMPLOYEE: ['ticket-types', 'roles', 'branches', 'departments'],
+    EMPLOYEE: ['ticket-types', 'roles', 'branches', 'departments', 'users'],
 };
 
 // ໜ້າທີ່ຕ້ອງເຊື່ອງຕາມ path (ໃຊ້ເມື່ອ module ຖືກໃຊ້ຮ່ວມກັບໜ້າອື່ນທີ່ຍັງຕ້ອງເຫັນ)

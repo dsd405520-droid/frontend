@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, Link, useLocation } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
-import { canSeePage, canSeePath, logout } from '../utils/permissions';
+import { canSeePage, canSeePath, hasPermission, logout } from '../utils/permissions';
 
 function isTokenExpired(token) {
   try {
@@ -12,7 +12,7 @@ function isTokenExpired(token) {
   }
 }
 
-export default function ProtectedRoute({ children, module }) {
+export default function ProtectedRoute({ children, module, action }) {
   const token = localStorage.getItem('token');
   const location = useLocation();
 
@@ -39,7 +39,9 @@ export default function ProtectedRoute({ children, module }) {
   const modules = Array.isArray(module) ? module : module ? [module] : [];
   const allowed =
     (modules.length === 0 || modules.some((m) => canSeePage(m))) &&
-    canSeePath(location.pathname);
+    canSeePath(location.pathname) &&
+    // action (ຖ້າລະບຸ) = ຕ້ອງມີສິດ action ນັ້ນ ບໍ່ແມ່ນພຽງ read (ເຊັ່ນ ໜ້າແມ່ແບບຄຳຕອບຕ້ອງມີ update)
+    (!action || modules.length === 0 || hasPermission(modules[0], action));
 
   if (!allowed) {
     return (

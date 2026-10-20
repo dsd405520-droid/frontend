@@ -130,6 +130,21 @@ export default function Issues() {
   const canCreateTicketType = canCreateFromMenu('ticket-types');
   const canAssign = hasPermission('tickets', 'assign');
   const canUpdateStatus = hasPermission('tickets', 'update');
+  // id ຂອງຜູ້ໃຊ້ປັດຈຸບັນ ຈາກ JWT (currentUser ໂຫຼດສະເພາະຜູ້ມີສິດ assign)
+  const tokenUserId = (() => {
+    try {
+      return JSON.parse(atob(token.split('.')[1])).sub;
+    } catch {
+      return null;
+    }
+  })();
+  // ປ່ຽນສະຖານະໄດ້ສະເພາະ Agent ທີ່ຖືກມອບໝາຍ ticket ນັ້ນ ຫຼື ຜູ້ມີສິດ assign (ກົງກັບກົດຂອງ API)
+  const canChangeStatusOf = (t) => {
+    if (!canUpdateStatus || !t) return false;
+    if (canAssign) return true;
+    const assignedId = String(t.assignedAgent?._id ?? t.assignedAgent ?? '');
+    return !!assignedId && assignedId === String(tokenUserId);
+  };
   const canCreateTicket = hasPermission('tickets', 'create');
   const canImportTickets = hasPermission('tickets', 'import');
 
@@ -1427,7 +1442,7 @@ export default function Issues() {
               )}
 
               {/* ປຸ່ມປ່ຽນສະຖານະ */}
-              {canUpdateStatus && (ALLOWED_TRANSITIONS[selectedTicket.status] || []).length > 0 && (
+              {canChangeStatusOf(selectedTicket) && (ALLOWED_TRANSITIONS[selectedTicket.status] || []).length > 0 && (
                 <div>
                   <div className="text-xs text-gray-400 mb-2">ປ່ຽນສະຖານະ</div>
                   <div className="flex flex-wrap gap-2">

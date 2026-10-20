@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, BookOpen, Plus, Loader2, X, ThumbsUp, ThumbsDown, Eye, Maximize2, ExternalLink } from 'lucide-react';
+import { Search, BookOpen, Plus, Loader2, X, ThumbsUp, ThumbsDown, Eye, Maximize2, ExternalLink, BarChart3 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
@@ -46,6 +46,32 @@ export default function KnowledgeBase() {
   const canManageKb = hasPermission('kb', 'publish');
   const canUpdateArticle = hasPermission('kb', 'update');
   const canDeleteArticle = hasPermission('kb', 'delete');
+
+  // ສະຖິຕິບົດຄວາມ (ສະເພາະຜູ້ມີສິດ publish)
+  const [showStats, setShowStats] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState('');
+
+  const toggleStats = async () => {
+    const next = !showStats;
+    setShowStats(next);
+    if (!next) return;
+    setStatsLoading(true);
+    setStatsError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/kb-articles/analytics`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || 'ໂຫຼດສະຖິຕິບໍ່ສຳເລັດ');
+      setStats(body?.data ?? body);
+    } catch (err) {
+      setStatsError(err.message);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
 
   const [editingId, setEditingId] = useState(null); // null = create mode, else PATCH this id
   const [statusSubmitting, setStatusSubmitting] = useState(false);
@@ -422,6 +448,67 @@ export default function KnowledgeBase() {
             </div>
           )}
         </div>
+
+        {canManageKb && (
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+            <button
+              type="button"
+              onClick={toggleStats}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 rounded-xl"
+            >
+              <span className="flex items-center gap-2"><BarChart3 size={18} className="text-amber-500" /> ສະຖິຕິບົດຄວາມ — ເບິ່ງຫຼາຍທີ່ສຸດ / ມີປະໂຫຍດໜ້ອຍທີ່ສຸດ</span>
+              <span className="text-xs text-gray-400">{showStats ? 'ເຊື່ອງ' : 'ສະແດງ'}</span>
+            </button>
+            {showStats && (
+              <div className="px-4 pb-4 border-t border-gray-100 pt-3">
+                {statsLoading ? (
+                  <div className="py-6 text-center text-gray-400"><Loader2 className="animate-spin inline" size={18} /></div>
+                ) : statsError ? (
+                  <p className="text-sm text-red-600">{statsError}</p>
+                ) : stats && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><Eye size={14} /> ເບິ່ງຫຼາຍທີ່ສຸດ (Top 10)</p>
+                      {(stats.mostViewed || []).length === 0 ? (
+                        <p className="text-sm text-gray-400">ຍັງບໍ່ມີຂໍ້ມູນ</p>
+                      ) : (
+                        <ol className="space-y-1">
+                          {stats.mostViewed.map((a, i) => (
+                            <li key={a._id} className="flex items-center gap-2 text-sm">
+                              <span className="w-5 text-gray-400 text-xs">{i + 1}.</span>
+                              <button type="button" onClick={() => openDetail(a._id)} className="flex-1 min-w-0 text-left truncate text-gray-800 hover:text-amber-600 hover:underline">{a.title}</button>
+                              <span className="shrink-0 text-xs text-gray-500">{a.viewCount || 0} ຄັ້ງ</span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1"><ThumbsDown size={14} /> ມີປະໂຫຍດໜ້ອຍທີ່ສຸດ (Top 10)</p>
+                      {(stats.leastHelpful || []).length === 0 ? (
+                        <p className="text-sm text-gray-400">ຍັງບໍ່ມີຄົນໃຫ້ຄະແນນ</p>
+                      ) : (
+                        <ol className="space-y-1">
+                          {stats.leastHelpful.map((a, i) => {
+                            const total = (a.helpfulCount || 0) + (a.notHelpfulCount || 0);
+                            const pct = total ? Math.round(((a.notHelpfulCount || 0) / total) * 100) : 0;
+                            return (
+                              <li key={a._id} className="flex items-center gap-2 text-sm">
+                                <span className="w-5 text-gray-400 text-xs">{i + 1}.</span>
+                                <button type="button" onClick={() => openDetail(a._id)} className="flex-1 min-w-0 text-left truncate text-gray-800 hover:text-amber-600 hover:underline">{a.title}</button>
+                                <span className="shrink-0 text-xs text-red-600">👎 {a.notHelpfulCount || 0}/{total} ({pct}%)</span>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
           <div className="relative w-full">

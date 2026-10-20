@@ -13,6 +13,7 @@ import RolesManagement from './pages/RolesManagement';
 import BranchesManagement from './pages/BranchesManagement';
 import Announcements from './pages/Announcements';
 import Notifications from './pages/Notifications';
+import CannedResponses from './pages/CannedResponses';
 import Reports from './pages/Reports';
 import AuditLogs from './pages/AuditLogs';
 import Settings from './pages/Settings';
@@ -46,6 +47,7 @@ export default function App() {
         <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
 
         {/* ການບໍລິການ / Tickets */}
+        <Route path="/canned-responses" element={<ProtectedRoute module="tickets" action="update"><CannedResponses /></ProtectedRoute>} />
         <Route path="/issues" element={<ProtectedRoute module="tickets"><Issues /></ProtectedRoute>} />
         <Route path="/issues/:id" element={<ProtectedRoute module="tickets"><TicketDetail /></ProtectedRoute>} />
         <Route path="/issues/:id/chat" element={<ProtectedRoute module="tickets"><TicketChat /></ProtectedRoute>} />

@@ -22,10 +22,11 @@ import {
   FileText,
   Settings,
   Tag,
+  MessageSquare,
   X
 } from 'lucide-react';
 import { LogOut } from 'lucide-react';
-import { canSeePage, canSeePath, logout, getCurrentUser } from '../utils/permissions';
+import { canSeePage, canSeePath, hasPermission, logout, getCurrentUser } from '../utils/permissions';
 import api from '../services/api';
 import { getOrgSettings, applySystemName, DEFAULT_SYSTEM_NAME } from '../utils/orgSettings';
 import { useBranch } from '../contexts/BranchContext';
@@ -65,6 +66,7 @@ const MENU_SECTIONS = [
     heading: 'ການບໍລິການ',
     items: [
       { to: '/issues', label: 'ປັນຫາທີ່ແຈ້ງເຂົ້າມາ', icon: Ticket, module: 'tickets', badgeKey: 'tickets' },
+      { to: '/canned-responses', label: 'ແມ່ແບບຄຳຕອບ', icon: MessageSquare, module: 'tickets', action: 'update' },
       { to: '/sla-management', label: 'ການຈັດການ SLA', icon: Clock, module: 'sla' },
       { to: '/ticket-types', label: 'ປະເພດບັນຫາ', icon: Tag, module: 'ticket-types' },
       { to: '/knowledge-base', label: 'ຖານຂໍ້ມູນຄວາມຮູ້ / FAQ', icon: BookOpen, module: 'kb' },
@@ -267,7 +269,7 @@ export default function Sidebar({ open = false, onClose }) {
         {/* Menu List — ຄັດຕອງແຕ່ລະລາຍການດ້ວຍ canView(module) ກ່ອນສະແດງ */}
         <div className="flex-1 p-4 space-y-6">
           {MENU_SECTIONS.map((section) => {
-            const visibleItems = section.items.filter((item) => canViewAny(item.module) && canSeePath(item.to));
+            const visibleItems = section.items.filter((item) => canViewAny(item.module) && canSeePath(item.to) && (!item.action || hasPermission(item.module, item.action)));
             if (visibleItems.length === 0) return null;
 
             return (

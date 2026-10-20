@@ -9,6 +9,87 @@ import { getSocket } from '../utils/socket';
 import { useBranch } from '../contexts/BranchContext';
 import { API_BASE_URL } from '../config';
 
+// ===== ເສັ້ນຂັ້ນຕອນຂອງການຈອງ: ຮ້ອງຂໍຫ້ອງ → ລໍຖ້າແກ້ໄຂ → ລໍຖ້າອະນຸມັດ → ຈອງສຳເລັດ =====
+// ບໍ່ສະແດງເມື່ອ: ຍົກເລີກ / ຖືກປະຕິເສດ / ກຳລັງໃຊ້ງານ (check-in ຫຼື ຢູ່ໃນຊ່ວງເວລາ) / ໃຊ້ງານແລ້ວ (ຈົບ ຫຼື check-out)
+const BOOKING_PROGRESS_STEPS = [
+  { key: 'requested', label: 'ຮ້ອງຂໍຫ້ອງ' },
+  { key: 'editing', label: 'ລໍຖ້າແກ້ໄຂ' },
+  { key: 'approval', label: 'ລໍຖ້າແອັດມິນອະນຸມັດ' },
+  { key: 'booked', label: 'ຈອງສຳເລັດ' },
+];
+
+function getBookingProgress(b) {
+  if (!b) return null;
+  if (b.status === 'CANCELLED' || b.status === 'REJECTED') return null;
+  if (b.checkedInAt || b.checkedOutAt) return null;
+  const now = Date.now();
+  const start = b.startAt ? new Date(b.startAt).getTime() : null;
+  const end = b.endAt ? new Date(b.endAt).getTime() : null;
+  if (end !== null && end <= now) return null; // ໃຊ້ງານແລ້ວ
+  if (start !== null && start <= now) return null; // ກຳລັງໃຊ້ງານ
+
+  const needsEdit = !!b.changeRequestedAt;
+  const awaitingApproval = b.status === 'PENDING' || (b.pendingStartAt && b.pendingEndAt);
+  // current = index ຂອງຂັ້ນຕອນປັດຈຸບັນ
+  const current = needsEdit ? 1 : awaitingApproval ? 2 : 3;
+  return { current, needsEdit };
+}
+
+function BookingProgress({ booking }) {
+  const progress = getBookingProgress(booking);
+  if (!progress) return null;
+  const { current, needsEdit } = progress;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-100" aria-label="ຂັ້ນຕອນການຈອງ">
+      <div className="flex items-start">
+        {BOOKING_PROGRESS_STEPS.map((step, i) => {
+          const isBooked = step.key === 'booked';
+          const skipped = step.key === 'editing' && !needsEdit && current > 1;
+          const done = !skipped && (i < current || (isBooked && current === 3));
+          const active = i === current && !(isBooked && current === 3);
+          const alert = active && step.key === 'editing';
+
+          let circle = 'bg-gray-100 text-gray-400 border border-gray-200';
+          let text = 'text-gray-400';
+          let content = i + 1;
+          if (skipped) {
+            circle = 'bg-gray-50 text-gray-300 border border-dashed border-gray-300';
+            text = 'text-gray-300';
+            content = '–';
+          } else if (done) {
+            circle = 'bg-emerald-500 text-white border border-emerald-500';
+            text = 'text-emerald-700';
+            content = '✓';
+          } else if (alert) {
+            circle = 'bg-red-500 text-white border border-red-500 ring-4 ring-red-100 animate-pulse';
+            text = 'text-red-600 font-semibold';
+            content = '!';
+          } else if (active) {
+            circle = 'bg-violet-500 text-white border border-violet-500 ring-4 ring-violet-100 animate-pulse';
+            text = 'text-violet-700 font-semibold';
+          }
+
+          const lineDone = i < current && !(skipped);
+          return (
+            <div key={step.key} className="flex-1 flex flex-col items-center relative min-w-0">
+              {i > 0 && (
+                <div
+                  className={`absolute top-3 right-1/2 w-full h-0.5 -z-0 ${i <= current ? (skipped ? 'bg-gray-200' : 'bg-emerald-400') : 'bg-gray-200'}`}
+                />
+              )}
+              <div className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold ${circle}`}>
+                {content}
+              </div>
+              <span className={`mt-1.5 text-[11px] leading-tight text-center px-0.5 ${text}`}>{step.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function MeetingRooms() {
   const { selectedBranchId, branches } = useBranch();
   const [searchParams] = useSearchParams();
@@ -22,6 +103,11 @@ export default function MeetingRooms() {
   const canSeeAdminTab = canApproveBookings || canManageRooms;
 
   const [activeTab, setActiveTab] = useState('rooms');
+  // ການຄົ້ນຫາ / ກັ່ນຕອງ / ຮຽງລຳດັບ ຂອງແຖບ "ການຈອງຂອງຂ້ອຍ" (ຄ່າເລີ່ມຕົ້ນ: ຮຽງຕາມວັນທີສ້າງ ໃໝ່ → ເກົ່າ)
+  const [myQuery, setMyQuery] = useState('');
+  const [myStatusFilter, setMyStatusFilter] = useState('all');
+  const [myRoomFilter, setMyRoomFilter] = useState('all');
+  const [mySort, setMySort] = useState('created_desc');
   const [adminSubTab, setAdminSubTab] = useState(canApproveBookings ? 'requests' : 'status');
 
   const [rooms, setRooms] = useState([]);
@@ -264,6 +350,59 @@ export default function MeetingRooms() {
     b.status !== 'REJECTED' &&
     !isBookingPast(b)
   );
+
+  const myBookingRoomName = (b) => b.room?.name || b.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ';
+
+  // ວັນທີສ້າງການຈອງ (createdAt → ເຫດການ CREATED ໃນປະຫວັດ → ເວລາເລີ່ມ)
+  const myBookingCreatedMs = (b) => {
+    const created = b.createdAt || (b.history || []).find(h => h.action === 'CREATED')?.at || b.startAt;
+    const t = created ? new Date(created).getTime() : 0;
+    return Number.isNaN(t) ? 0 : t;
+  };
+
+  const getVisibleMyBookings = () => {
+    const q = myQuery.trim().toLowerCase();
+    const list = myBookings.filter((b) => {
+      if (myRoomFilter !== 'all' && myBookingRoomName(b) !== myRoomFilter) return false;
+
+      if (myStatusFilter === 'needs_change' && !bookingNeedsChange(b)) return false;
+      if (myStatusFilter === 'upcoming' && !((b.status === 'PENDING' || b.status === 'CONFIRMED') && !isBookingPast(b))) return false;
+      if (myStatusFilter === 'past' && !(isBookingPast(b) && b.status !== 'CANCELLED' && b.status !== 'REJECTED')) return false;
+      if (['PENDING', 'CONFIRMED', 'REJECTED', 'CANCELLED'].includes(myStatusFilter) && b.status !== myStatusFilter) return false;
+
+      if (q) {
+        const hay = [
+          b.title,
+          myBookingRoomName(b),
+          bookingStatusInfo(b.status).label,
+          b.rejectionReason,
+          b.description,
+          b.startAt ? new Date(b.startAt).toLocaleString() : '',
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    const cmp = {
+      created_desc: (x, y) => myBookingCreatedMs(y) - myBookingCreatedMs(x),
+      created_asc: (x, y) => myBookingCreatedMs(x) - myBookingCreatedMs(y),
+      start_desc: (x, y) => new Date(y.startAt).getTime() - new Date(x.startAt).getTime(),
+      start_asc: (x, y) => new Date(x.startAt).getTime() - new Date(y.startAt).getTime(),
+      room_asc: (x, y) => myBookingRoomName(x).localeCompare(myBookingRoomName(y)) || myBookingCreatedMs(y) - myBookingCreatedMs(x),
+    }[mySort] || ((x, y) => myBookingCreatedMs(y) - myBookingCreatedMs(x));
+
+    // ການຈອງທີ່ຕ້ອງແກ້ໄຂ ຍັງຖືກດັນຂຶ້ນເທິງສຸດສະເໝີ
+    return [...list].sort((x, y) => (Number(bookingNeedsChange(y)) - Number(bookingNeedsChange(x))) || cmp(x, y));
+  };
+
+  const myFiltersActive = !!myQuery.trim() || myStatusFilter !== 'all' || myRoomFilter !== 'all' || mySort !== 'created_desc';
+  const resetMyFilters = () => {
+    setMyQuery('');
+    setMyStatusFilter('all');
+    setMyRoomFilter('all');
+    setMySort('created_desc');
+  };
 
   // ເປີດ popup ເລື່ອນເວລາ / ປ່ຽນຫ້ອງ ຂອງການຈອງ (ໃຊ້ທັງຈາກປຸ່ມ ແລະ ຈາກການກົດ notification)
   const openRescheduleModal = (b) => {
@@ -3951,11 +4090,67 @@ export default function MeetingRooms() {
             <div className="p-4 border-b border-gray-100 font-bold text-gray-800">
               ປະຫວັດ ແລະ ລາຍການການຈອງຫ້ອງປະຊຸມຂອງຂ້ອຍ
             </div>
+            <div className="p-3 border-b border-gray-100 bg-gray-50/60 flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={myQuery}
+                  onChange={(e) => setMyQuery(e.target.value)}
+                  placeholder="ຄົ້ນຫາ ຊື່ການຈອງ, ຫ້ອງ, ສະຖານະ, ວັນທີ..."
+                  className="w-full pl-9 pr-8 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+                {myQuery && (
+                  <button type="button" onClick={() => setMyQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              <select value={myStatusFilter} onChange={(e) => setMyStatusFilter(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <option value="all">ທຸກສະຖານະ</option>
+                <option value="needs_change">⚠️ ຕ້ອງແກ້ໄຂ</option>
+                <option value="PENDING">ລໍຖ້າອະນຸມັດ</option>
+                <option value="CONFIRMED">ອະນຸມັດແລ້ວ</option>
+                <option value="upcoming">ກຳລັງຈະມາເຖິງ</option>
+                <option value="past">ຜ່ານໄປແລ້ວ / ໃຊ້ງານແລ້ວ</option>
+                <option value="REJECTED">ຖືກປະຕິເສດ</option>
+                <option value="CANCELLED">ຍົກເລີກແລ້ວ</option>
+              </select>
+              <select value={myRoomFilter} onChange={(e) => setMyRoomFilter(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                <option value="all">ທຸກຫ້ອງ</option>
+                {[...new Set(myBookings.map(myBookingRoomName))].sort().map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              <select value={mySort} onChange={(e) => setMySort(e.target.value)} className="px-3 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none" title="ຮຽງລຳດັບ">
+                <option value="created_desc">ຮຽງ: ວັນທີສ້າງ (ໃໝ່ → ເກົ່າ)</option>
+                <option value="created_asc">ຮຽງ: ວັນທີສ້າງ (ເກົ່າ → ໃໝ່)</option>
+                <option value="start_desc">ຮຽງ: ວັນທີປະຊຸມ (ໃໝ່ → ເກົ່າ)</option>
+                <option value="start_asc">ຮຽງ: ວັນທີປະຊຸມ (ເກົ່າ → ໃໝ່)</option>
+                <option value="room_asc">ຮຽງ: ຊື່ຫ້ອງ (A → Z)</option>
+              </select>
+              {myFiltersActive && (
+                <button type="button" onClick={resetMyFilters} className="px-3 py-2 text-sm rounded-xl text-gray-600 hover:bg-gray-200/60 flex items-center gap-1">
+                  <X size={14} /> ລ້າງ
+                </button>
+              )}
+              <span className="text-xs text-gray-500 ml-auto">
+                {getVisibleMyBookings().length} / {myBookings.length} ລາຍການ
+              </span>
+            </div>
             {loadingMyBookings ? (
               <div className="py-12 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</div>
             ) : myBookings.length > 0 ? (
               <div className="divide-y divide-gray-100">
-                {[...myBookings].sort((x, y) => Number(bookingNeedsChange(y)) - Number(bookingNeedsChange(x))).map((b) => {
+                {getVisibleMyBookings().length === 0 && (
+                  <div className="py-10 text-center text-sm text-gray-400">
+                    ບໍ່ພົບການຈອງທີ່ຕົງກັບການຄົ້ນຫາ / ຕົວກັ່ນຕອງ
+                    <div>
+                      <button type="button" onClick={resetMyFilters} className="mt-2 text-blue-600 hover:underline">ລ້າງຕົວກັ່ນຕອງ</button>
+                    </div>
+                  </div>
+                )}
+                {getVisibleMyBookings().map((b) => {
                   const needsChange = bookingNeedsChange(b);
                   const roomName = b.room?.name || b.roomId?.name || 'ບໍ່ລະບຸຫ້ອງ';
                   const past = isBookingPast(b);
@@ -4019,6 +4214,7 @@ export default function MeetingRooms() {
                             {b.status === 'REJECTED' ? 'ເຫດຜົນທີ່ປະຕິເສດ: ' : 'ເຫດຜົນທີ່ຍົກເລີກ: '}{b.rejectionReason}
                           </p>
                         )}
+                        <BookingProgress booking={b} />
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">

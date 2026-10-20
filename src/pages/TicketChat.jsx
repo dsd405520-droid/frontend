@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Send, Loader2 } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, MessageSquare, Search, Plus, Pencil, Trash2, X } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { API_BASE_URL, API_ORIGIN } from '../config';
+import { hasPermission } from '../utils/permissions';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -19,6 +20,18 @@ export default function TicketChat() {
 
   const [pendingFiles, setPendingFiles] = useState([]);
   const [fileUploading, setFileUploading] = useState(false);
+
+  // ===== ແມ່ແບບຄຳຕອບ (Canned responses) — ສຳລັບ Agent =====
+  const canUseTemplates = hasPermission('tickets', 'update');
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateQuery, setTemplateQuery] = useState('');
+  const [editingTemplate, setEditingTemplate] = useState(null); // { _id?, title, body }
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateError, setTemplateError] = useState('');
+  const [usedTemplateId, setUsedTemplateId] = useState(null);
+  const inputRef = useRef(null);
 
   const token = localStorage.getItem('token') || localStorage.getItem('accessToken') || '';
   const headers = { 'Authorization': `Bearer ${token}` };
@@ -114,6 +127,89 @@ export default function TicketChat() {
     setPendingFiles(prev => prev.filter(u => u !== url));
   };
 
+  const loadTemplates = () => {
+    if (!ticket?.departmentId) return;
+    setTemplatesLoading(true);
+    setTemplateError('');
+    fetch(`${API_BASE_URL}/canned-responses?departmentId=${encodeURIComponent(ticket.departmentId)}`, { headers })
+      .then(async (res) => {
+        const b = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(b.message || 'ໂຫຼດແມ່ແບບບໍ່ສຳເລັດ');
+        const list = b?.data ?? b;
+        setTemplates(Array.isArray(list) ? list : []);
+      })
+      .catch((err) => setTemplateError(err.message))
+      .finally(() => setTemplatesLoading(false));
+  };
+
+  const toggleTemplates = () => {
+    const next = !showTemplates;
+    setShowTemplates(next);
+    setEditingTemplate(null);
+    setTemplateQuery('');
+    if (next) loadTemplates();
+  };
+
+  // ກົດແມ່ແບບ → ໃສ່ຂໍ້ຄວາມລົງໃນຊ່ອງພິມ (ຕໍ່ທ້າຍຖ້າມີຂໍ້ຄວາມຢູ່ແລ້ວ) ໃຫ້ agent ແກ້ໄຂກ່ອນສົ່ງໄດ້
+  const insertTemplate = (t) => {
+    setBody((prev) => (prev.trim() ? `${prev.replace(/\s+$/, '')}\n${t.body}` : t.body));
+    setUsedTemplateId(t._id);
+    setShowTemplates(false);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const saveTemplate = async () => {
+    const t = editingTemplate;
+    if (!t?.title?.trim() || !t?.body?.trim()) {
+      setTemplateError('ກະລຸນາໃສ່ຫົວຂໍ້ ແລະ ເນື້ອຫາ');
+      return;
+    }
+    setTemplateSaving(true);
+    setTemplateError('');
+    try {
+      const isEdit = !!t._id;
+      const res = await fetch(`${API_BASE_URL}/canned-responses${isEdit ? `/${t._id}` : ''}`, {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          isEdit
+            ? { title: t.title.trim(), body: t.body.trim() }
+            : { departmentId: ticket.departmentId, title: t.title.trim(), body: t.body.trim() }
+        ),
+      });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(Array.isArray(b.message) ? b.message.join(', ') : b.message || 'ບັນທຶກແມ່ແບບບໍ່ສຳເລັດ');
+      }
+      setEditingTemplate(null);
+      loadTemplates();
+    } catch (err) {
+      setTemplateError(err.message);
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
+  const deleteTemplate = async (t) => {
+    if (!window.confirm(`ລຶບແມ່ແບບ "${t.title}" ແມ່ນບໍ?`)) return;
+    setTemplateError('');
+    try {
+      const res = await fetch(`${API_BASE_URL}/canned-responses/${t._id}`, { method: 'DELETE', headers });
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.message || 'ລຶບແມ່ແບບບໍ່ສຳເລັດ');
+      }
+      loadTemplates();
+    } catch (err) {
+      setTemplateError(err.message);
+    }
+  };
+
+  const visibleTemplates = templates.filter((t) => {
+    const q = templateQuery.trim().toLowerCase();
+    return !q || `${t.title} ${t.body}`.toLowerCase().includes(q);
+  });
+
   const isImage = (url) => /\.(png|jpe?g|gif|webp)$/i.test(url);
 
   const handleSend = (e) => {
@@ -126,7 +222,10 @@ export default function TicketChat() {
       body: JSON.stringify({
         ticketId: id,
         body: body.trim() || '(ໄຟລ໌ແນບ)',
-        attachments: pendingFiles
+        attachments: pendingFiles,
+        ...(usedTemplateId && body.trim()
+          ? { isCannedResponse: true, cannedResponseId: usedTemplateId }
+          : {}),
       }),
     })
       .then(async res => {
@@ -135,6 +234,7 @@ export default function TicketChat() {
           throw new Error(result.message || 'ສົ່ງຂໍ້ຄວາມບໍ່ສຳເລັດ');
         }
         setBody('');
+        setUsedTemplateId(null);
         setPendingFiles([]);
         fetchMessages(true);
       })
@@ -265,7 +365,116 @@ export default function TicketChat() {
           </div>
         )}
 
-        <form onSubmit={handleSend} className="mt-3 flex items-center gap-2">
+        <form onSubmit={handleSend} className="mt-3 flex items-end gap-2 relative">
+          {canUseTemplates && showTemplates && (
+            <div className="absolute bottom-full mb-2 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-20 flex flex-col max-h-96">
+              <div className="p-3 border-b border-gray-100 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    value={templateQuery}
+                    onChange={(e) => setTemplateQuery(e.target.value)}
+                    placeholder="ຄົ້ນຫາແມ່ແບບຄຳຕອບ..."
+                    className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-amber-400 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setTemplateError(''); setEditingTemplate({ title: '', body: '' }); }}
+                  className="shrink-0 flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100"
+                >
+                  <Plus size={14} /> ສ້າງໃໝ່
+                </button>
+                <button type="button" onClick={toggleTemplates} className="shrink-0 p-1.5 text-gray-400 hover:text-gray-600">
+                  <X size={16} />
+                </button>
+              </div>
+
+              {templateError && (
+                <p className="px-4 pt-2 text-xs text-red-600">{templateError}</p>
+              )}
+
+              {editingTemplate ? (
+                <div className="p-4 space-y-2 overflow-y-auto">
+                  <p className="text-xs font-semibold text-gray-600">
+                    {editingTemplate._id ? 'ແກ້ໄຂແມ່ແບບ' : 'ສ້າງແມ່ແບບໃໝ່'} (ພະແນກ {ticket?.departmentId})
+                  </p>
+                  <input
+                    type="text"
+                    value={editingTemplate.title}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, title: e.target.value })}
+                    placeholder="ຫົວຂໍ້ (ເຊັ່ນ: ຂັ້ນຕອນ reset VPN)"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                  <textarea
+                    rows={4}
+                    value={editingTemplate.body}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, body: e.target.value })}
+                    placeholder="ເນື້ອຫາຄຳຕອບ..."
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setEditingTemplate(null); setTemplateError(''); }}
+                      className="px-3 py-1.5 text-xs rounded-lg text-gray-600 hover:bg-gray-100"
+                    >
+                      ຍົກເລີກ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveTemplate}
+                      disabled={templateSaving}
+                      className="px-4 py-1.5 text-xs font-medium rounded-lg bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
+                    >
+                      {templateSaving ? 'ກຳລັງບັນທຶກ...' : 'ບັນທຶກ'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-y-auto divide-y divide-gray-100">
+                  {templatesLoading ? (
+                    <div className="py-8 text-center text-sm text-gray-400">ກຳລັງໂຫຼດ...</div>
+                  ) : visibleTemplates.length === 0 ? (
+                    <div className="py-8 text-center text-sm text-gray-400">
+                      {templates.length === 0 ? 'ຍັງບໍ່ມີແມ່ແບບສຳລັບພະແນກນີ້ — ກົດ "ສ້າງໃໝ່" ເພື່ອເພີ່ມ' : 'ບໍ່ພົບແມ່ແບບທີ່ຕົງກັນ'}
+                    </div>
+                  ) : (
+                    visibleTemplates.map((t) => (
+                      <div
+                        key={t._id}
+                        onClick={() => insertTemplate(t)}
+                        className="px-4 py-2.5 flex items-start gap-3 cursor-pointer hover:bg-amber-50/60"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-gray-800 truncate">{t.title}</p>
+                          <p className="text-xs text-gray-500 truncate">{t.body}</p>
+                        </div>
+                        <button
+                          type="button"
+                          title="ແກ້ໄຂ"
+                          onClick={(e) => { e.stopPropagation(); setTemplateError(''); setEditingTemplate({ _id: t._id, title: t.title, body: t.body }); }}
+                          className="shrink-0 p-1.5 text-gray-400 hover:text-blue-600"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          title="ລຶບ"
+                          onClick={(e) => { e.stopPropagation(); deleteTemplate(t); }}
+                          className="shrink-0 p-1.5 text-gray-400 hover:text-red-600"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <label className="cursor-pointer text-gray-400 hover:text-gray-600 shrink-0 p-2">
             {fileUploading ? <Loader2 size={20} className="animate-spin" /> : <span className="text-lg">📎</span>}
             <input
@@ -276,12 +485,34 @@ export default function TicketChat() {
               className="hidden"
             />
           </label>
-          <input
-            type="text"
+          {canUseTemplates && (
+            <button
+              type="button"
+              onClick={toggleTemplates}
+              disabled={!ticket}
+              title="ແມ່ແບບຄຳຕອບ"
+              className={`shrink-0 p-2 rounded-lg transition disabled:opacity-40 ${showTemplates ? 'bg-amber-100 text-amber-700' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              <MessageSquare size={20} />
+            </button>
+          )}
+          <textarea
+            ref={inputRef}
+            rows={Math.min(5, Math.max(1, body.split('\n').length))}
             value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="ພິມຂໍ້ຄວາມ..."
-            className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-sm"
+            onChange={(e) => {
+              setBody(e.target.value);
+              if (!e.target.value.trim()) setUsedTemplateId(null);
+            }}
+            onKeyDown={(e) => {
+              // Enter = ສົ່ງ, Shift+Enter = ຂຶ້ນແຖວໃໝ່
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                handleSend(e);
+              }
+            }}
+            placeholder="ພິມຂໍ້ຄວາມ... (Shift+Enter ເພື່ອຂຶ້ນແຖວໃໝ່)"
+            className="flex-1 border border-gray-300 rounded-xl px-4 py-2.5 text-sm resize-none"
           />
           <button
             type="submit"
