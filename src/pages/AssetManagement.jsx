@@ -155,6 +155,12 @@ export default function AssetManagement() {
   const [pendingError, setPendingError] = useState('');
   const [reviewingId, setReviewingId] = useState(null);
 
+  // States ສຳລັບໃບຂໍທີ່ອະນຸມັດແລ້ວ (ສ້າງ POPR ຕໍ່ລາຍການ)
+  const [approvedRequests, setApprovedRequests] = useState([]);
+  const [loadingApproved, setLoadingApproved] = useState(false);
+  const [approvedError, setApprovedError] = useState('');
+  const [poprPrefill, setPoprPrefill] = useState(null);
+
   const fetchCatalog = async () => {
     try {
       setLoading(true);
@@ -231,6 +237,58 @@ export default function AssetManagement() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPendingRequests();
   }, []);
+
+  // ໃບຂໍທີ່ອະນຸມັດແລ້ວ — ໃຊ້ເປັນຕົ້ນທາງສ້າງ POPR (ຈຳນວນທີ່ຮັບຂອງບໍ່ຄົບ)
+  const fetchApprovedRequests = async () => {
+    if (!canCreateCatalog) return;
+    try {
+      setLoadingApproved(true);
+      setApprovedError('');
+      const response = await api.get('/supply-requests/approved-for-popr');
+      const responseData = response.data;
+      let list = [];
+      if (Array.isArray(responseData)) {
+        list = responseData;
+      } else if (responseData && Array.isArray(responseData.data)) {
+        list = responseData.data;
+      } else if (responseData && typeof responseData === 'object') {
+        const foundArrayKey = Object.keys(responseData).find(key => Array.isArray(responseData[key]));
+        if (foundArrayKey) list = responseData[foundArrayKey];
+      }
+      setApprovedRequests(list);
+    } catch (error) {
+      console.error('Failed to fetch approved supply requests:', error);
+      setApprovedError(error.response?.data?.msg || error.response?.data?.message || 'ບໍ່ສາມາດດຶງໃບຂໍທີ່ອະນຸມັດແລ້ວໄດ້');
+      setApprovedRequests([]);
+    } finally {
+      setLoadingApproved(false);
+    }
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchApprovedRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canCreateCatalog]);
+
+  // ເປີດ POPR ພ້ອມຂໍ້ມູນທີ່ເລືອກມາຈາກໃບຂໍ (ຜ່ານ query param: /assets?popr=SR001&idx=0)
+  useEffect(() => {
+    const srId = searchParams.get('popr');
+    if (!srId) return;
+    const idx = Number(searchParams.get('idx') ?? 0);
+    const sr = approvedRequests.find((r) => r._id === srId);
+    const item = sr?.items?.[Number.isFinite(idx) ? idx : 0];
+    const progress = sr?.progress?.[Number.isFinite(idx) ? idx : 0];
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPoprPrefill({
+      supplyRequestId: srId,
+      supplyRequestItemIndex: Number.isFinite(idx) ? idx : 0,
+      itemName: item?.name || '',
+      quantity: progress?.remaining ?? item?.quantity ?? 1,
+    });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setActiveTab('popr');
+  }, [searchParams, approvedRequests]);
 
   const handleApprove = async (id) => {
     try {
@@ -400,6 +458,19 @@ export default function AssetManagement() {
               </span>
             )}
           </button>
+          {canCreateCatalog && (
+            <button
+              onClick={() => setActiveTab('approved')}
+              className={`pb-3 text-sm font-medium transition border-b-2 flex items-center gap-2 ${activeTab === 'approved' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              <span>ໃບຂໍທີ່ອະນຸມັດແລ້ວ (ສ້າງ POPR)</span>
+              {approvedRequests.length > 0 && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                  {approvedRequests.length}
+                </span>
+              )}
+            </button>
+          )}
           {canCreateCatalog && (
             <button
               onClick={() => setActiveTab('popr')}
@@ -666,9 +737,104 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
         </div>
         )}
 
+        {/* TAB: APPROVED SUPPLY REQUESTS — ໃບຂໍທີ່ອະນຸມັດແລ້ວ (ຕົ້ນທາງສ້າງ POPR) */}
+        {activeTab === 'approved' && canCreateCatalog && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle size={18} className="text-emerald-500" />
+              <h2 className="font-bold text-gray-800">ໃບຂໍທີ່ອະນຸມັດແລ້ວ — ສ້າງ POPR</h2>
+            </div>
+            <p className="text-xs text-gray-500">ກົດ "ສ້າງ POPR" ທີ່ລາຍການເພື່ອຮັບຕໍ່ລາຍການນັ້ນ</p>
+          </div>
+          {approvedError ? (
+            <div className="p-4 text-sm text-red-500">⚠️ {approvedError}</div>
+          ) : loadingApproved ? (
+            <div className="py-12 text-center text-sm text-gray-400">ກຳລັງໂຫຼດໃບຂໍ...</div>
+          ) : approvedRequests.length === 0 ? (
+            <div className="py-12 text-center text-sm text-gray-400">ບໍ່ມີໃບຂໍທີ່ອະນຸມັດແລ້ວ</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
+                    <th className="p-4 font-medium">ໃບຂໍ</th>
+                    <th className="p-4 font-medium">ລາຍການ</th>
+                    <th className="p-4 font-medium">ຈຳນວນອະນຸມັດ</th>
+                    <th className="p-4 font-medium">ຮັບແລ້ວ</th>
+                    <th className="p-4 font-medium">ເຫລືອ</th>
+                    <th className="p-4 font-medium text-right">ຈັດການ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 text-gray-600">
+                  {approvedRequests.map((req) => (
+                    <tr key={req._id} className="hover:bg-gray-50">
+                      <td className="p-4 font-semibold text-gray-900">{req._id}</td>
+                      <td className="p-4">
+                        {(req.items || []).map((it, i) => {
+                          const p = (req.progress || [])[i] || {};
+                          const remaining = p.remaining ?? it.quantity;
+                          return (
+                            <div key={i} className="flex items-center justify-between gap-3 py-0.5">
+                              <span className="text-xs">• {it.name} (x{it.quantity})</span>
+                              {canCreateCatalog && remaining > 0 && (
+                                <button
+                                  onClick={() => {
+                                    setPoprPrefill({
+                                      supplyRequestId: req._id,
+                                      supplyRequestItemIndex: i,
+                                      itemName: it.name,
+                                      quantity: remaining,
+                                    });
+                                    setActiveTab('popr');
+                                  }}
+                                  className="shrink-0 text-xs px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-medium transition"
+                                >
+                                  ສ້າງ POPR
+                                </button>
+                              )}
+                              {remaining <= 0 && (
+                                <span className="text-[11px] text-emerald-600">ຮັບຄົບແລ້ວ</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </td>
+                      <td className="p-4 text-xs">
+                        {(req.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)}
+                      </td>
+                      <td className="p-4 text-xs">
+                        {(req.progress || []).reduce((sum, p) => sum + (Number(p?.received) || 0), 0)}
+                      </td>
+                      <td className="p-4 text-xs font-medium text-amber-700">
+                        {(req.progress || []).reduce((sum, p) => sum + (Number(p?.remaining) || 0), 0)}
+                      </td>
+                      <td className="p-4 text-right">
+                        <button
+                          onClick={() => setActiveTab('popr')}
+                          className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg hover:bg-gray-50"
+                        >
+                          ເປີດ POPR
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        )}
+
         {/* TAB: POPR — ຂະບວນການຈັດຊື້/ນຳເຂົ້າອຸປະກອນ */}
           {activeTab === 'popr' && canCreateCatalog && (
-            <PoprWorkflow catalog={assets} canManage={canCreateCatalog} onChanged={fetchCatalog} />
+            <PoprWorkflow
+              catalog={assets}
+              canManage={canCreateCatalog}
+              onChanged={fetchCatalog}
+              prefill={poprPrefill}
+              onPrefillConsumed={() => setPoprPrefill(null)}
+            />
         )}
       </div>
 

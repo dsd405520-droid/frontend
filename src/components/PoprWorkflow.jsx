@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Plus, X, Search, Trash2, Check, ChevronLeft, ChevronRight, Info, Pencil,
-  ClipboardList, PackageCheck, Settings2, Send, RotateCcw,
+  ClipboardList, PackageCheck, Settings2, RotateCcw,
 } from 'lucide-react';
 import { POPR_STEPS, POPR_STATUS, POPR_ORDER_STATUS, POPR_DELIVERY_STATUS, POPR_ITEM_TYPE } from '../constants/poprSteps';
 
-// ເກນມູນຄ່າຕໍ່ໜ່ວຍ (ກີບ) ທີ່ຕ່ຳກວ່າ ມັກເປັນຂອງສິ້ນເປືອງ — ປັບໄດ້ຕາມນະໂຍບາຍບໍລິສັດ
+// ເກນມູນຄ່າຕໍ່ໜ່ວຍ (ກີບ) ທີ່ຕ່ຳກວ່າ ມັກເປັນຂອງສິນຊັບ — ປັບໄດ້ຕາມນະໂຍບາຍບໍລິສັດ
 const ASSET_PRICE_THRESHOLD = 500000;
-import { getCurrentUser, hasPermission } from '../utils/permissions';
+import { getCurrentUser, hasPermission, hasAnyPermission } from '../utils/permissions';
 import api from '../services/api';
 
-const STEP_ICONS = [ClipboardList, PackageCheck, Settings2, Send];
+const STEP_ICONS = [ClipboardList, PackageCheck, Settings2];
 
 const inputCls =
   'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 bg-white';
@@ -19,12 +19,16 @@ const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
 
 const emptyForm = () => ({
   itemType: 'ELECTRONIC',
+  // ໃບຂໍທີ່ອະນຸມັດ (backend ບັງຄັບຕ້ອງຜູກ in. ຖ້າບໍ່ມີ → ສ້າງ POPR ບໍ່ໄດ້)
+  supplyRequestId: '',
+  supplyRequestItemIndex: '',
   // 1) P — ການຈັດຫາ/ຈັດຊື້
   catalogItemId: '',
   itemName: '',
   quantity: 1, // ຈຳນວນຂອງງວດນີ້
   poTotalQuantity: '', // ຈຳນວນສັ່ງທັງໝົດຕາມ PO (ວ່າງ = ເທົ່າກັບຈຳນວນງວດນີ້)
   lotNo: 1,
+  expectedDeliveryDate: '', // ວັນຄາດຫວັງສົ່ງມອບ
   // ໃຊ້ສ້າງລາຍການ Catalog ໃໝ່ຕອນປິດ POPR (ຖ້າຊື່ບໍ່ມີໃນ Catalog)
   category: '',
   unit: '',
@@ -61,6 +65,7 @@ const emptyForm = () => ({
   secAntivirus: false,
   secEdr: false,
   secFirewall: false,
+  securityReady: false, // ກັອບເປັນ checkbox ດຽວ (ຕັ້ງຄວາມປອດໄພ/ເຂົ້າລະຫັດແລ້ວ)
   domainJoined: false,
   userAccount: '',
   network: '',
@@ -120,11 +125,18 @@ function toForm(rec = {}) {
   }));
   return {
     itemType: rec.itemType || 'ELECTRONIC',
+    supplyRequestId: rec.supplyRequestId || '',
+    supplyRequestItemIndex:
+      rec.supplyRequestItemIndex === undefined ||
+      rec.supplyRequestItemIndex === null
+        ? ''
+        : rec.supplyRequestItemIndex,
     catalogItemId: p.catalogItemId || '',
     itemName: p.itemName || '',
     quantity: p.quantity ?? 1,
     poTotalQuantity: p.poTotalQuantity ?? '',
     lotNo: p.lotNo ?? 1,
+    expectedDeliveryDate: day(p.expectedDeliveryDate),
     category: p.category || '',
     unit: p.unit || '',
     lowStockThreshold: p.lowStockThreshold ?? '',
@@ -161,6 +173,12 @@ function toForm(rec = {}) {
     secAntivirus: !!c.secAntivirus,
     secEdr: !!c.secEdr,
     secFirewall: !!c.secFirewall,
+    securityReady: !!(
+      c.securityPolicy ||
+      c.secAntivirus ||
+      c.secEdr ||
+      c.secFirewall
+    ),
     domainJoined: !!c.domainJoined,
     userAccount: c.userAccount || '',
     network: c.network || '',
@@ -198,12 +216,20 @@ function toPayload(form, status, stage) {
     status,
     stage,
     itemType: form.itemType,
+    supplyRequestId: (form.supplyRequestId || '').trim() || undefined,
+    supplyRequestItemIndex:
+      form.supplyRequestItemIndex === '' ||
+      form.supplyRequestItemIndex === null ||
+      form.supplyRequestItemIndex === undefined
+        ? undefined
+        : Number(form.supplyRequestItemIndex),
     procurement: {
       catalogItemId: form.catalogItemId || undefined,
       itemName: form.itemName,
       quantity: qty,
       poTotalQuantity: num(form.poTotalQuantity) ?? qty,
       lotNo: Number(form.lotNo) || 1,
+      expectedDeliveryDate: form.expectedDeliveryDate || undefined,
       category: form.catalogItemId ? undefined : form.category.trim() || undefined,
       unit: form.catalogItemId ? undefined : form.unit.trim() || undefined,
       lowStockThreshold: form.catalogItemId ? undefined : num(form.lowStockThreshold),
@@ -235,9 +261,9 @@ function toPayload(form, status, stage) {
     preparation: {
       os: form.os || undefined,
       software: form.software || undefined,
-      secAntivirus: form.secAntivirus,
-      secEdr: form.secEdr,
-      secFirewall: form.secFirewall,
+      secAntivirus: !!form.securityReady,
+      secEdr: !!form.securityReady,
+      secFirewall: !!form.securityReady,
       domainJoined: form.domainJoined,
       userAccount: form.userAccount || undefined,
       network: form.network || undefined,
@@ -284,11 +310,16 @@ function normalize(rec) {
 const apiErr = (err, fallback) =>
   err.response?.data?.msg || err.response?.data?.message || fallback;
 
-function validateStep(step, form) {
+function validateStep(step, form, opts = {}) {
   const err = {};
   const type = form.itemType;
   const qty = Number(form.quantity) || 1;
+  const final = !!opts.final;
   if (step === 0) {
+    if (!form.supplyRequestId) err.supplyRequestId = 'ກະລຸນາເລືອກໃບຂໍທີ່ອະນຸມັດແລ້ວ';
+    if (form.supplyRequestId && form.supplyRequestItemIndex === '') {
+      err.supplyRequestItemIndex = 'ກະລຸນາເລືອກລາຍການໃນໃບຂໍ';
+    }
     if (!form.itemName.trim()) err.itemName = 'ກະລຸນາລະບຸຊື່/ລາຍການອຸປະກອນ';
     if (!(Number(form.quantity) >= 1)) err.quantity = 'ຈຳນວນຕ້ອງຢ່າງໜ້ອຍ 1';
     // ລາຍການທີ່ບໍ່ມີໃນ Catalog ຈະຖືກສ້າງໃໝ່ຕອນປິດ POPR → ຕ້ອງມີໝວດໝູ່ ແລະ ຫົວໜ່ວຍ
@@ -299,8 +330,8 @@ function validateStep(step, form) {
     if (form.poTotalQuantity !== '' && Number(form.poTotalQuantity) < Number(form.quantity)) {
       err.poTotalQuantity = 'ຈຳນວນສັ່ງທັງ PO ຕ້ອງບໍ່ໜ້ອຍກວ່າຈຳນວນຂອງງວດນີ້';
     }
-    if (!form.spec.trim()) err.spec = 'ກະລຸນາລະບຸຂໍ້ກຳນົດ/ຂໍ້ມູນຈຳເພາະ';
-    if (form.budget === '' || Number(form.budget) < 0) err.budget = 'ກະລຸນາລະບຸງົບປະມານ';
+    // ບິນໃບຊັ້ນ (short form): spec ແລະ budget ເປັນຂໍ້ມູນທາງເລືອກ (backend ບໍ່ບັງຄັບ)
+    if (form.budget !== '' && Number(form.budget) < 0) err.budget = 'ງົບປະມານຕ້ອງບໍ່ຕໍ່ລົບ';
     if (!form.vendor.trim()) err.vendor = 'ກະລຸນາລະບຸຜູ້ຂາຍ';
     if (!form.poNumber.trim()) err.poNumber = 'ກະລຸນາລະບຸເລກໃບສັ່ງຊື້ (PO)';
   }
@@ -342,12 +373,13 @@ function validateStep(step, form) {
   }
   if (step === 2 && type === 'ELECTRONIC') {
     if (!form.os.trim()) err.os = 'ກະລຸນາລະບຸລະບົບປະຕິບັດການ (OS)';
+    if (!form.securityReady) err.securityReady = 'ຕ້ອງຢືນຢັນວ່າຕິດຕັ້ງຄວາມປອດໄພ/ເຂົ້າລະຫັດແລ້ວ';
   }
   // ວັດສະດຸສິ້ນເປືອງເຂົ້າຄັງ — ບໍ່ຕ້ອງມີຜູ້ຮັບ/ລາຍເຊັນ
-  if (step === 3 && type !== 'CONSUMABLE' && form.storeInStock && !form.location.trim()) {
+  if (step === 1 && final && type !== 'CONSUMABLE' && form.storeInStock && !form.location.trim()) {
     err.location = 'ເຂົ້າຄັງ: ກະລຸນາລະບຸສະຖານທີ່ເກັບ (ກັບໄປຂັ້ນ O ແລ້ວໃສ່ຊ່ອງ "ສະຖານທີ່")';
   }
-  if (step === 3 && type !== 'CONSUMABLE' && !form.storeInStock) {
+  if (step === 1 && final && type !== 'CONSUMABLE' && !form.storeInStock) {
     if (!form.deliveredTo.trim()) err.deliveredTo = 'ກະລຸນາລະບຸຜູ້ຮັບມອບ/ພະແນກ';
     if (!form.assignedUserId) err.assignedUser = 'ຕ້ອງເລືອກຜູ້ຮັບດ້ວຍລະຫັດພະນັກງານ (ກົດ "ຄົ້ນຫາ")';
     if (!form.signedHandover) err.signedHandover = 'ຕ້ອງຢືນຢັນການລົງນາມຮັບມອບ';
@@ -616,12 +648,16 @@ function UnitsTable({ units, qty, onChange, required }) {
   );
 }
 
-export default function PoprWorkflow({ catalog = [], canManage = false }) {
+export default function PoprWorkflow({ catalog = [], canManage = false, prefill = null, onPrefillConsumed = null }) {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  // ໃບຂໍທີ່ອະນຸມັດແລ້ວ (ສະຖານະ ເປີດ) — ໃຊ້ເລືອກໃບຂໍ + ລາຍການທີ່ຍັງຮັບຂອງບໍ່ຄົບ
+  const [srRequests, setSrRequests] = useState([]);
+  const [srLoading, setSrLoading] = useState(false);
+  const [srError, setSrError] = useState('');
 
   const [isOpen, setIsOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -638,8 +674,32 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     ? `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || currentUser.email || ''
     : '';
   // ການປິດສຳເລັດ ແລະ ການລຶບ ເປັນສິດແຍກຕ່າງຫາກ (approve / delete) ບໍ່ໃຊ້ manage ດຽວ
+  // ປິດສຳເລັດ → ຜູ້ຮັບເຂົ້າ (supplies:receive) ຫຼື ຜູ້ອະນຸມັດ (supplies:approve)
+  const canComplete = hasAnyPermission('supplies', ['receive', 'approve']);
   const canApprove = hasPermission('supplies', 'approve');
   const canDelete = hasPermission('supplies', 'delete');
+
+  const fetchSrRequests = async () => {
+    if (!canManage) return;
+    try {
+      setSrLoading(true);
+      setSrError('');
+      const res = await api.get('/supply-requests/approved-for-popr');
+      const list = unwrap(res.data) || [];
+      setSrRequests(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setSrError(apiErr(err, 'ບໍ່ສາມາດໂຫຼດໃບຂໍທີ່ອະນຸມັດແລ້ວໄດ້'));
+      setSrRequests([]);
+    } finally {
+      setSrLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchSrRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManage]);
 
   const fetchRecords = async () => {
     try {
@@ -663,13 +723,27 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
 
   const set = (patch) => setForm((prev) => ({ ...prev, ...patch }));
 
-  const openCreate = () => {
+  const openCreate = (pre = null) => {
     setEditingId(null);
     setForm({
       ...emptyForm(),
       receivedBy: operatorName,
       receivedDate: new Date().toISOString().slice(0, 10),
       deliveryDate: new Date().toISOString().slice(0, 10),
+      ...(pre
+        ? {
+            supplyRequestId: pre.supplyRequestId || '',
+            supplyRequestItemIndex:
+              pre.supplyRequestItemIndex === undefined ||
+              pre.supplyRequestItemIndex === null
+                ? ''
+                : pre.supplyRequestItemIndex,
+            itemName: pre.itemName || '',
+            quantity: pre.quantity ?? 1,
+            poTotalQuantity: pre.quantity ?? '',
+            expectedDeliveryDate: pre.expectedDeliveryDate || '',
+          }
+        : {}),
     });
     setStep(0);
     setErrors({});
@@ -677,10 +751,19 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     setIsOpen(true);
   };
 
+  // ເປີດຟອມສ້າງ POPR ພ້ອມຂໍ້ມູນຈາກໃບຂໍທີ່ອະນຸມັດແລ້ວ (ຈາກ tab/ໃບຂໍ ຫຼື query param)
+  useEffect(() => {
+    if (!prefill) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    openCreate(prefill);
+    if (onPrefillConsumed) onPrefillConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
+
   const openEdit = (record) => {
     setEditingId(record._id);
     setForm(record.form);
-    setStep(Math.max(0, Math.min(3, (record.stage || 1) - 1)));
+    setStep(Math.max(0, Math.min(POPR_STEPS.length - 1, (record.stage || 1) - 1)));
     setErrors({});
     setSubmitError('');
     setIsOpen(true);
@@ -742,8 +825,9 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
   const saveDraft = () => persist(step === 0 ? 'DRAFT' : 'IN_PROGRESS');
 
   const submitAll = () => {
+    // ກວດທຸກຂັ້ນ (final = true → ກວດການປລອຍ/ມອບມອບດ້ວຢ)
     for (let i = 0; i < POPR_STEPS.length; i += 1) {
-      const err = validateStep(i, form);
+      const err = validateStep(i, form, { final: true });
       if (Object.keys(err).length > 0) {
         setStep(i);
         setErrors(err);
@@ -762,6 +846,12 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     setForm({
       ...emptyForm(),
       itemType: r.itemType,
+      supplyRequestId: r.form.supplyRequestId || '',
+      supplyRequestItemIndex:
+        r.form.supplyRequestItemIndex === undefined ||
+        r.form.supplyRequestItemIndex === null
+          ? ''
+          : r.form.supplyRequestItemIndex,
       catalogItemId: r.form.catalogItemId,
       itemName: r.form.itemName,
       category: r.form.category,
@@ -847,7 +937,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
       if (statusFilter && r.status !== statusFilter) return false;
       if (!q) return true;
       const f = r.form || {};
-      return [r._id, f.itemName, f.vendor, f.poNumber, f.serialNumber, f.assetTag, f.assignedUser]
+      return [r._id, f.itemName, f.vendor, f.poNumber, f.serialNumber, f.assetTag, f.assignedUser, f.supplyRequestId]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q));
     });
@@ -868,14 +958,214 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
     const isConsumable = form.itemType === 'CONSUMABLE';
     const isElectronic = form.itemType === 'ELECTRONIC';
     const qty = Number(form.quantity) || 1;
-    const categories = [...new Set(catalog.map((c) => c.category).filter(Boolean))];
     const poInfo = computePo(records, form.poNumber, editingId);
     const thisCost = (Number(form.price) || 0) * (Number(form.quantity) || 0);
     const poOver = !!poInfo && poInfo.total > 0 && poInfo.received + (Number(form.quantity) || 0) > poInfo.total;
     const costOver = !!poInfo && form.budget !== '' && poInfo.cost + thisCost > Number(form.budget);
-    if (step === 0) {
+    // ການປລອຍ/ມອບມອບ (ຢູ່ໃນຂັ້ນຮັບເຂົ້າ — ຄືກັບຈາກ 4 ຂັ້ນເປັນ 3 ຂັ້ນ)
+    const renderRelease = () => {
+      if (isConsumable) {
+        return (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-purple-100 bg-purple-50/60 p-4 text-sm text-purple-800">
+              ວັດສະດຸສິ້ນເປືອງເຂົ້າຄັງ — ບໍ່ຕ້ອງລະບຸຜູ້ຮັບ/ລາຍເຊັນ. ເມື່ອປິດ POPR ສະຕ໊ອກຂອງ "{form.itemName || '—'}" ຈະເພີ່ມ{' '}
+              <b>{form.receivedQuantity === '' ? form.quantity : form.receivedQuantity}</b> {form.unit || 'ໜ່ວຍ'}.
+            </div>
+            <Field label="ວັນທີເຂົ້າຄັງ">
+              <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
+            </Field>
+          </div>
+        );
+      }
+
+      const modeBox = (
+        <div className="rounded-xl border border-gray-200 p-3 space-y-2">
+          <p className="text-xs font-medium text-gray-700">ປ່ອຍແບບໃດ?</p>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input type="radio" checked={!form.storeInStock} onChange={() => set({ storeInStock: false })} className="mt-1" />
+            <span><b>ມອບໃຫ້ຜູ້ໃຊ້ທັນທີ</b> — ຊັບສິນຢູ່ກັບຜູ້ຮັບ, ສະຕ໊ອກບໍ່ເພີ່ມ</span>
+          </label>
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              checked={!!form.storeInStock}
+              onChange={() => set({
+                storeInStock: true,
+                // ເຂົ້າຄັງ = ບໍ່ມອບໃຫ້ໃຜ → ລ້າງຂໍ້ມູນຜູ້ຮັບທີ່ຄ້າງຢູ່ ເພື່ອບໍ່ໃຫ້ສົ່ງໄປ backend
+                assignedUserId: '',
+                assignedUser: '',
+                deliveredTo: '',
+                deliveredToUserId: '',
+                signedHandover: false,
+              })}
+              className="mt-1"
+            />
+            <span><b>ເຂົ້າຄັງ</b> — ຊັບສິນ "ວ່າງ", ສະຕ໊ອກ +{qty}, ບໍ່ຕ້ອງເລືອກຜູ້ຮັບ (ຜູ້ຂໍມາເບີກພາຍຫຼັງຕາມໃບຂໍ)</span>
+          </label>
+        </div>
+      );
+      if (form.storeInStock) {
+        return (
+          <div className="space-y-4">
+            {modeBox}
+            {errors.location && <p className="text-xs text-red-500">{errors.location}</p>}
+            <Field label="ວັນທີເຂົ້າຄັງ">
+              <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
+            </Field>
+          </div>
+        );
+      }
+
       return (
         <div className="space-y-4">
+          {modeBox}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Field label="ສົ່ງມອບໃຫ້ (ພະນັກງານ/ພະແນກ)" required error={errors.deliveredTo}>
+              <input
+                type="text"
+                value={form.deliveredTo}
+                onChange={(e) => set({ deliveredTo: e.target.value, deliveredToUserId: '' })}
+                className={inputCls}
+              />
+              <EmployeeCodeLookup
+                onResolved={(u) => set({ deliveredTo: u.name, deliveredToUserId: u.userId })}
+                linkedLabel={form.deliveredToUserId ? form.deliveredTo : ''}
+              />
+            </Field>
+            <Field label="ຜູ້ຮັບ/ຜູ້ໃຊ້ (ເລືອກດ້ວຍລະຫັດພະນັກງານ)" required error={errors.assignedUser}>
+              <input
+                type="text"
+                value={form.assignedUser}
+                readOnly
+                placeholder="ກົດຄົ້ນຫາດ້ວຍລະຫັດພະນັກງານ"
+                className={`${inputCls} bg-gray-50`}
+              />
+              <EmployeeCodeLookup
+                onResolved={(u) => set({ assignedUser: u.name, assignedUserId: u.userId })}
+                linkedLabel={form.assignedUserId ? form.assignedUser : ''}
+              />
+            </Field>
+            <Field label="ວັນທີສົ່ງມອບ">
+              <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
+            </Field>
+          </div>
+          <Field label="ສະຖານະສິນຊັບຫຼັງມອບ">
+            <select value={form.assetStatus} onChange={(e) => set({ assetStatus: e.target.value })} className={inputCls}>
+              {ASSET_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          </Field>
+          <div className="flex flex-wrap gap-5">
+            <Toggle checked={form.signedHandover} onChange={(v) => set({ signedHandover: v })}>
+              ຜູ້ຮັບລົງນາມເອກະສານຮັບມອບ
+            </Toggle>
+            <Toggle checked={form.userOrientation} onChange={(v) => set({ userOrientation: v })}>
+              ແນະນຳການໃຊ້ / ຄວາມປອດໄພ / ຊ່ອງທາງແຈ້ງບັນຫາ IT
+            </Toggle>
+          </div>
+          {errors.signedHandover && <p className="text-xs text-red-500">{errors.signedHandover}</p>}
+
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600 space-y-1">
+            <p className="font-semibold text-gray-700">ສະຫຼຸບການຕັ້ງຄ່າ</p>
+            <p>ລາຍການ: {form.itemName || '—'} (x{form.quantity})</p>
+            <p>ຜູ້ຂາຍ: {form.vendor || '—'} · PO: {form.poNumber || '—'}</p>
+            <p>ຈຳນວນໜ່ວຍ: {qty} · ຜູກຊັບສິນເດີມ: {(form.units || []).filter((u) => u.assetId).length}</p>
+            <p>OS: {form.os || '—'} · AD: {form.domainJoined ? 'ເຊື່ອມແລ້ວ' : 'ຍັງ'} · BitLocker: {form.diskEncryption ? 'ເປີດ' : 'ຍັງ'}</p>
+          </div>
+        </div>
+      );
+    };
+
+    if (step === 0) {
+      const srLine = (() => {
+        const sr = srRequests.find((r) => r._id === form.supplyRequestId);
+        if (!sr) return null;
+        const idx = Number(form.supplyRequestItemIndex);
+        const item = (sr.items || [])[idx];
+        if (!item) return null;
+        const p = (sr.progress || [])[idx] || {};
+        return { sr, idx, item, progress: p };
+      })();
+      return (
+        <div className="space-y-4">
+          {/* ເລືອກໃບຂໍທີ່ອະນຸມັດ (ບັງຄັບ — backend ຮັບເຂົ້າໃບຂໍປະກຽານ) */}
+          <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2">
+            <p className="text-xs font-medium text-blue-800">
+              ໃບຂໍທີ່ອະນຸມັດແລ້ວ (ຕ້ອງເລືອກ) — ຈຳນວນຮັບຂອງ POPR ຫຼື ຂອງລາຍການ SR ບໍ່ເກີນໄດ້
+            </p>
+            {srError && <p className="text-xs text-red-500">{srError}</p>}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="ໃບຂໍ" required error={errors.supplyRequestId}>
+                <select
+                  value={form.supplyRequestId || ''}
+                  onChange={(e) => {
+                    const srId = e.target.value;
+                    const sr = srRequests.find((r) => r._id === srId);
+                    const first = sr ? (sr.items || [])[0] : null;
+                    const remain = first
+                      ? ((sr.progress || [])[0]?.remaining ?? first.quantity)
+                      : '';
+                    set({
+                      supplyRequestId: srId,
+                      supplyRequestItemIndex: first ? 0 : '',
+                      itemName: first ? first.name : form.itemName,
+                      quantity: remain || form.quantity,
+                      poTotalQuantity: remain || form.poTotalQuantity,
+                    });
+                  }}
+                  disabled={srLoading}
+                  className={inputCls}
+                >
+                  <option value="">{srLoading ? 'ກຳລັງໂຫຼດ...' : '— ເລືອກໃບຂໍທີ່ອະນຸມັດ —'}</option>
+                  {srRequests.map((r) => (
+                    <option key={r._id} value={r._id}>
+                      {r._id} · {r.items?.[0]?.name || ''} ({r.items?.length || 0} ລາຍການ)
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="ລາຍການໃນໃບຂໍ" required error={errors.supplyRequestItemIndex}>
+                <select
+                  value={String(form.supplyRequestItemIndex ?? '')}
+                  onChange={(e) => {
+                    const idx = Number(e.target.value);
+                    const sr = srRequests.find((r) => r._id === form.supplyRequestId);
+                    const item = sr ? (sr.items || [])[idx] : null;
+                    const remain = item
+                      ? ((sr.progress || [])[idx]?.remaining ?? item.quantity)
+                      : form.quantity;
+                    set({
+                      supplyRequestItemIndex: idx,
+                      itemName: item ? item.name : form.itemName,
+                      quantity: remain || form.quantity,
+                      poTotalQuantity: remain || form.poTotalQuantity,
+                    });
+                  }}
+                  disabled={!form.supplyRequestId}
+                  className={inputCls}
+                >
+                  <option value="">— ເລືອກລາຍການ —</option>
+                  {(srRequests.find((r) => r._id === form.supplyRequestId)?.items || []).map(
+                    (it, i) => {
+                      const p = (srRequests.find((r) => r._id === form.supplyRequestId)?.progress || [])[i] || {};
+                      return (
+                        <option key={i} value={i}>
+                          {it.name} (ອະນຸມັດ {it.quantity} · ຮັບແລ້ວ {p.received ?? 0} · ເຫລືອ {p.remaining ?? it.quantity})
+                        </option>
+                      );
+                    },
+                  )}
+                </select>
+              </Field>
+            </div>
+            {srLine && (
+              <p className="text-xs text-blue-700">
+                ຈັດຊື້ຕາມ <b>{srLine.item.name}</b> ຈຳນວນ <b>{srLine.progress.remaining ?? srLine.item.quantity}</b> ຫົວໜ່ວຍ
+                {srLine.progress.received ? ` (ຮັບແລ້ວ ${srLine.progress.received})` : ''}
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="ລາຍການອຸປະກອນ" required error={errors.itemName} className="sm:col-span-2">
               <input
@@ -1006,6 +1296,14 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 min="1"
                 value={form.lotNo}
                 onChange={(e) => set({ lotNo: e.target.value })}
+                className={inputCls}
+              />
+            </Field>
+            <Field label="ວັນຄາດຫວັງສົ່ງມອບ">
+              <input
+                type="date"
+                value={form.expectedDeliveryDate}
+                onChange={(e) => set({ expectedDeliveryDate: e.target.value })}
                 className={inputCls}
               />
             </Field>
@@ -1240,6 +1538,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               />
             </Field>
           </div>
+          {renderRelease()}
         </div>
       );
     }
@@ -1263,11 +1562,12 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               className={inputCls}
             />
           </Field>
-          <Toggle checked={form.securityPolicy} onChange={(v) => set({ securityPolicy: v })}>
-            ຕັ້ງຄ່າຄວາມປອດໄພມາດຕະຖານ (Antivirus, EDR, Firewall, ເຂົ້າລະຫັດດິສ, ເຊື່ອມ Domain)
+          <Toggle checked={form.securityReady} onChange={(v) => set({ securityReady: v, securityPolicy: v })}>
+            ຕັ້ງຄວາມປອດໄພ/ເຂົ້າລະຫັດແລ້ວ (Antivirus, EDR, Firewall, ເຂົ້າລະຫັດດິສ, ເຊື່ອມ Domain)
           </Toggle>
+          {errors.securityReady && <p className="text-xs text-red-500">{errors.securityReady}</p>}
           <p className="text-xs text-gray-500">
-            ເປີດຊ່ອງນີ້ = ຢືນຢັນວ່າໄດ້ຕັ້ງຄ່າຄວາມປອດໄພຕາມມາດຕະຖານຂອງອົງກອນແລ້ວ. ຖ້າຕ້ອງການລາຍລະອຽດເພີ່ມ ກົດ "ລາຍລະອຽດ".
+            ເປີດຊ່ອງນີ້ = ຢືນຢັນວ່າໄດ້ຕັ້ງຄວາມປອດໄພຕາມມາດຕະຖານຂອງອົງກອນແລ້ວ. ຖ້າຕ້ອງການລາຍລະອຽດເພີ່ມ ກົດ "ລາຍລະອຽດ".
           </p>
           {showPrepDetail ? (
             <div className="space-y-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
@@ -1291,12 +1591,15 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                   />
                 </Field>
               </div>
-              <Field label="ຊອບແວຄວາມປອດໄພ">
-                <div className="flex flex-wrap gap-5 pt-1">
-                  <Toggle checked={form.secAntivirus} onChange={(v) => set({ secAntivirus: v })}>Antivirus</Toggle>
-                  <Toggle checked={form.secEdr} onChange={(v) => set({ secEdr: v })}>EDR</Toggle>
-                  <Toggle checked={form.secFirewall} onChange={(v) => set({ secFirewall: v })}>Firewall</Toggle>
-                </div>
+              <Field label="ຊອບແວຄວາມປອດໄພ (ຍືນຢືມ)">
+                <p className="text-xs text-gray-600 pt-1">
+                  Antivirus · EDR · Firewall —{' '}
+                  {form.securityReady ? (
+                    <span className="text-emerald-600">ຕິດຕັ້ງແລ້ວ</span>
+                  ) : (
+                    <span className="text-amber-600">ຢືນຢັນຢູ່ການກົດຊ່ອງ "ຕັ້ງຄວາມປອດໄພ/ເຂົ້າລະຫັດແລ້ວ" ຂອງ</span>
+                  )}
+                </p>
               </Field>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="ເຄືອຂ່າຍ (VLAN / Wi-Fi)">
@@ -1340,117 +1643,6 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
       );
     }
 
-    if (isConsumable) {
-      return (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-purple-100 bg-purple-50/60 p-4 text-sm text-purple-800">
-            ວັດສະດຸສິ້ນເປືອງເຂົ້າຄັງ — ບໍ່ຕ້ອງລະບຸຜູ້ຮັບ/ລາຍເຊັນ. ເມື່ອປິດ POPR ສະຕ໊ອກຂອງ "{form.itemName || '—'}" ຈະເພີ່ມ{' '}
-            <b>{form.receivedQuantity === '' ? form.quantity : form.receivedQuantity}</b> {form.unit || 'ໜ່ວຍ'}.
-          </div>
-          <Field label="ວັນທີເຂົ້າຄັງ">
-            <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
-          </Field>
-        </div>
-      );
-    }
-
-    const modeBox = (
-      <div className="rounded-xl border border-gray-200 p-3 space-y-2">
-        <p className="text-xs font-medium text-gray-700">ປ່ອຍແບບໃດ?</p>
-        <label className="flex items-start gap-2 text-sm cursor-pointer">
-          <input type="radio" checked={!form.storeInStock} onChange={() => set({ storeInStock: false })} className="mt-1" />
-          <span><b>ມອບໃຫ້ຜູ້ໃຊ້ທັນທີ</b> — ຊັບສິນຢູ່ກັບຜູ້ຮັບ, ສະຕ໊ອກບໍ່ເພີ່ມ</span>
-        </label>
-        <label className="flex items-start gap-2 text-sm cursor-pointer">
-          <input
-            type="radio"
-            checked={!!form.storeInStock}
-            onChange={() => set({
-              storeInStock: true,
-              // ເຂົ້າຄັງ = ບໍ່ມອບໃຫ້ໃຜ → ລ້າງຂໍ້ມູນຜູ້ຮັບທີ່ຄ້າງຢູ່ ເພື່ອບໍ່ໃຫ້ສົ່ງໄປ backend
-              assignedUserId: '',
-              assignedUser: '',
-              deliveredTo: '',
-              deliveredToUserId: '',
-              signedHandover: false,
-            })}
-            className="mt-1"
-          />
-          <span><b>ເຂົ້າຄັງ</b> — ຊັບສິນ "ວ່າງ", ສະຕ໊ອກ +{qty}, ບໍ່ຕ້ອງເລືອກຜູ້ຮັບ (ຜູ້ຂໍມາເບີກພາຍຫຼັງຕາມໃບຂໍ)</span>
-        </label>
-      </div>
-    );
-    if (form.storeInStock) {
-      return (
-        <div className="space-y-4">
-          {modeBox}
-          {errors.location && <p className="text-xs text-red-500">{errors.location}</p>}
-          <Field label="ວັນທີເຂົ້າຄັງ">
-            <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
-          </Field>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-4">
-        {modeBox}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Field label="ສົ່ງມອບໃຫ້ (ພະນັກງານ/ພະແນກ)" required error={errors.deliveredTo}>
-            <input
-              type="text"
-              value={form.deliveredTo}
-              onChange={(e) => set({ deliveredTo: e.target.value, deliveredToUserId: '' })}
-              className={inputCls}
-            />
-            <EmployeeCodeLookup
-              onResolved={(u) => set({ deliveredTo: u.name, deliveredToUserId: u.userId })}
-              linkedLabel={form.deliveredToUserId ? form.deliveredTo : ''}
-            />
-          </Field>
-          <Field label="ຜູ້ຮັບ/ຜູ້ໃຊ້ (ເລືອກດ້ວຍລະຫັດພະນັກງານ)" required error={errors.assignedUser}>
-            <input
-              type="text"
-              value={form.assignedUser}
-              readOnly
-              placeholder="ກົດຄົ້ນຫາດ້ວຍລະຫັດພະນັກງານ"
-              className={`${inputCls} bg-gray-50`}
-            />
-            <EmployeeCodeLookup
-              onResolved={(u) => set({ assignedUser: u.name, assignedUserId: u.userId })}
-              linkedLabel={form.assignedUserId ? form.assignedUser : ''}
-            />
-          </Field>
-          <Field label="ວັນທີສົ່ງມອບ">
-            <input type="date" value={form.deliveryDate} onChange={(e) => set({ deliveryDate: e.target.value })} className={inputCls} />
-          </Field>
-        </div>
-        <Field label="ສະຖານະສິນຊັບຫຼັງມອບ">
-          <select value={form.assetStatus} onChange={(e) => set({ assetStatus: e.target.value })} className={inputCls}>
-            {ASSET_STATUSES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
-        </Field>
-        <div className="flex flex-wrap gap-5">
-          <Toggle checked={form.signedHandover} onChange={(v) => set({ signedHandover: v })}>
-            ຜູ້ຮັບລົງນາມເອກະສານຮັບມອບ
-          </Toggle>
-          <Toggle checked={form.userOrientation} onChange={(v) => set({ userOrientation: v })}>
-            ແນະນຳການໃຊ້ / ຄວາມປອດໄພ / ຊ່ອງທາງແຈ້ງບັນຫາ IT
-          </Toggle>
-        </div>
-        {errors.signedHandover && <p className="text-xs text-red-500">{errors.signedHandover}</p>}
-
-        <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600 space-y-1">
-          <p className="font-semibold text-gray-700">ສະຫຼຸບການຕັ້ງຄ່າ</p>
-          <p>ລາຍການ: {form.itemName || '—'} (x{form.quantity})</p>
-          <p>ຜູ້ຂາຍ: {form.vendor || '—'} · PO: {form.poNumber || '—'}</p>
-          <p>ຈຳນວນໜ່ວຍ: {qty} · ຜູກຊັບສິນເດີມ: {(form.units || []).filter((u) => u.assetId).length}</p>
-          <p>OS: {form.os || '—'} · AD: {form.domainJoined ? 'ເຊື່ອມແລ້ວ' : 'ຍັງ'} · BitLocker: {form.diskEncryption ? 'ເປີດ' : 'ຍັງ'}</p>
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -1458,8 +1650,8 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
       <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-800">
         <Info size={16} className="mt-0.5 shrink-0" />
         <p>
-          ຂະບວນການ POPR: <b>P</b> ຈັດຫາ/ຈັດຊື້ → <b>O</b> ຮັບເຂົ້າ → <b>P</b> ຕຽມ/ກຳນົດຄ່າ → <b>R</b> ປ່ອຍ/ລົງທະບຽນ.
-          ບັນທຶກຜ່ານ API <code>/api/popr-records</code> ແລ້ວ.
+          ຂະບວນການ POPR: <b>P</b> ຈັດຫາ/ຈັດຊື້ → <b>O</b> ຮັບເຂົ້າ/ມອບມອບ → <b>P</b> ຕຽມ/ກຳນົດຄ່າ.
+          ທຸກ POPR ຕ້ອງຜູກໃບຂໍທີ່ອະນຸມັດແລ້ວ. ບັນທຶກຜ່ານ API <code>/api/popr-records</code> ແລ້ວ.
         </p>
       </div>
 
@@ -1541,7 +1733,17 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                   return (
                     <tr key={r._id} className="hover:bg-gray-50">
                       <td className="p-4 font-semibold text-gray-900">{r._id}</td>
-                      <td className="p-4 font-medium text-gray-800">{f.itemName || '—'}{Number(f.quantity) > 1 ? ` (x${f.quantity})` : ''}</td>
+                      <td className="p-4 font-medium text-gray-800">
+                        {f.itemName || '—'}{Number(f.quantity) > 1 ? ` (x${f.quantity})` : ''}
+                        {f.supplyRequestId && (
+                          <div className="text-[11px] text-blue-600">
+                            ໃບຂໍ {f.supplyRequestId}
+                            {f.supplyRequestItemIndex !== '' && f.supplyRequestItemIndex !== undefined
+                              ? ` · ລາຍການ ${Number(f.supplyRequestItemIndex) + 1}`
+                              : ''}
+                          </div>
+                        )}
+                      </td>
                       <td className="p-4">{f.vendor || '—'}</td>
                       <td className="p-4">{f.orderedBy || r.createdBy || '—'}</td>
                       <td className="p-4">
@@ -1750,7 +1952,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 <button
                   type="button"
                   onClick={saveDraft}
-                  disabled={saving || !form.itemName.trim()}
+                  disabled={saving || !form.itemName.trim() || !form.supplyRequestId}
                   className="px-4 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:bg-gray-50 transition disabled:opacity-40"
                 >
                   {saving ? 'ກຳລັງບັນທຶກ...' : 'ບັນທຶກຮ່າງ'}
@@ -1764,7 +1966,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                   >
                     ຕໍ່ໄປ <ChevronRight size={16} />
                   </button>
-                ) : canApprove ? (
+                ) : canComplete ? (
                   <button
                     type="button"
                     onClick={submitAll}
@@ -1775,7 +1977,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                   </button>
                 ) : (
                   <span className="text-xs text-gray-400 max-w-[16rem] text-right">
-                    ບັນທຶກເປັນຮ່າງໄດ້ — ການປິດສຳເລັດຕ້ອງມີສິດອະນຸມັດ (supplies:approve)
+                    ບັນທຶກເປັນຮ່າງໄດ້ — ການປິດສຳເລັດຕ້ອງມີສິດຮັບເຂົ້າ (supplies:receive)
                   </span>
                 )}
               </div>

@@ -31,6 +31,12 @@ export function hasPermission(moduleKey, action = 'read') {
     return !!mod && Array.isArray(mod.actions) && mod.actions.includes(action);
 }
 
+/** ມີສິດໃດໆໜຶ່ງຂອງລາຍການ (OR) — ຈຳປັນຕ້ອງມີ receive ຫຼື approve */
+export function hasAnyPermission(moduleKey, actions = []) {
+    const list = Array.isArray(actions) ? actions : [actions];
+    return list.some((a) => hasPermission(moduleKey, a));
+}
+
 export function canView(moduleKey) {
     return hasPermission(moduleKey, 'read');
 }
