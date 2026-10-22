@@ -22,6 +22,8 @@ export default function AssetRegistry() {
   const publicBaseUrl = (import.meta.env.VITE_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
   const claimBaseUrl = publicBaseUrl || window.location.origin;
   const isLocalOrigin = !publicBaseUrl && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  // ຖ້າເປີດຜ່ານ IP ກົງ (ບໍ່ມີ domain) ແລະບໍ່ໄດ້ຕັ້ງ VITE_PUBLIC_BASE_URL — QR ພິມໄວ້ຈະຝັງ IP ນັ້ນໄວ້
+  const isIpOrigin = !publicBaseUrl && /^\d{1,3}(\.\d{1,3}){3}$/.test(window.location.hostname);
 
   const canCreate = hasPermission('assets', 'create');
   const canRead = hasPermission('assets', 'read');
@@ -62,7 +64,6 @@ export default function AssetRegistry() {
   const [batchBranch, setBatchBranch] = useState('');
   const [batchPurchase, setBatchPurchase] = useState('');
   const [batchWarranty, setBatchWarranty] = useState('');
-  const [batchAddStock, setBatchAddStock] = useState(false);
   const [batchDone, setBatchDone] = useState({});       // rowId → ຈຳນວນທີ່ສ້າງແລ້ວ (ກົດບັນທຶກຊ້ຳ = ຂ້າມສ່ວນທີ່ສ້າງແລ້ວ)
   const [batchResult, setBatchResult] = useState(null);
   const [batchError, setBatchError] = useState('');
@@ -84,6 +85,8 @@ export default function AssetRegistry() {
   const [barcodeModalAsset, setBarcodeModalAsset] = useState(null);
   const [historyModalAsset, setHistoryModalAsset] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  // id ຂອງຊັບສິນຈາກ QR ທີ່ສະແກນໄດ້ — ຖາມຜູ້ໃຊ້ວ່າຈະຮັບເຄື່ອງ ຫຼື ເບິ່ງລາຍລະອຽດ
+  const [scanTargetId, setScanTargetId] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
   // ເລືອກຫຼາຍລາຍການ → ຢືນຢັນຮັບເຄື່ອງທັງໝົດໃນຄັ້ງດຽວ (bulk claim)
@@ -92,6 +95,9 @@ export default function AssetRegistry() {
   const [bulkClaimSubmitting, setBulkClaimSubmitting] = useState(false);
   const [bulkClaimError, setBulkClaimError] = useState('');
   const [bulkClaimResults, setBulkClaimResults] = useState(null);
+  // ຊ່ອງລະຫັດພະນັກງານຂອງຜູ້ມາຮັບ (ສຳລະບັນ assets:assign) — ກວດກັບ /users/lookup/ກ່ອນສົ່ງ claim
+  const [bulkClaimCode, setBulkClaimCode] = useState('');
+  const [bulkLookup, setBulkLookup] = useState({ state: 'idle', user: null });
 
   // ຜູ້ຮັບ = ບັນຊີທີ່ກຳລັງ login (claim ຜູກກັບ token ເທົ່ານັ້ນ)
   const currentUser = getCurrentUser();
@@ -150,7 +156,6 @@ export default function AssetRegistry() {
     setBatchBranch('');
     setBatchPurchase('');
     setBatchWarranty('');
-    setBatchAddStock(false);
     setBatchDone({});
     setBatchResult(null);
     setBatchError('');
@@ -240,8 +245,17 @@ export default function AssetRegistry() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  const branchName = (id) => branches.find((b) => b._id === id)?.name || id;
+  // ref ອາດກັບມາເປັນ object (populate) ຫຼື string — ຮັບທັງສອງແບບເພື່ອບໍ່ໃຫ້ React ລົ້ມ
+  const refId = (v) => (v && typeof v === 'object' ? v._id : v);
+  const branchName = (id) => {
+    if (id && typeof id === 'object') return id.name || id._id || '—';
+    return branches.find((b) => b._id === id)?.name || id;
+  };
   const userName = (id) => {
+    if (id && typeof id === 'object') {
+      const name = `${id.firstName || ''} ${id.lastName || ''}`.trim();
+      return name ? `${name}${id.employeeCode ? ` (${id.employeeCode})` : ''}` : id._id || '—';
+    }
     const u = users.find((u) => u._id === id);
     return u ? `${u.firstName} ${u.lastName} (${u.employeeCode})` : id;
   };
@@ -256,20 +270,26 @@ export default function AssetRegistry() {
     }
   };
 
-  // ຂໍ້ມູນຊັບສິນເປັນຂໍ້ຄວາມฝังลง QR — ສະແກນດ້ວຍกลໍ່ມືຖືເຫັນຂໍ້ມູນທັນທີ ໂດຍບໍ່ຕ້ອງເຊື່ອມຕໍ່ເຊີບເວີ
-  // QR ແບບອອຟໄລ — ຝັງສະເພາະ Asset Tag ເພື່ອພິມເປັນສະຕິກເກີ ບໍ່ໃຫ້ມີຂໍ້ມູນທີ່ຈະລ້າສະໄໝ
+  // QR ພິມເປັນສະຕິກເກີ — ຝັງລິ້ງ /assets/<id>?claim=1 ເທົ່ານັ້ນ (ຕ້ອງ login ກ່ອນເປີດ)
+  // ບໍ່ຝັງຂໍ້ມູນຊັບສິນເພື່ອປ້ອງກັນການຮົ່ວໄຫຼຂໍ້ມູນຈາກ QR ທີ່ຖືກພິມໄວ້
 
   const isAscii = (s) => !(s || '').split('').some((c) => c.charCodeAt(0) > 127);
 
   const filteredAssets = assets.filter((a) => {
     if (statusFilter && a.status !== statusFilter) return false;
-    if (branchFilter && a.branchId !== branchFilter) return false;
+    if (branchFilter && refId(a.branchId) !== branchFilter) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!a.assetTag.toLowerCase().includes(q)) return false;
     }
     return true;
   });
+
+  // ກຳຈັດລາຍການທີ່ເລືອກໄວ້ເມື່ປ່ຽນຕົວກອງ/ຄົ້ນຫາ — ບໍ່ໃຫ້ຢືນຢັນຊັບສິນທີ່ເບິ່ງບໍ່ເຫັນອີກ
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedIds(new Set());
+  }, [search, statusFilter, branchFilter]);
 
   const closeCreate = () => {
     setShowCreateModal(false);
@@ -365,22 +385,9 @@ export default function AssetRegistry() {
           break;
         }
       }
-      let stockMsg = '';
-      const created = ok - startOk;
-      if (batchAddStock && r.catalogItemId && created > 0) {
-        try {
-          const res = await fetch(`${API_BASE_URL}/supply-catalog/${encodeURIComponent(r.catalogItemId)}/adjust-stock`, {
-            method: 'PATCH', headers, body: JSON.stringify({ delta: created }),
-          });
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(body?.msg || 'ບໍ່ມີສິດ ຫຼືເກີດຂໍ້ຜິດພາດ');
-          }
-        } catch (err) {
-          stockMsg = `ສ້າງຊັບສິນແລ້ວ ແຕ່ເພີ່ມສະຕ໊ອກ Catalog ບໍ່ສຳເລັດ: ${err.message}`;
-        }
-      }
-      results.push({ name: r.name || r.assetTag, ok, want, errMsg, stockMsg });
+      // ບໍ່ເອີ້ນ adjust-stock ດ້ວຍຕົນເອງ — backend POST /assets ບັນທຶກ catalog stock +1 ອັດຕະໂນມັດຢູ່ແລ້ວ
+      // (PATCH adjust-stock ປະຕິເສດລາຍການ itemType=ASSET ແລະຈະນັບຊ້ຳຖ້າເອີ້ນເພີ່ມອີກ)
+      results.push({ name: r.name || r.assetTag, ok, want, errMsg });
       if (failed) break;
     }
     setBatchDone(done);
@@ -474,6 +481,8 @@ export default function AssetRegistry() {
   const openBulkClaim = () => {
     setBulkClaimError('');
     setBulkClaimResults(null);
+    setBulkClaimCode('');
+    setBulkLookup({ state: 'idle', user: null });
     setBulkClaimOpen(true);
   };
 
@@ -481,13 +490,44 @@ export default function AssetRegistry() {
     setBulkClaimOpen(false);
     setBulkClaimError('');
     setBulkClaimResults(null);
+    setBulkClaimCode('');
+    setBulkLookup({ state: 'idle', user: null });
   };
 
+  // ກວດລະຫັດພະນັກງານຜູ້ມາຮັບ (debounce 400ms) — ໃຊ້ /users/lookup ທີ່ບໍ່ຕ້ອງມີສິດ users:read
+  const bulkCodeTrim = bulkClaimCode.trim();
+  useEffect(() => {
+    if (!bulkClaimOpen || !canAssign || !bulkCodeTrim) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBulkLookup({ state: 'idle', user: null });
+      return undefined;
+    }
+    setBulkLookup({ state: 'loading', user: null });
+    const t = setTimeout(() => {
+      fetch(`${API_BASE_URL}/users/lookup/${encodeURIComponent(bulkCodeTrim)}`, { headers })
+        .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
+        .then(({ ok, body }) => setBulkLookup(ok ? { state: 'found', user: unwrap(body) } : { state: 'notfound', user: null }))
+        .catch(() => setBulkLookup({ state: 'error', user: null }));
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bulkCodeTrim, bulkClaimOpen, canAssign]);
+
   // ຢືນຢັນຮັບເຄື່ອງທີ່ເລືອກທັງໝົດ — ເອີ້ນ PATCH /assets/:id/claim ເປັນລຳດັບ ແລ້ວສະຫຼຸບຜົນລາຍຊິ້ນ
+  // ຜູ້ມີ assets:assign (ເຊັ່ນ ເຫນືນ) ຕ້ອງໃສ່ລະຫັດພະນັກງານຂອງຜູ້ມາຮັບ — ສົ່ງ assigneeCode ໄປກັບ claim
   const confirmBulkClaim = () => {
-    const targetAssets = assets.filter((a) => selectedIds.has(a._id));
+    const targetAssets = filteredAssets.filter((a) => selectedIds.has(a._id));
     if (targetAssets.length === 0) {
       setBulkClaimError('ກະລຸນາເລືອກຊັບສິນຢ່າງໜ້ອຍ 1 ລາຍການ');
+      return;
+    }
+    const code = bulkClaimCode.trim();
+    if (canAssign && !code) {
+      setBulkClaimError('ກະລຸນາໃສ່ລະຫັດພະນັກງານຂອງຜູ້ມາຮັບ');
+      return;
+    }
+    if (canAssign && bulkLookup.state !== 'found') {
+      setBulkClaimError('ກະລຸນາກວດລະຫັດພະນັກງານໃຫ້ພົບກ່ອນກົດຢືນຢັນ');
       return;
     }
     setBulkClaimSubmitting(true);
@@ -502,7 +542,10 @@ export default function AssetRegistry() {
             method: 'PATCH',
             headers,
             body: JSON.stringify({
-              note: 'ຮັບເຄື່ອງຫຼາຍລາຍການດ້ວຍຕົນເອງ — ຢືນຢັນຕົວຕົນຂອງຜູ້ໃຊ້ທີ່ກຳລັງ login',
+              note: canAssign
+                ? 'ມອບເຄື່ອງຫຼາຍລາຍການຢູ່ຄັງ — ຢືນຢັນຕົວຕົນດ້ວຍລະຫັດພະນັກງານ'
+                : 'ຮັບເຄື່ອງຫຼາຍລາຍການດ້ວຍຕົນເອງ — ຢືນຢັນຕົວຕົນຂອງຜູ້ໃຊ້ທີ່ກຳລັງ login',
+              ...(canAssign && code ? { assigneeCode: code } : {}),
             }),
           });
           const body = await res.json().catch(() => ({}));
@@ -917,8 +960,8 @@ export default function AssetRegistry() {
                       {cat ? (
                         <div className="text-xs text-gray-500">
                           ✓ {cat.name} ({cat._id}) — Asset Tag ສ້າງໃຫ້ອັດຕະໂນມັດ · ໃນທະບຽນ {cnt.total} (ວ່າງ {cnt.available}) · ສະຕ໊ອກ Catalog {cat.stockQty}
-                          {!batchAddStock && availAfter > cat.stockQty && (
-                            <span className="block text-amber-600">ຫຼັງສ້າງ ວ່າງ {availAfter} ເກີນສະຕ໊ອກ Catalog {cat.stockQty} — ຖ້າເປັນເຄື່ອງຊື້ໃໝ່ ໃຫ້ຕິກ "ເຄື່ອງຊື້ໃໝ່" ດ້ານລຸ່ມ</span>
+                          {availAfter > cat.stockQty && (
+                            <span className="block text-gray-400">ຫຼັງສ້າງ ສະຕ໊ອກ Catalog ຈະບວກ +{qty} ອັດຕະໂນມັດ (backend ນັບຈາກຊັບສິນວ່າງ)</span>
                           )}
                         </div>
                       ) : (
@@ -949,13 +992,6 @@ export default function AssetRegistry() {
                 })}
               </div>
 
-              {hasPermission('supplies', 'update') && (
-                <label className="flex items-start gap-2 text-xs text-gray-600 bg-amber-50/60 border border-amber-100 rounded-lg px-3 py-2">
-                  <input type="checkbox" className="mt-0.5" checked={batchAddStock} onChange={(e) => setBatchAddStock(e.target.checked)} />
-                  <span>ເຄື່ອງຊື້ໃໝ່ — ເພີ່ມສະຕ໊ອກ Catalog ນຳ (+ຈຳນວນທີ່ສ້າງ). ປ່ອຍວ່າງຖ້າເປັນການລົງທະບຽນເຄື່ອງທີ່ມີຢູ່ແລ້ວ ເພື່ອບໍ່ນັບຊ້ຳ.</span>
-                </label>
-              )}
-
               <div className="text-xs text-gray-500">ລວມ {batchTotal} ຊິ້ນ (ສູງສຸດ {MAX_BATCH} ຕໍ່ຄັ້ງ)</div>
 
               {batchResult && (
@@ -965,7 +1001,6 @@ export default function AssetRegistry() {
                       <div className={r.errMsg ? 'text-red-600' : 'text-emerald-700'}>
                         {r.errMsg ? '✕' : '✓'} {r.name}: ສ້າງແລ້ວ {r.ok}/{r.want}{r.errMsg ? ` — ${r.errMsg}` : ''}
                       </div>
-                      {r.stockMsg && <div className="text-amber-600">{r.stockMsg}</div>}
                     </div>
                   ))}
                 </div>
@@ -1041,11 +1076,10 @@ export default function AssetRegistry() {
                   level="M"
                   marginSize={2}
                 />
-                {isLocalOrigin ? (
+                {isLocalOrigin || isIpOrigin ? (
                   <div className="text-[11px] text-red-500 bg-red-50 border border-red-100 rounded-lg px-2 py-1">
-                    ກຳລັງເປີດຜ່ານ localhost — QR ນີ້ມືຖືຈະເປີດບໍ່ໄດ້.
-                    ໃຫ້ເປີດເວັບຜ່ານ https://&lt;IP ຂອງ PC&gt;:5173 ກ່ອນ ແລ້ວສະແກນໃໝ່
-                    (ຫຼື ຕັ້ງ VITE_PUBLIC_BASE_URL=https://&lt;IP&gt;:5173)
+                    ກຳລັງເປີດຜ່ານ localhost/IP — QR ນີ້ມືຖືຈະເປີດບໍ່ໄດ້ຖ້າ IP ປ່ຽນ.
+                    ໃຫ້ຕັ້ງ VITE_PUBLIC_BASE_URL=https://&lt;domain/IP ຖາວອນ&gt; ກ່ອນ build ແລ້ວສະແກນໃໝ່
                   </div>
                 ) : (
                   <div className="text-[11px] text-gray-400">ຕ້ອງເຊື່ອມຕໍ່ເຄືອຂ່າຍດຽວກັບເຊີບເວີ — ເປີດໜ້າໃສ່ລະຫັດພະນັກງານທັນທີ</div>
@@ -1114,7 +1148,7 @@ export default function AssetRegistry() {
                   }}
                   className="w-full px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition"
                 >
-                  ຮັບເຄື່ອງ / ຍັນຍົນ
+                  ຮັບເຄື່ອງ / ຢືນຢັນ
                 </button>
               </div>
             </div>
@@ -1195,18 +1229,57 @@ export default function AssetRegistry() {
               ) : (
                 <div className="space-y-3">
                   <p className="text-xs text-gray-500">
-                    ຈະມອບໝາຍຊັບສິນ {selectedIds.size} ລາຍການ ໃຫ້ບັນຊີທີ່ກຳລັງ login ເທົ່ານັ້ນ:
+                    {canAssign
+                      ? `ຈະມອບໝາຍຊັບສິນ ${selectedIds.size} ລາຍການ ໃຫ້ຜູ້ທີ່ກຳລັງຈະມາຮັບ — ພິມລະຫັດພະນັກງານເພື່ອກວດຊື່ກ່ອນຢືນຢັນ:`
+                      : `ຈະມອບໝາຍຊັບສິນ ${selectedIds.size} ລາຍການ ໃຫ້ບັນຊີທີ່ກຳລັງ login ເທົ່ານັ້ນ:`}
                   </p>
+                  {canAssign && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບ *</label>
+                      <input
+                        type="text"
+                        value={bulkClaimCode}
+                        onChange={(e) => { setBulkClaimCode(e.target.value); setBulkClaimError(''); }}
+                        placeholder="ເຊັ່ນ USR200"
+                        autoFocus
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                  )}
+                  {canAssign && bulkCodeTrim && bulkLookup.state === 'found' && bulkLookup.user && (
+                    <div className="bg-gray-50 rounded-xl p-3 text-sm space-y-1">
+                      <div className="flex justify-between"><span className="text-gray-500">ຊື່-ນາມສະກຸນ</span><span className="font-medium text-gray-800">{`${bulkLookup.user.firstName || ''} ${bulkLookup.user.lastName || ''}`.trim() || '—'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">ສາຂາ</span><span className="font-medium text-gray-800 text-right">{branchName(bulkLookup.user.branchId)}</span></div>
+                      {bulkLookup.user.isActive === false && <div className="text-xs text-red-600">ບັນຊີນີ້ຖືກປິດໃຊ້ງານ</div>}
+                    </div>
+                  )}
+                  {canAssign && bulkCodeTrim && bulkLookup.state === 'loading' && (
+                    <div className="text-xs text-gray-500">ກຳລັງກວດລະຫັດ...</div>
+                  )}
+                  {canAssign && bulkCodeTrim && bulkLookup.state === 'notfound' && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      ບໍ່ພົບລະຫັດພະນັກງານນີ້ — ກວດກັບບັດພະນັກງານຂອງຜູ້ມາຮັບອີກຄັ້ງ
+                    </div>
+                  )}
+                  {canAssign && bulkCodeTrim && bulkLookup.state === 'error' && (
+                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      ກວດລະຫັດບໍ່ໄດ້ຕອນນີ້ — Backend ຈະກວດຢືນຢັນອີກຄັ້ງຕອນບັນທຶກ
+                    </div>
+                  )}
                   <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
                     <div className="flex justify-between py-1 border-b border-gray-100">
                       <span className="text-gray-500">ຜູ້ຮັບ</span>
                       <span className="font-medium text-gray-800">
-                        {claimUser ? (`${claimUser.firstName || ''} ${claimUser.lastName || ''}`.trim() || claimUser.email || '—') : '—'}
+                        {canAssign
+                          ? (bulkLookup.state === 'found' && bulkLookup.user
+                            ? (`${bulkLookup.user.firstName || ''} ${bulkLookup.user.lastName || ''}`.trim() || bulkLookup.user.employeeCode || '—')
+                            : '—')
+                          : (claimUser ? (`${claimUser.firstName || ''} ${claimUser.lastName || ''}`.trim() || claimUser.email || '—') : '—')}
                       </span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-gray-100">
                       <span className="text-gray-500">ລະຫັດພະນັກງານ</span>
-                      <span className="font-medium text-gray-800">{claimUser?.employeeCode || '—'}</span>
+                      <span className="font-medium text-gray-800">{canAssign ? (bulkLookup.user?.employeeCode || bulkCodeTrim || '—') : (claimUser?.employeeCode || '—')}</span>
                     </div>
                     <div className="flex justify-between py-1">
                       <span className="text-gray-500">ຈຳນວນຊັບສິນ</span>
@@ -1214,7 +1287,7 @@ export default function AssetRegistry() {
                     </div>
                   </div>
                   <div className="max-h-44 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100">
-                    {assets.filter((a) => selectedIds.has(a._id)).map((a) => (
+                    {filteredAssets.filter((a) => selectedIds.has(a._id)).map((a) => (
                       <div key={a._id} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
                         <span className="font-mono text-gray-800 truncate">{a.assetTag}</span>
                         <span className="text-gray-400 shrink-0">{a.type || '—'}</span>
@@ -1234,10 +1307,15 @@ export default function AssetRegistry() {
                     <button
                       type="button"
                       onClick={confirmBulkClaim}
-                      disabled={bulkClaimSubmitting || !claimUser}
+                      disabled={
+                        bulkClaimSubmitting
+                        || (canAssign
+                          ? !bulkCodeTrim || bulkLookup.state !== 'found' || bulkLookup.user?.isActive === false
+                          : !claimUser)
+                      }
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium disabled:opacity-50"
                     >
-                      {bulkClaimSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ຍັນຍົນຮັບເຄື່ອງ'}
+                      {bulkClaimSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ຢືນຢັນຮັບເຄື່ອງ'}
                     </button>
                   </div>
                 </div>
@@ -1254,14 +1332,49 @@ export default function AssetRegistry() {
               const raw = String(text || '').trim();
               const urlMatch = raw.match(/\/assets\/([A-Za-z0-9_-]+)/);
               if (urlMatch) {
-                // ໄປໜ້າລາຍລະອຽດຕາມ id ໃນ QR ໂດຍກົງ — ບໍ່ຕ້ອງໃຫ້ຊັບສິນຢູ່ໃນລາຍການທີ່ໂຫຼດ/ກັ່ນຕອງຢູ່
-                navigate(`/assets/${urlMatch[1]}?claim=1`);
+                // QR ຝັງ /assets/<id> — ບອກຜູ້ໃຊ້ກ່ອນວ່າຈະ "ຮັບເຄື່ອງ" ຫຼື "ເບິ່ງລາຍລະອຽດ"
+                setScannerOpen(false);
+                setScanTargetId(urlMatch[1]);
                 return;
               }
               setSearch(raw);
             }}
             onClose={() => setScannerOpen(false)}
           />
+        )}
+
+        {scanTargetId && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-xs space-y-4 text-center">
+              <div>
+                <div className="text-sm font-semibold text-gray-800">ພົບ QR ຂອງຊັບສິນ</div>
+                <div className="text-[11px] text-gray-500 mt-1">ເລືອກການກະທຳທີ່ຕ້ອງການ</div>
+              </div>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => { navigate(`/assets/${scanTargetId}?claim=1`); setScanTargetId(null); }}
+                  className="w-full px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition"
+                >
+                  ຮັບເຄື່ອງ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { navigate(`/assets/${scanTargetId}`); setScanTargetId(null); }}
+                  className="w-full px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl text-sm font-medium transition"
+                >
+                  ເບິ່ງລາຍລະອຽດ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScanTargetId(null)}
+                  className="w-full px-4 py-2 text-gray-500 hover:text-gray-700 text-sm"
+                >
+                  ຍົກເລີກ
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </MainLayout>

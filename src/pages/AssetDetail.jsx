@@ -27,7 +27,7 @@ export default function AssetDetail() {
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
 
-  // Modal ຍັນຍົນຮັບເຄື່ອງ — ມອບໝາຍໃຫ້ຜູ້ທີ່ກຳລັງ login ເທົ່ານັ້ນ (PATCH /assets/:id/claim)
+  // Modal ຢືນຢັນຮັບເຄື່ອງ — ມອບໝາຍໃຫ້ຜູ້ທີ່ກຳລັງ login ເທົ່ານັ້ນ (PATCH /assets/:id/claim)
   const currentUser = getCurrentUser();
   const claimUser = users.find(
     (u) => (currentUser?._id && u._id === currentUser._id) || (currentUser?.email && u.email === currentUser.email),
@@ -52,6 +52,13 @@ export default function AssetDetail() {
   function unwrap(body) {
     return body?.data !== undefined ? body.data : body;
   }
+
+  const statusLabel = (s) => ({
+    AVAILABLE: 'ວ່າງ',
+    ASSIGNED: 'ຖືກມອບໝາຍແລ້ວ',
+    UNDER_REPAIR: 'ກຳລັງສ້ອມແປງ',
+    RETIRED: 'ປົດລະວາງແລ້ວ',
+  }[s] || s || '—');
 
   function fetchAssetDetail(quiet = false) {
     if (!quiet) setLoading(true);
@@ -274,7 +281,7 @@ export default function AssetDetail() {
                 onClick={openClaim}
                 className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm"
               >
-                <UserCheck size={16} /> <span>ຮັບເຄື່ອງ / ຍັນຍົນ</span>
+                <UserCheck size={16} /> <span>ຮັບເຄື່ອງ / ຢືນຢັນ</span>
               </button>
             )}
             {canUpdate && (
@@ -308,7 +315,7 @@ export default function AssetDetail() {
               asset.status === 'UNDER_REPAIR' ? 'bg-amber-100 text-amber-700' :
               asset.status === 'RETIRED' ? 'bg-gray-200 text-gray-600' : 'bg-green-100 text-green-700'
             }`}>
-              {asset.status}
+              {statusLabel(asset.status)}
             </span>
           </div>
         </div>
@@ -350,7 +357,7 @@ export default function AssetDetail() {
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-100">
                   <span className="text-gray-500">ສະຖານະ</span>
-                  <span className="font-medium text-gray-800">{asset.status || '—'}</span>
+                  <span className="font-medium text-gray-800">{statusLabel(asset.status)}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-100">
                   <span className="text-gray-500">ວັນທີຊື້</span>
@@ -403,12 +410,12 @@ export default function AssetDetail() {
 
         {activeTab === 'maintenance' && (
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-gray-100 font-bold text-gray-800">ປະຫວັດການສ້ອມແປງ ແລະ บຳລຸງຮັກສາ</div>
+            <div className="p-4 border-b border-gray-100 font-bold text-gray-800">ປະຫວັດການສ້ອມແປງ ແລະ ບຳລຸງຮັກສາ</div>
             <div className="divide-y divide-gray-100">
               {loadingLogs ? (
                 <div className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</div>
               ) : maintenanceLogs.length === 0 ? (
-                <div className="p-6 text-center text-sm text-gray-500">ຍังບໍ່ມີປະຫວັດການສ້ອມແປງ</div>
+                <div className="p-6 text-center text-sm text-gray-500">ຍັງບໍ່ມີປະຫວັດການສ້ອມແປງ</div>
               ) : (
                 maintenanceLogs.map((log) => (
                   <div key={log._id || log.id} className="p-4 flex items-center justify-between gap-4">
@@ -494,7 +501,7 @@ export default function AssetDetail() {
 
               {asset.status !== 'AVAILABLE' && !claimDone && (
                 <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                  ອຸປະກອນນີ້ບໍ່ວ່າງ (ສະຖານະ: {asset.status}) — ບໍ່ສາມາດຮັບໄດ້
+                  ອຸປະກອນນີ້ບໍ່ວ່າງ (ສະຖານະ: {statusLabel(asset.status)}) — ບໍ່ສາມາດຮັບໄດ້
                 </div>
               )}
 
@@ -512,7 +519,7 @@ export default function AssetDetail() {
                     onClick={closeClaim}
                     className="w-full px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium transition"
                   >
-                    ເປີດໜ້າລາຍລະອຽດ
+                    ປິດ
                   </button>
                 </div>
               ) : canAssign ? (
@@ -626,7 +633,7 @@ export default function AssetDetail() {
                       disabled={claimSubmitting || asset.status !== 'AVAILABLE'}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium disabled:opacity-50"
                     >
-                      {claimSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ຍັນຍົນຮັບເຄື່ອງ'}
+                      {claimSubmitting ? 'ກຳລັງບັນທຶກ...' : 'ຢືນຢັນຮັບເຄື່ອງ'}
                     </button>
                   </div>
                 </div>

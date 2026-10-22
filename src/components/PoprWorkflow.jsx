@@ -225,12 +225,12 @@ function toPayload(form, status, stage) {
       equipmentCondition: form.equipmentCondition,
       receivedQuantity: isConsumable ? num(form.receivedQuantity) ?? qty : undefined,
       units,
-      snMatch: form.snMatch,
+      snMatch: isConsumable ? form.snMatch : true,
       receivedBy: form.receivedBy || undefined,
       receivedByUserId: form.receivedByUserId || null,
       custodian: form.custodian || undefined,
       location: form.location || undefined,
-      deliveryStatus: form.deliveryStatus,
+      deliveryStatus: status === 'COMPLETED' ? 'RECEIVED' : form.deliveryStatus,
     },
     preparation: {
       os: form.os || undefined,
@@ -309,6 +309,11 @@ function validateStep(step, form) {
     if (type === 'CONSUMABLE') {
       if (form.receivedQuantity === '' || !(Number(form.receivedQuantity) >= 0)) {
         err.receivedQuantity = 'ກະລຸນາລະບຸຈຳນວນທີ່ຮັບເຂົ້າຄັງຈິງ';
+      } else {
+        const ordered = Number(form.poTotalQuantity) || Number(form.quantity) || 0;
+        if (ordered > 0 && Number(form.receivedQuantity) > ordered) {
+          err.receivedQuantity = `ຈຳນວນຮັບ (${form.receivedQuantity}) ເກີນຈຳນວນສັ່ງ (${ordered}) — ກວດຈຳນວນອີກຄັ້ງ`;
+        }
       }
     } else if (type === 'ELECTRONIC') {
       const units = padUnits(form.units || [], qty);
@@ -333,14 +338,10 @@ function validateStep(step, form) {
       } else if (dup) {
         err.units = dup;
       }
-      if (!form.snMatch) err.snMatch = 'ຕ້ອງຢືນຢັນວ່າ S/N ກົງກັບເອກະສານ';
     }
   }
   if (step === 2 && type === 'ELECTRONIC') {
     if (!form.os.trim()) err.os = 'ກະລຸນາລະບຸລະບົບປະຕິບັດການ (OS)';
-    if (!form.secAntivirus && !form.secEdr && !form.secFirewall) {
-      err.security = 'ເລືອກຢ່າງໜ້ອຍ 1 ຊອບແວຄວາມປອດໄພ';
-    }
   }
   // ວັດສະດຸສິ້ນເປືອງເຂົ້າຄັງ — ບໍ່ຕ້ອງມີຜູ້ຮັບ/ລາຍເຊັນ
   if (step === 3 && type !== 'CONSUMABLE' && form.storeInStock && !form.location.trim()) {
@@ -630,6 +631,7 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [detail, setDetail] = useState(null);
+  const [showPrepDetail, setShowPrepDetail] = useState(false);
 
   const currentUser = getCurrentUser();
   const operatorName = currentUser
@@ -978,34 +980,15 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               className={inputCls}
             />
           </Field>
-          <div className="flex flex-wrap gap-5">
-            <Toggle checked={form.vendorStandard} onChange={(v) => set({ vendorStandard: v })}>
-              ຜູ້ຂາຍຕົງມາດຕະຖານ
-            </Toggle>
-            <Toggle checked={form.warrantyAgreement} onChange={(v) => set({ warrantyAgreement: v })}>
-              ມີຂໍ້ຕົກລົງຮັບປະກັນ
-            </Toggle>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="ເລກໃບສັ່ງຊື້ (PO)" required error={errors.poNumber}>
-              <input
-                type="text"
-                value={form.poNumber}
-                onChange={(e) => set({ poNumber: e.target.value })}
-                placeholder="PO-2026-0001"
-                className={inputCls}
-              />
-            </Field>
-            <Field label="ເລກໃບຮັບ/ໃບສົ່ງສິນຄ້າ">
-              <input
-                type="text"
-                value={form.goodsReceiptNo}
-                onChange={(e) => set({ goodsReceiptNo: e.target.value })}
-                placeholder="GRN-0001 / DN-0001"
-                className={inputCls}
-              />
-            </Field>
-          </div>
+          <Field label="ເລກໃບສັ່ງຊື້ (PO)" required error={errors.poNumber}>
+            <input
+              type="text"
+              value={form.poNumber}
+              onChange={(e) => set({ poNumber: e.target.value })}
+              placeholder="PO-2026-0001"
+              className={inputCls}
+            />
+          </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="ຈຳນວນສັ່ງທັງໝົດຕາມ PO" error={errors.poTotalQuantity}>
               <input
@@ -1068,30 +1051,6 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
               )}
             </div>
           )}
-          <Field label="ຜູ້ສັ່ງຊື້">
-            <input
-              type="text"
-              value={form.orderedBy}
-              readOnly
-              placeholder="ບໍ່ລະບຸ = ຜູ້ບັນທຶກ POPR (ທ່ານ) — ກົດຄົ້ນຫາເພື່ອປ່ຽນ"
-              className={`${inputCls} bg-gray-50`}
-            />
-            <EmployeeCodeLookup
-              onResolved={(u) => set({ orderedBy: u.name, orderedByUserId: u.userId })}
-              linkedLabel={form.orderedByUserId ? form.orderedBy : ''}
-            />
-          </Field>
-          <Field label="ສະຖານະການສັ່ງຊື້" error={errors.orderStatus}>
-            <select
-              value={form.orderStatus}
-              onChange={(e) => set({ orderStatus: e.target.value })}
-              className={inputCls}
-            >
-              {Object.entries(POPR_ORDER_STATUS).map(([key, s]) => (
-                <option key={key} value={key}>{s.label}</option>
-              ))}
-            </select>
-          </Field>
         </div>
       );
     }
@@ -1156,24 +1115,10 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 className={inputCls}
               />
             </Field>
-            <Field label="ສະພາບກ່ອງ/ຫີບ">
-              <select value={form.boxCondition} onChange={(e) => set({ boxCondition: e.target.value })} className={inputCls}>
+            <Field label="ສະພາບກ່ອງ/ອຸປະກອນ">
+              <select value={form.equipmentCondition} onChange={(e) => set({ equipmentCondition: e.target.value, boxCondition: e.target.value })} className={inputCls}>
                 {BOX_CONDITIONS.map((c) => (
                   <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="ສະພາບອຸປະກອນຕົວຈິງ">
-              <select value={form.equipmentCondition} onChange={(e) => set({ equipmentCondition: e.target.value })} className={inputCls}>
-                {BOX_CONDITIONS.map((c) => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="ສະຖານະການສົ່ງ/ກວດຮັບ">
-              <select value={form.deliveryStatus} onChange={(e) => set({ deliveryStatus: e.target.value })} className={inputCls}>
-                {Object.entries(POPR_DELIVERY_STATUS).map(([key, s]) => (
-                  <option key={key} value={key}>{s.label}</option>
                 ))}
               </select>
             </Field>
@@ -1272,8 +1217,8 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
             </div>
           )}
           {errors.snMatch && <p className="text-xs text-red-500">{errors.snMatch}</p>}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Field label="ຜູ້ຮັບເຄື່ອງ">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="ຜູ້ຮັບເຄື່ອງ" required error={errors.receivedBy}>
               <input
                 type="text"
                 value={form.receivedBy}
@@ -1284,9 +1229,6 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
                 onResolved={(u) => set({ receivedBy: u.name, receivedByUserId: u.userId })}
                 linkedLabel={form.receivedByUserId ? form.receivedBy : ''}
               />
-            </Field>
-            <Field label="ຜູ້ເກັບຮັກສາ (ບໍ່ບັງຄັບ)">
-              <input type="text" value={form.custodian} onChange={(e) => set({ custodian: e.target.value })} className={inputCls} />
             </Field>
             <Field label="ສະຖານທີ່">
               <input
@@ -1312,73 +1254,88 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
       }
       return (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="ລະບົບປະຕິບັດການ (OS)" required error={errors.os}>
-              <input
-                type="text"
-                value={form.os}
-                onChange={(e) => set({ os: e.target.value })}
-                placeholder="Windows 11 Pro / Ubuntu 24.04"
-                className={inputCls}
-              />
-            </Field>
-            <Field label="ຊອບແວຈຳເປັນ">
-              <input
-                type="text"
-                value={form.software}
-                onChange={(e) => set({ software: e.target.value })}
-                placeholder="Office, VPN, ໂປຣແກຣມວິຊາຊີບ"
-                className={inputCls}
-              />
-            </Field>
-          </div>
-          <Field label="ຊອບແວຄວາມປອດໄພ" required error={errors.security}>
-            <div className="flex flex-wrap gap-5 pt-1">
-              <Toggle checked={form.secAntivirus} onChange={(v) => set({ secAntivirus: v })}>Antivirus</Toggle>
-              <Toggle checked={form.secEdr} onChange={(v) => set({ secEdr: v })}>EDR</Toggle>
-              <Toggle checked={form.secFirewall} onChange={(v) => set({ secFirewall: v })}>Firewall</Toggle>
-            </div>
-          </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="ບັນຊີຜູ້ໃຊ້">
-              <input
-                type="text"
-                value={form.userAccount}
-                onChange={(e) => set({ userAccount: e.target.value })}
-                placeholder="username / ອີເມວ"
-                className={inputCls}
-              />
-            </Field>
-            <Field label="ເຄືອຂ່າຍ (VLAN / Wi-Fi)">
-              <input
-                type="text"
-                value={form.network}
-                onChange={(e) => set({ network: e.target.value })}
-                placeholder="VLAN-10 / WIFI-OFFICE"
-                className={inputCls}
-              />
-            </Field>
-          </div>
-          <Field label="ສິດເຂົ້າເຖິງຂໍ້ມູນ">
+          <Field label="ລະບົບປະຕິບັດການ (OS)" required error={errors.os}>
             <input
               type="text"
-              value={form.accessRights}
-              onChange={(e) => set({ accessRights: e.target.value })}
-              placeholder="Shared Drive, ERP, ແຟ້ມຂໍ້ມູນ..."
+              value={form.os}
+              onChange={(e) => set({ os: e.target.value })}
+              placeholder="Windows 11 Pro / Ubuntu 24.04"
               className={inputCls}
             />
           </Field>
-          <div className="flex flex-wrap gap-5">
-            <Toggle checked={form.domainJoined} onChange={(v) => set({ domainJoined: v })}>
-              ເຊື່ອມກັບ Active Directory / Domain
-            </Toggle>
-            <Toggle checked={form.diskEncryption} onChange={(v) => set({ diskEncryption: v })}>
-              ເປີດເຂົ້າລະຫັດດິສ (BitLocker)
-            </Toggle>
-            <Toggle checked={form.securityPolicy} onChange={(v) => set({ securityPolicy: v })}>
-              ຕັ້ງຄ່າຄວາມປອດໄພຕາມນະໂຍບາຍອົງກອນ
-            </Toggle>
-          </div>
+          <Toggle checked={form.securityPolicy} onChange={(v) => set({ securityPolicy: v })}>
+            ຕັ້ງຄ່າຄວາມປອດໄພມາດຕະຖານ (Antivirus, EDR, Firewall, ເຂົ້າລະຫັດດິສ, ເຊື່ອມ Domain)
+          </Toggle>
+          <p className="text-xs text-gray-500">
+            ເປີດຊ່ອງນີ້ = ຢືນຢັນວ່າໄດ້ຕັ້ງຄ່າຄວາມປອດໄພຕາມມາດຕະຖານຂອງອົງກອນແລ້ວ. ຖ້າຕ້ອງການລາຍລະອຽດເພີ່ມ ກົດ "ລາຍລະອຽດ".
+          </p>
+          {showPrepDetail ? (
+            <div className="space-y-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="ຊອບແວຈຳເປັນ">
+                  <input
+                    type="text"
+                    value={form.software}
+                    onChange={(e) => set({ software: e.target.value })}
+                    placeholder="Office, VPN, ໂປຣແກຣມວິຊາຊີບ"
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="ບັນຊີຜູ້ໃຊ້">
+                  <input
+                    type="text"
+                    value={form.userAccount}
+                    onChange={(e) => set({ userAccount: e.target.value })}
+                    placeholder="username / ອີເມວ"
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
+              <Field label="ຊອບແວຄວາມປອດໄພ">
+                <div className="flex flex-wrap gap-5 pt-1">
+                  <Toggle checked={form.secAntivirus} onChange={(v) => set({ secAntivirus: v })}>Antivirus</Toggle>
+                  <Toggle checked={form.secEdr} onChange={(v) => set({ secEdr: v })}>EDR</Toggle>
+                  <Toggle checked={form.secFirewall} onChange={(v) => set({ secFirewall: v })}>Firewall</Toggle>
+                </div>
+              </Field>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="ເຄືອຂ່າຍ (VLAN / Wi-Fi)">
+                  <input
+                    type="text"
+                    value={form.network}
+                    onChange={(e) => set({ network: e.target.value })}
+                    placeholder="VLAN-10 / WIFI-OFFICE"
+                    className={inputCls}
+                  />
+                </Field>
+                <Field label="ສິດເຂົ້າເຖິງຂໍ້ມູນ">
+                  <input
+                    type="text"
+                    value={form.accessRights}
+                    onChange={(e) => set({ accessRights: e.target.value })}
+                    placeholder="Shared Drive, ERP, ແຟ້ມຂໍ້ມູນ..."
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
+              <div className="flex flex-wrap gap-5">
+                <Toggle checked={form.domainJoined} onChange={(v) => set({ domainJoined: v })}>
+                  ເຊື່ອມກັບ Active Directory / Domain
+                </Toggle>
+                <Toggle checked={form.diskEncryption} onChange={(v) => set({ diskEncryption: v })}>
+                  ເປີດເຂົ້າລະຫັດດິສ (BitLocker)
+                </Toggle>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowPrepDetail(true)}
+              className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600"
+            >
+              ລາຍລະອຽດເພີ່ມເຕີມ (ບໍ່ບັງຄັບ)
+            </button>
+          )}
         </div>
       );
     }
@@ -1405,7 +1362,20 @@ export default function PoprWorkflow({ catalog = [], canManage = false }) {
           <span><b>ມອບໃຫ້ຜູ້ໃຊ້ທັນທີ</b> — ຊັບສິນຢູ່ກັບຜູ້ຮັບ, ສະຕ໊ອກບໍ່ເພີ່ມ</span>
         </label>
         <label className="flex items-start gap-2 text-sm cursor-pointer">
-          <input type="radio" checked={!!form.storeInStock} onChange={() => set({ storeInStock: true })} className="mt-1" />
+          <input
+            type="radio"
+            checked={!!form.storeInStock}
+            onChange={() => set({
+              storeInStock: true,
+              // ເຂົ້າຄັງ = ບໍ່ມອບໃຫ້ໃຜ → ລ້າງຂໍ້ມູນຜູ້ຮັບທີ່ຄ້າງຢູ່ ເພື່ອບໍ່ໃຫ້ສົ່ງໄປ backend
+              assignedUserId: '',
+              assignedUser: '',
+              deliveredTo: '',
+              deliveredToUserId: '',
+              signedHandover: false,
+            })}
+            className="mt-1"
+          />
           <span><b>ເຂົ້າຄັງ</b> — ຊັບສິນ "ວ່າງ", ສະຕ໊ອກ +{qty}, ບໍ່ຕ້ອງເລືອກຜູ້ຮັບ (ຜູ້ຂໍມາເບີກພາຍຫຼັງຕາມໃບຂໍ)</span>
         </label>
       </div>
