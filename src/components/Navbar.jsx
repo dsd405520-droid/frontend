@@ -66,7 +66,7 @@ const CREATE_OPTIONS = [
       { label: 'ສ້າງບົດບາດ/ສິດ', icon: Shield, module: 'roles', to: '/roles?create=1' },
       { label: 'ສ້າງສາຂາ', icon: Building2, module: 'branches', to: '/branches?create=branch' },
       { label: 'ສ້າງພະແນກ', icon: Layers, module: 'departments', to: '/branches?create=department' },
-      { label: 'ເພີ່ມລາຍການຊັບສິນ', icon: Package, module: 'supplies', to: '/assets?create=1' },
+      { label: 'ເພີ່ມລາຍການຊັບສິນ', icon: Package, module: 'supplies', to: '/goods-receipt?new=1' },
       { label: 'ສ້າງທະບຽນຊັບສິນ', icon: Laptop, module: 'assets', to: '/asset-registry?create=1' },
     ],
   },

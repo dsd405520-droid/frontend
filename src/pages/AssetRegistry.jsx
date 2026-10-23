@@ -10,8 +10,7 @@ import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import CameraScanner from '../components/CameraScanner';
-import BarcodeComponent from 'react-barcode';
-import { QRCodeSVG } from 'qrcode.react';
+import AssetTagVisual from '../components/AssetTagVisual';
 import { API_BASE_URL } from '../config';
 
 export default function AssetRegistry() {
@@ -273,7 +272,6 @@ export default function AssetRegistry() {
   // QR ພິມເປັນສະຕິກເກີ — ຝັງລິ້ງ /assets/<id>?claim=1 ເທົ່ານັ້ນ (ຕ້ອງ login ກ່ອນເປີດ)
   // ບໍ່ຝັງຂໍ້ມູນຊັບສິນເພື່ອປ້ອງກັນການຮົ່ວໄຫຼຂໍ້ມູນຈາກ QR ທີ່ຖືກພິມໄວ້
 
-  const isAscii = (s) => !(s || '').split('').some((c) => c.charCodeAt(0) > 127);
 
   const filteredAssets = assets.filter((a) => {
     if (statusFilter && a.status !== statusFilter) return false;
@@ -1068,45 +1066,13 @@ export default function AssetRegistry() {
                 </button>
               </div>
 
-              <div className="flex flex-col items-center justify-center space-y-1">
-                <div className="text-xs font-medium text-gray-600">ເປີດໜ້າຢືນຢັນຮັບເຄື່ອງ (online)</div>
-                <QRCodeSVG
-                  value={`${claimBaseUrl}/assets/${barcodeModalAsset._id}?claim=1`}
-                  size={130}
-                  level="M"
-                  marginSize={2}
-                />
-                {isLocalOrigin || isIpOrigin ? (
-                  <div className="text-[11px] text-red-500 bg-red-50 border border-red-100 rounded-lg px-2 py-1">
-                    ກຳລັງເປີດຜ່ານ localhost/IP — QR ນີ້ມືຖືຈະເປີດບໍ່ໄດ້ຖ້າ IP ປ່ຽນ.
-                    ໃຫ້ຕັ້ງ VITE_PUBLIC_BASE_URL=https://&lt;domain/IP ຖາວອນ&gt; ກ່ອນ build ແລ້ວສະແກນໃໝ່
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-gray-400">ຕ້ອງເຊື່ອມຕໍ່ເຄືອຂ່າຍດຽວກັບເຊີບເວີ — ເປີດໜ້າໃສ່ລະຫັດພະນັກງານທັນທີ</div>
-                )}
-              </div>
-
-              <div className="border-t border-gray-100 pt-3 flex flex-col items-center justify-center">
-                {isAscii(barcodeModalAsset.assetTag) ? (
-                  <BarcodeComponent
-                    value={barcodeModalAsset.assetTag}
-                    format="CODE128"
-                    width={2.0}
-                    height={50}
-                    fontSize={14}
-                    displayValue={false}
-                    margin={8}
-                  />
-                ) : (
-                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 max-w-[260px]">
-                    Asset Tag ມີຕົວອັກສອນທີ່ບໍ່ແມ່ນ ASCII (ຕົວຢ່າງ: ພາສາລາວ) — CODE128 ສ້າງບໍ່ໄດ້
-                  </div>
-                )}
-                <div className="mt-1 text-sm font-semibold tracking-widest text-gray-800">
-                  {barcodeModalAsset.assetTag}
-                </div>
-                <div className="text-[11px] text-gray-400">Barcode — CODE128 ຮອງຮັບສະເພາະຕົວອັກສອນ ASCII (A-Z, 0-9, ສັນຍາລັກ)</div>
-              </div>
+              <AssetTagVisual
+                asset={barcodeModalAsset}
+                claimBaseUrl={claimBaseUrl}
+                showOriginWarning
+                isLocalOrigin={isLocalOrigin}
+                isIpOrigin={isIpOrigin}
+              />
 
               {(() => {
                 const a = barcodeModalAsset;

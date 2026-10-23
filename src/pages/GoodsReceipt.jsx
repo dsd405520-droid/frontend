@@ -1,15 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Plus, ShoppingCart, X, Search, ScanLine, CheckCircle2 } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Plus,
+  ShoppingCart,
+  X,
+  Search,
+  ScanLine,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Printer,
+} from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
+import AssetTagPrintModal from '../components/AssetTagPrintModal';
+import CsvExportButton from '../components/CsvExportButton';
 import api from '../services/api';
-import { hasPermission } from '../utils/permissions';
+import { getCurrentUser, hasPermission } from '../utils/permissions';
 
 const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
 const today = () => new Date().toISOString().slice(0, 10);
 const MODE_LABEL = {
   RESTOCK: { text: 'ເພີ່ມ', cls: 'bg-amber-100 text-amber-700' },
-  NEW_ITEM: { text: 'ຊື້', cls: 'bg-emerald-100 text-emerald-700' },
+  NEW_ITEM: { text: 'ຊື້ໃໝ່', cls: 'bg-emerald-100 text-emerald-700' },
+};
+const TRACKING = {
+  SERIAL: { text: 'ມີ Serial Number', cls: 'bg-blue-100 text-blue-700' },
+  TAG: { text: 'ຕິດ Asset Tag (ບໍ່ມີ S/N)', cls: 'bg-violet-100 text-violet-700' },
+  COUNT: { text: 'ນັບຈຳນວນ', cls: 'bg-gray-100 text-gray-600' },
 };
 const inputCls =
   'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 bg-white';
@@ -18,6 +36,13 @@ const errText = (err, fallback) => {
   const m = err.response?.data?.msg ?? err.response?.data?.message;
   if (Array.isArray(m)) return m.join(' · ');
   return m || fallback;
+};
+
+const trackingOf = (item) => {
+  if (!item) return null;
+  if (item.itemType === 'CONSUMABLE') return 'COUNT';
+  if (item.itemType === 'ASSET') return item.trackSerial === false ? 'TAG' : 'SERIAL';
+  return null;
 };
 
 function Field({ label, required, children }) {
@@ -33,25 +58,77 @@ function Field({ label, required, children }) {
 }
 
 /** ຟອມຮັບເຄື່ອງ — ໃຊ້ຮ່ວມກັນທັງ "ເພີ່ມ" (RESTOCK) ແລະ "ຊື້" (NEW_ITEM) */
-function ReceiveModal({ mode, catalog, onClose, onSaved }) {
+function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved }) {
   const isNew = mode === 'NEW_ITEM';
-  const [catalogItemId, setCatalogItemId] = useState('');
-  const [item, setItem] = useState({ name: '', category: '', unit: '', type: 'DEVICE' });
-  const [hasSerial, setHasSerial] = useState(false); // ສຳລັບ RESTOCK ຂອງລາຍການເກົ່າທີ່ບໍ່ໄດ້ລະບຸປະເພດ
+  const currentUser = getCurrentUser();
+  const [catalogItemId, setCatalogItemId] = useState(initialCatalogItemId || '');
+  const [item, setItem] = useState({
+    name: '',
+    category: '',
+    unit: '',
+    type: 'DEVICE_SERIAL',
+  });
+  const [hasSerial, setHasSerial] = useState(false); // legacy item ທີ່ຍັງບໍ່ມີ itemType
   const [quantity, setQuantity] = useState(1);
+  const [expectedQuantity, setExpectedQuantity] = useState('');
+  const [countNote, setCountNote] = useState('');
   const [receivedDate, setReceivedDate] = useState(today());
   const [vendor, setVendor] = useState('');
   const [note, setNote] = useState('');
   const [serials, setSerials] = useState([]);
-  const [scanIdx, setScanIdx] = useState(null);
+  const [pasteText, setPasteText] = useState('');
+  const [scan, setScan] = useState(null); // { mode: 'single' | 'continuous', index? }
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState(currentUser?.branchId || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [scannedIds, setScannedIds] = useState(() => new Set());
 
   const selected = catalog.find((c) => c._id === catalogItemId);
-  const isDevice = isNew
-    ? item.type === 'DEVICE'
-    : selected?.itemType === 'ASSET' || (!!selected && !selected.itemType && hasSerial);
+  const tracking = isNew
+    ? item.type === 'CONSUMABLE'
+      ? 'COUNT'
+      : item.type === 'DEVICE_TAG'
+        ? 'TAG'
+        : 'SERIAL'
+    : trackingOf(selected) || (selected && hasSerial ? 'SERIAL' : selected ? 'COUNT' : null);
   const qty = Math.max(0, Math.min(1000, parseInt(quantity, 10) || 0));
+  const expected = expectedQuantity === '' ? null : parseInt(expectedQuantity, 10);
+  const mismatch = Number.isInteger(expected) && expected !== qty;
+  const stockBefore = selected?.stockQty ?? 0;
+  const stockAfter = stockBefore + qty;
+
+  const filledCount = Array.from({ length: qty }, (_, i) => (serials[i] || '').trim()).filter(Boolean).length;
+  const dupSet = useMemo(() => {
+    const counts = new Map();
+    Array.from({ length: qty }, (_, i) => (serials[i] || '').trim().toLowerCase())
+      .filter(Boolean)
+      .forEach((sn) => counts.set(sn, (counts.get(sn) || 0) + 1));
+    return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([sn]) => sn));
+  }, [serials, qty]);
+  const hasDuplicate = dupSet.size > 0;
+
+  const sortedCatalog = useMemo(
+    () =>
+      [...catalog]
+        .filter((c) => c.isActive !== false)
+        .sort((a, b) => {
+          const aLow = a.stockQty <= a.lowStockThreshold ? 0 : 1;
+          const bLow = b.stockQty <= b.lowStockThreshold ? 0 : 1;
+          return aLow - bLow;
+        }),
+    [catalog],
+  );
+
+  useEffect(() => {
+    api
+      .get('/branches')
+      .then((res) => setBranches(unwrap(res.data) || []))
+      .catch(() => setBranches([]));
+  }, []);
 
   const setSerial = (i, v) =>
     setSerials((prev) => {
@@ -60,44 +137,237 @@ function ReceiveModal({ mode, catalog, onClose, onSaved }) {
       return next;
     });
 
+  const applySerialText = (text) => {
+    const parsed = String(text || '')
+      .split(/[\r\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parsed.length === 0) return;
+    setSerials(parsed);
+    if (parsed.length !== qty) {
+      if (window.confirm(`ປັບຈຳນວນເປັນ ${parsed.length}?`)) setQuantity(parsed.length);
+    }
+  };
+
+  const handlePaste = (e) => {
+    const text = e.clipboardData.getData('text');
+    if (!text?.trim()) return;
+    e.preventDefault();
+    setPasteText(text);
+    applySerialText(text);
+  };
+
+  const handleScan = (text) => {
+    const value = String(text || '').trim();
+    if (!value) return;
+    if (scan?.mode === 'single') {
+      setSerial(scan.index, value);
+      setScan(null);
+      return;
+    }
+    setSerials((prev) => {
+      const next = [...prev];
+      let idx = -1;
+      for (let i = 0; i < qty; i++) {
+        if (!String(next[i] || '').trim()) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx === -1) idx = Math.max(0, Math.min(qty - 1, next.length));
+      next[idx] = value;
+      return next;
+    });
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setError('');
     if (!isNew && !catalogItemId) return setError('ກະລຸນາເລືອກລາຍການ');
     if (isNew && (!item.name.trim() || !item.category.trim() || !item.unit.trim()))
       return setError('ກະລຸນາໃສ່ຊື່, ໝວດໝູ່ ແລະ ໜ່ວຍນັບ');
-    if (!Number.isInteger(Number(quantity)) || qty < 1) return setError('ຈຳນວນຕ້ອງເປັນຈຳນວນເຕັມ ແລະ ຢ່າງໜ້ອຍ 1');
+    if (!Number.isInteger(Number(quantity)) || qty < 1)
+      return setError('ຈຳນວນຕ້ອງເປັນຈຳນວນເຕັມ ແລະ ຢ່າງໜ້ອຍ 1');
+    if (tracking === 'TAG' && qty > 500)
+      return setError('ຮັບເຂົ້າລາຍການທີ່ຕິດ Asset Tag ໄດ້ສູງສຸດ 500 ຊິ້ນຕໍ່ຄັ້ງ');
+    if (mismatch && countNote.trim().length < 3)
+      return setError('ຈຳນວນບໍ່ກົງກັບໃບສົ່ງເຄື່ອງ ກະລຸນາໃສ່ໝາຍເຫດ');
+
     let serialNumbers;
-    if (isDevice) {
+    if (tracking === 'SERIAL') {
       serialNumbers = Array.from({ length: qty }, (_, i) => (serials[i] || '').trim());
       if (serialNumbers.some((s) => !s)) return setError('ກະລຸນາໃສ່ Serial Number ໃຫ້ຄົບທຸກໜ່ວຍ');
       const lower = serialNumbers.map((s) => s.toLowerCase());
       if (new Set(lower).size !== lower.length) return setError('ມີ Serial Number ຊ້ຳກັນໃນລາຍການທີ່ປ້ອນ');
     }
+
     const common = {
       quantity: qty,
+      expectedQuantity: Number.isInteger(expected) ? expected : undefined,
+      countNote: mismatch ? countNote.trim() : undefined,
       receivedDate: receivedDate || undefined,
       vendor: vendor.trim() || undefined,
       note: note.trim() || undefined,
+      branchId: tracking !== 'COUNT' ? branchId || undefined : undefined,
       serialNumbers,
     };
     try {
       setSaving(true);
-      if (isNew) {
-        await api.post('/goods-receipt/new-item', {
-          item: { ...item, name: item.name.trim(), category: item.category.trim(), unit: item.unit.trim() },
-          ...common,
-        });
-      } else {
-        await api.post('/goods-receipt/restock', { catalogItemId, ...common });
-      }
-      onSaved(isNew ? 'ບັນທຶກການຊື້ເຄື່ອງເຂົ້າສະຕັອກສຳເລັດ' : 'ເພີ່ມເຄື່ອງເຂົ້າສະຕັອກສຳເລັດ');
+      const res = isNew
+        ? await api.post('/goods-receipt/new-item', {
+            item: {
+              ...item,
+              name: item.name.trim(),
+              category: item.category.trim(),
+              unit: item.unit.trim(),
+            },
+            ...common,
+          })
+        : await api.post('/goods-receipt/restock', { catalogItemId, ...common });
+      setResult(unwrap(res.data));
+      onSaved?.();
     } catch (err) {
       setError(errText(err, 'ບັນທຶກບໍ່ສຳເລັດ'));
     } finally {
       setSaving(false);
     }
   };
+
+  const claimBaseUrl = (import.meta.env.VITE_PUBLIC_BASE_URL || window.location.origin).replace(/\/+$/, '');
+  const missingTags = result?.assets?.filter((a) => !scannedIds.has(a._id)) || [];
+
+  if (result) {
+    const created = result.assets || [];
+    const range =
+      created.length > 1
+        ? `${created[0].assetTag} … ${created[created.length - 1].assetTag}`
+        : created[0]?.assetTag || '—';
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden max-h-[92vh] flex flex-col">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h3 className="text-lg font-bold text-gray-800">ຮັບເຄື່ອງສຳເລັດ</h3>
+            <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X size={20} />
+            </button>
+          </div>
+          <div className="p-6 overflow-y-auto space-y-4">
+            <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl">
+              <CheckCircle2 size={16} /> ບັນທຶກການຮັບເຄື່ອງເຂົ້າສະຕັອກສຳເລັດ
+            </div>
+            <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 text-sm">
+              <span className="text-gray-500">ສະຕັອກ</span>
+              <span className="font-semibold text-gray-800">
+                {result.stockBefore ?? 0} → {result.stockAfter ?? 0}
+              </span>
+            </div>
+            {created.length > 0 && (
+              <>
+                <p className="text-xs text-gray-500">
+                  Asset Tag {range} · ທັງໝົດ {created.length} ລາຍການ
+                </p>
+                <div className="border border-gray-100 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-gray-50 text-gray-500">
+                      <tr>
+                        <th className="p-2 font-medium">Asset Tag</th>
+                        <th className="p-2 font-medium">Serial Number</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {created.map((a) => (
+                        <tr key={a._id}>
+                          <td className="p-2 font-mono text-gray-800">{a.assetTag}</td>
+                          <td className="p-2 text-gray-500">{a.serialNumber || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {verifyOpen && (
+              <div className="border border-blue-200 bg-blue-50 rounded-xl p-3 text-sm space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-blue-800">
+                    ສະແກນແລ້ວ {created.length - missingTags.length}/{created.length}
+                  </span>
+                  <button type="button" onClick={() => setVerifyOpen(false)} className="text-xs text-blue-600">
+                    ປິດການສະແກນ
+                  </button>
+                </div>
+                {missingTags.length > 0 ? (
+                  <p className="text-xs text-blue-700">
+                    ຍັງຂາດ: {missingTags.map((a) => a.assetTag).join(', ')}
+                  </p>
+                ) : (
+                  <p className="text-xs text-emerald-700">ຄົບທຸກລາຍການ</p>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 px-6 py-4 border-t border-gray-100">
+            {created.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setVerifyOpen(true)}
+                  className="px-4 py-2 border border-blue-200 text-blue-600 rounded-xl text-sm hover:bg-blue-50"
+                >
+                  ສະແກນກວດຢືນຢັນ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintOpen(true)}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <Printer size={16} /> ພິມປ້າຍ QR ທັງຊຸດ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    window.location.assign(`/asset-registry?search=${encodeURIComponent(result.catalogItemId || '')}`);
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium"
+                >
+                  ເບິ່ງໃນທະບຽນຊັບສິນ
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium"
+            >
+              ປິດ
+            </button>
+          </div>
+        </div>
+
+        {printOpen && (
+          <AssetTagPrintModal assets={created} claimBaseUrl={claimBaseUrl} onClose={() => setPrintOpen(false)} />
+        )}
+        {verifyOpen && (
+          <CameraScanner
+            title="ສະແກນກວດຢືນຢັນ"
+            hint="ສະແກນ QR ຂອງຊັບສິນທີ່ຫາກໍ່ສ້າງ"
+            continuous
+            onScan={(text) => {
+              const raw = String(text || '').trim();
+              const idMatch = raw.match(/\/assets\/([A-Za-z0-9_-]+)/);
+              const hit = created.find(
+                (a) => a._id === (idMatch?.[1] || raw) || a.assetTag.toLowerCase() === raw.toLowerCase(),
+              );
+              if (hit) setScannedIds((prev) => new Set(prev).add(hit._id));
+            }}
+            onClose={() => setVerifyOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -147,10 +417,11 @@ function ReceiveModal({ mode, catalog, onClose, onSaved }) {
                   />
                 </Field>
               </div>
-              <Field label="ປະເພດ" required>
+              <Field label="ວິທີຕິດຕາມ" required>
                 <select className={inputCls} value={item.type} onChange={(e) => setItem({ ...item, type: e.target.value })}>
-                  <option value="DEVICE">ອຸປະກອນ (ມີ Serial Number / ຕິດ Asset Tag)</option>
-                  <option value="CONSUMABLE">ວັດສະດຸສິ້ນເປືອງ (ນັບຈຳນວນ)</option>
+                  <option value="DEVICE_SERIAL">ມີ Serial Number</option>
+                  <option value="DEVICE_TAG">ຕິດ Asset Tag (ບໍ່ມີ S/N)</option>
+                  <option value="CONSUMABLE">ນັບຈຳນວນ (ສິ້ນເປືອງ)</option>
                 </select>
               </Field>
             </>
@@ -159,13 +430,12 @@ function ReceiveModal({ mode, catalog, onClose, onSaved }) {
               <Field label="ລາຍການ" required>
                 <select className={inputCls} value={catalogItemId} onChange={(e) => setCatalogItemId(e.target.value)}>
                   <option value="">— ເລືອກລາຍການ —</option>
-                  {catalog
-                    .filter((c) => c.isActive !== false)
-                    .map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c._id} — {c.name} (ສະຕັອກ {c.stockQty ?? 0})
-                      </option>
-                    ))}
+                  {sortedCatalog.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c._id} — {c.name} (ສະຕັອກ {c.stockQty ?? 0})
+                      {c.stockQty <= c.lowStockThreshold ? ' · ໃກ້ໝົດ' : ''}
+                    </option>
+                  ))}
                 </select>
               </Field>
               {selected && !selected.itemType && (
@@ -174,11 +444,26 @@ function ReceiveModal({ mode, catalog, onClose, onSaved }) {
                   ລາຍການນີ້ເປັນອຸປະກອນທີ່ມີ Serial Number
                 </label>
               )}
+              {tracking && (
+                <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${TRACKING[tracking].cls}`}>
+                  {TRACKING[tracking].text}
+                </span>
+              )}
             </>
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <Field label="ຈຳນວນ (ຊິ້ນ)" required>
+            <Field label="ຈຳນວນຕາມໃບສົ່ງເຄື່ອງ (ທາງເລືອກ)">
+              <input
+                type="number"
+                min="1"
+                max="1000"
+                className={inputCls}
+                value={expectedQuantity}
+                onChange={(e) => setExpectedQuantity(e.target.value)}
+              />
+            </Field>
+            <Field label="ຈຳນວນນັບໄດ້ຈິງ" required>
               <input
                 type="number"
                 min="1"
@@ -188,49 +473,112 @@ function ReceiveModal({ mode, catalog, onClose, onSaved }) {
                 onChange={(e) => setQuantity(e.target.value)}
               />
             </Field>
-            <Field label="ວັນທີຮັບ">
-              <input type="date" className={inputCls} value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
-            </Field>
           </div>
+          {mismatch && (
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-xl">
+              {expected > qty ? `ຂາດ ${expected - qty}` : `ເກີນ ${qty - expected}`}
+            </div>
+          )}
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>ສະຕັອກ {stockBefore} → {stockAfter}</span>
+            <span>{receivedDate ? new Date(receivedDate).toLocaleDateString() : ''}</span>
+          </div>
+          <Field label="ວັນທີຮັບ">
+            <input type="date" className={inputCls} value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
+          </Field>
+          {tracking !== 'COUNT' && (
+            <Field label="ສາຂາ / ບ່ອນເກັບ">
+              <select className={inputCls} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                {!branchId && <option value="">— ເລືອກສາຂາ —</option>}
+                {branches.map((b) => (
+                  <option key={b._id} value={b._id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="ຜູ້ຂາຍ / ຜູ້ສະໜອງ">
             <input className={inputCls} value={vendor} onChange={(e) => setVendor(e.target.value)} />
           </Field>
           <Field label="ໝາຍເຫດ">
             <textarea rows={2} className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
+          {mismatch && (
+            <Field label="ໝາຍເຫດການນັບ (ຈຳເປັນ)" required>
+              <textarea rows={2} className={inputCls} value={countNote} onChange={(e) => setCountNote(e.target.value)} />
+            </Field>
+          )}
 
-          {isDevice && qty > 0 && (
+          {tracking === 'SERIAL' && qty > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-gray-700">
                 Serial Number ({qty} ໜ່ວຍ) <span className="text-red-500">*</span>
               </p>
-              {Array.from({ length: qty }, (_, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="w-8 text-xs text-gray-400 text-right">{i + 1}.</span>
-                  <input
-                    className={inputCls}
-                    placeholder="ພິມ ຫຼື ສະແກນ S/N"
-                    value={serials[i] || ''}
-                    onChange={(e) => setSerial(i, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const next = e.target.closest('div')?.nextElementSibling?.querySelector('input');
-                        next?.focus();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setScanIdx(i)}
-                    title="ສະແກນ"
-                    className="p-2 border border-gray-200 rounded-xl text-gray-500 hover:bg-gray-50"
-                  >
-                    <ScanLine size={16} />
-                  </button>
-                </div>
-              ))}
+              <textarea
+                rows={2}
+                className={inputCls}
+                placeholder="ວາງຫຼາຍ S/N (ບັນທັດລະອັນ)"
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                onPaste={handlePaste}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => applySerialText(pasteText)}
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  ນຳໃຊ້ S/N
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScan({ mode: 'continuous' })}
+                  className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 flex items-center gap-1"
+                >
+                  <ScanLine size={14} /> ສະແກນຕໍ່ເນື່ອງ ({filledCount}/{qty})
+                </button>
+              </div>
+              {hasDuplicate && (
+                <p className="text-xs text-red-600">ມີ Serial Number ຊ້ຳກັນ — ກະລຸນາແກ້ໄຂກ່ອນບັນທຶກ</p>
+              )}
+              {Array.from({ length: qty }, (_, i) => {
+                const value = serials[i] || '';
+                const isDup = value.trim() && dupSet.has(value.trim().toLowerCase());
+                return (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-8 text-xs text-gray-400 text-right">{i + 1}.</span>
+                    <input
+                      className={`${inputCls} ${isDup ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
+                      placeholder="ພິມ ຫຼື ສະແກນ S/N"
+                      value={value}
+                      onChange={(e) => setSerial(i, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const next = e.target.closest('div')?.nextElementSibling?.querySelector('input');
+                          next?.focus();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setScan({ mode: 'single', index: i })}
+                      title="ສະແກນ"
+                      className="p-2 border border-gray-200 rounded-xl text-gray-500 hover:bg-gray-50"
+                    >
+                      <ScanLine size={16} />
+                    </button>
+                  </div>
+                );
+              })}
               <p className="text-xs text-gray-400">ລະບົບຈະສ້າງຊັບສິນ + Asset Tag + QR ໃຫ້ຕໍ່ແຕ່ລະໜ່ວຍ ແລະ ເກັບເຂົ້າຄັງ</p>
+            </div>
+          )}
+
+          {tracking === 'TAG' && qty > 0 && (
+            <div className="p-3 bg-violet-50 border border-violet-200 text-violet-700 text-sm rounded-xl">
+              ລະບົບຈະສ້າງ {qty} ຊັບສິນ ແລະ Asset Tag ອັດຕະໂນມັດ
             </div>
           )}
         </div>
@@ -251,14 +599,12 @@ function ReceiveModal({ mode, catalog, onClose, onSaved }) {
         </div>
       </form>
 
-      {scanIdx !== null && (
+      {scan && (
         <CameraScanner
-          title="ສະແກນ Serial Number"
-          onScan={(text) => {
-            setSerial(scanIdx, String(text).trim());
-            setScanIdx(null);
-          }}
-          onClose={() => setScanIdx(null)}
+          title={scan.mode === 'continuous' ? `ສະແກນ S/N (${filledCount}/${qty})` : 'ສະແກນ Serial Number'}
+          continuous={scan.mode === 'continuous'}
+          onScan={handleScan}
+          onClose={() => setScan(null)}
         />
       )}
     </div>
@@ -267,14 +613,18 @@ function ReceiveModal({ mode, catalog, onClose, onSaved }) {
 
 export default function GoodsReceipt() {
   const canManage = hasPermission('supplies', 'manage');
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [rows, setRows] = useState([]);
   const [catalog, setCatalog] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState('');
-  const [modal, setModal] = useState(null); // 'RESTOCK' | 'NEW_ITEM' | null
+  const [modal, setModal] = useState(null); // { mode, initialCatalogItemId }
   const [success, setSuccess] = useState('');
+  const [expandedId, setExpandedId] = useState('');
 
   const fetchRows = async () => {
     try {
@@ -312,14 +662,26 @@ export default function GoodsReceipt() {
   }, [search, modeFilter, canManage]);
 
   useEffect(() => {
-    if (canManage) fetchCatalog();
+    if (!canManage) return;
+    fetchCatalog();
+    api
+      .get('/branches')
+      .then((res) => setBranches(unwrap(res.data) || []))
+      .catch(() => setBranches([]));
   }, [canManage]);
 
-  const handleSaved = (msg) => {
-    setModal(null);
-    setSuccess(msg);
+  useEffect(() => {
+    const restock = searchParams.get('restock');
+    const isNew = searchParams.get('new');
+    if (!restock && !isNew) return;
+    setModal(restock ? { mode: 'RESTOCK', initialCatalogItemId: restock } : { mode: 'NEW_ITEM' });
+    navigate('/goods-receipt', { replace: true });
+  }, [searchParams, navigate]);
+
+  const handleSaved = () => {
     fetchRows();
     fetchCatalog();
+    setSuccess('ບັນທຶກການຮັບເຄື່ອງສຳເລັດ');
     setTimeout(() => setSuccess(''), 5000);
   };
 
@@ -327,6 +689,8 @@ export default function GoodsReceipt() {
     u && typeof u === 'object'
       ? [u.firstName, u.lastName].filter(Boolean).join(' ') || u.employeeCode || '—'
       : '—';
+
+  const branchName = (id) => branches.find((b) => b._id === id)?.name || id || '—';
 
   const total = useMemo(() => rows.reduce((s, r) => s + (r.quantity || 0), 0), [rows]);
 
@@ -348,13 +712,13 @@ export default function GoodsReceipt() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setModal('RESTOCK')}
+              onClick={() => setModal({ mode: 'RESTOCK' })}
               className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm"
             >
               <Plus size={18} /> <span>ເພີ່ມເຄື່ອງເຂົ້າສະຕັອກ</span>
             </button>
             <button
-              onClick={() => setModal('NEW_ITEM')}
+              onClick={() => setModal({ mode: 'NEW_ITEM' })}
               className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm"
             >
               <ShoppingCart size={18} /> <span>ຊື້ເຄື່ອງເຂົ້າສະຕັອກ</span>
@@ -392,6 +756,25 @@ export default function GoodsReceipt() {
                 <option value="RESTOCK">ເພີ່ມ</option>
                 <option value="NEW_ITEM">ຊື້</option>
               </select>
+              <CsvExportButton
+                data={rows}
+                filename="goods-receipts.csv"
+                label="Export CSV"
+                permitted={hasPermission('supplies', 'read')}
+                columns={[
+                  { key: 'receivedDate', label: 'date' },
+                  { key: 'itemName', label: 'item' },
+                  { key: 'quantity', label: 'quantity' },
+                  { key: 'mode', label: 'mode' },
+                  { key: 'vendor', label: 'vendor' },
+                  { key: 'note', label: 'note' },
+                  { key: 'countNote', label: 'countNote' },
+                  { key: 'expectedQuantity', label: 'expectedQuantity' },
+                  { key: 'branchId', label: 'branchId' },
+                  { key: 'serialNumbers', label: 'serialNumbers' },
+                  { key: 'assetTags', label: 'assetTags' },
+                ]}
+              />
             </div>
           </div>
 
@@ -416,23 +799,54 @@ export default function GoodsReceipt() {
                 ) : (
                   rows.map((r) => {
                     const m = MODE_LABEL[r.mode] || MODE_LABEL.RESTOCK;
+                    const open = expandedId === r._id;
                     return (
-                      <tr key={r._id} className="hover:bg-gray-50">
-                        <td className="p-4">{r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}</td>
-                        <td className="p-4">
-                          <div className="font-medium text-gray-800">{r.itemName}</div>
-                          <div className="text-xs text-gray-400">
-                            {r.catalogItemId}
-                            {r.vendor ? ` · ${r.vendor}` : ''}
-                            {r.serialNumbers?.length ? ` · S/N: ${r.serialNumbers.slice(0, 3).join(', ')}${r.serialNumbers.length > 3 ? '…' : ''}` : ''}
-                          </div>
-                        </td>
-                        <td className="p-4">{r.quantity}{r.unit ? ` ${r.unit}` : ''}</td>
-                        <td className="p-4">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.cls}`}>{m.text}</span>
-                        </td>
-                        <td className="p-4">{personName(r.createdBy)}</td>
-                      </tr>
+                      <Fragment key={r._id}>
+                        <tr
+                          onClick={() => setExpandedId(open ? '' : r._id)}
+                          className="hover:bg-gray-50 cursor-pointer"
+                        >
+                          <td className="p-4">
+                            <span className="inline-flex items-center gap-1">
+                              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              {r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <div className="font-medium text-gray-800">{r.itemName}</div>
+                            <div className="text-xs text-gray-400">
+                              {r.catalogItemId}
+                              {r.vendor ? ` · ${r.vendor}` : ''}
+                              {r.serialNumbers?.length ? ` · S/N: ${r.serialNumbers.slice(0, 3).join(', ')}${r.serialNumbers.length > 3 ? '…' : ''}` : ''}
+                            </div>
+                          </td>
+                          <td className="p-4">{r.quantity}{r.unit ? ` ${r.unit}` : ''}</td>
+                          <td className="p-4">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.cls}`}>{m.text}</span>
+                          </td>
+                          <td className="p-4">{personName(r.createdBy)}</td>
+                        </tr>
+                        {open && (
+                          <tr className="bg-gray-50/60">
+                            <td colSpan="5" className="px-6 py-4">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                                <div>ສະຕັອກ: <b>{r.stockBefore ?? '—'} → {r.stockAfter ?? '—'}</b></div>
+                                <div>ສາຂາ: <b>{branchName(r.branchId)}</b></div>
+                                <div>ຄາດວ່າ / ນັບໄດ້: <b>{r.expectedQuantity ?? '—'} / {r.quantity}</b></div>
+                                <div>ຜູ້ຂາຍ: <b>{r.vendor || '—'}</b></div>
+                                <div className="sm:col-span-2">ໝາຍເຫດ: <b>{r.note || '—'}</b></div>
+                                {r.countNote && <div className="sm:col-span-2">ໝາຍເຫດການນັບ: <b>{r.countNote}</b></div>}
+                                {r.serialNumbers?.length > 0 && (
+                                  <div className="sm:col-span-2">S/N: <b>{r.serialNumbers.join(', ')}</b></div>
+                                )}
+                                {r.assetTags?.length > 0 && (
+                                  <div className="sm:col-span-2">Asset Tags: <b>{r.assetTags.join(', ')}</b></div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })
                 )}
@@ -442,7 +856,15 @@ export default function GoodsReceipt() {
         </div>
       </div>
 
-      {modal && <ReceiveModal mode={modal} catalog={catalog} onClose={() => setModal(null)} onSaved={handleSaved} />}
+      {modal && (
+        <ReceiveModal
+          mode={modal.mode}
+          catalog={catalog}
+          initialCatalogItemId={modal.initialCatalogItemId}
+          onClose={() => setModal(null)}
+          onSaved={handleSaved}
+        />
+      )}
     </MainLayout>
   );
 }

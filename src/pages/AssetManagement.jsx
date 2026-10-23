@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Plus, AlertTriangle, X, Clock, CheckCircle, XCircle, Search, Filter, Pencil, ArrowUpDown, Ban } from 'lucide-react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { AlertTriangle, X, Clock, CheckCircle, XCircle, Search, Filter, Pencil, ArrowUpDown, Ban, ShoppingCart, History, PackagePlus } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
@@ -9,6 +9,7 @@ import CsvExportButton from '../components/CsvExportButton';
 
 export default function AssetManagement() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const canCreateCatalog = hasPermission('supplies', 'manage');
   const canImportCatalog = hasPermission('supplies', 'import');
   const canUpdateCatalog = hasPermission('supplies', 'update');
@@ -54,11 +55,17 @@ export default function AssetManagement() {
     name: '',
     category: '',
     unit: '',
-    itemType: '',
-    stockQty: 0,
+    trackMode: '',
     lowStockThreshold: 5,
   });
-  const [editingId, setEditingId] = useState(null); // null = ສ້າງໃໝ່, ມີຄ່າ = ແກ້ໄຂ
+  const [editingId, setEditingId] = useState(null); // ແກ້ໄຂລາຍການ (ການສ້າງລາຍການໃໝ່ເຮັດຜ່ານໜ້າ "ຮັບເຄື່ອງເຂົ້າຄັງ")
+
+  // ຮັບເຂົ້າຄັ້ງຫຼ້າສຸດຕໍ່ລາຍການ + ປະຫວັດການຮັບເຂົ້າ (drawer)
+  const [receiptSummary, setReceiptSummary] = useState({});
+  const [historyItem, setHistoryItem] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
 
   // Modal ປັບສະຕ໊ອກ (ບັງຄັບໃສ່ເຫດຜົນ → ບັນທຶກໃນ audit log)
   const [adjustItem, setAdjustItem] = useState(null);
@@ -66,17 +73,29 @@ export default function AssetManagement() {
   const [adjustError, setAdjustError] = useState('');
   const [adjusting, setAdjusting] = useState(false);
 
-  const ITEM_TYPE_LABEL = { ASSET: 'ຊັບສິນ (ມີ Asset Tag)', CONSUMABLE: 'ສິ້ນເປືອງ' };
+  // ວິທີຕິດຕາມ (tracking) ຄຳນວນຈາກ itemType + trackSerial
+  const trackModeOf = (item) => {
+    if (item?.itemType === 'CONSUMABLE') return 'COUNT';
+    if (item?.itemType === 'ASSET') return item.trackSerial === false ? 'TAG' : 'SERIAL';
+    return '';
+  };
+  const TRACK_LABEL = {
+    SERIAL: 'ມີ Serial Number',
+    TAG: 'ຕິດ Asset Tag (ບໍ່ມີ S/N)',
+    COUNT: 'ນັບຈຳນວນ (ສິ້ນເປືອງ)',
+  };
+  const TRACK_TO_BODY = {
+    SERIAL: { itemType: 'ASSET', trackSerial: true },
+    TAG: { itemType: 'ASSET', trackSerial: false },
+    COUNT: { itemType: 'CONSUMABLE' },
+  };
+  const MODE_BADGE = {
+    NEW_ITEM: { text: 'ຊື້ໃໝ່', cls: 'bg-emerald-100 text-emerald-700' },
+    RESTOCK: { text: 'ເພີ່ມ', cls: 'bg-amber-100 text-amber-700' },
+  };
   const apiMsg = (error, fallback) => {
     const m = error.response?.data?.msg || error.response?.data?.message;
     return Array.isArray(m) ? m.join(', ') : m || fallback;
-  };
-
-  const openCreate = () => {
-    setEditingId(null);
-    setErrorMsg('');
-    setFormData({ name: '', category: '', unit: '', itemType: '', stockQty: 0, lowStockThreshold: 5 });
-    setIsModalOpen(true);
   };
 
   const openEdit = (item) => {
@@ -86,8 +105,7 @@ export default function AssetManagement() {
       name: item.name || '',
       category: item.category || '',
       unit: item.unit || '',
-      itemType: item.itemType || '',
-      stockQty: item.stockQty ?? 0,
+      trackMode: trackModeOf(item),
       lowStockThreshold: item.lowStockThreshold ?? 5,
     });
     setIsModalOpen(true);
@@ -97,6 +115,34 @@ export default function AssetManagement() {
     setAdjustItem(item);
     setAdjustForm({ delta: '', reason: '' });
     setAdjustError('');
+  };
+
+  const openHistory = async (item) => {
+    setHistoryItem(item);
+    setHistoryRows([]);
+    setHistoryError('');
+    setHistoryLoading(true);
+    try {
+      const res = await api.get('/goods-receipt', { params: { catalogItemId: item._id } });
+      const body = res.data?.data ?? res.data;
+      setHistoryRows(Array.isArray(body) ? body : []);
+    } catch (error) {
+      setHistoryError(apiMsg(error, 'ບໍ່ສາມາດໂຫຼດປະຫວັດການຮັບເຂົ້າໄດ້'));
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const fetchReceiptSummary = async () => {
+    try {
+      const res = await api.get('/goods-receipt/summary');
+      const body = res.data?.data ?? res.data;
+      const map = {};
+      (Array.isArray(body) ? body : []).forEach((r) => { map[r.catalogItemId] = r; });
+      setReceiptSummary(map);
+    } catch {
+      setReceiptSummary({});
+    }
   };
 
   const handleRecalculateStock = async () => {
@@ -176,6 +222,7 @@ export default function AssetManagement() {
       }
 
       setAssets(items);
+      fetchReceiptSummary();
     } catch (error) {
       console.error('Failed to fetch supply catalog:', error);
     } finally {
@@ -269,26 +316,22 @@ export default function AssetManagement() {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: name === 'stockQty' || name === 'lowStockThreshold' ? Number(value) : value,
+      [name]: name === 'lowStockThreshold' ? Number(value) : value,
     }));
   };
 
-  const handleCreateSubmit = async (e) => {
+  const handleEditSubmit = async (e) => {
     e.preventDefault();
+    if (!editingId) return;
     try {
       setSubmitting(true);
       setErrorMsg('');
-      const { stockQty, itemType, ...rest } = formData;
-      const body = { ...rest, ...(itemType ? { itemType } : {}) };
-      if (editingId) {
-        // ສະຕ໊ອກບໍ່ແກ້ຜ່ານນີ້ — ໃຊ້ "ປັບສະຕ໊ອກ" (ມີ audit + ເຫດຜົນ)
-        await api.patch(`/supply-catalog/${editingId}`, body);
-      } else {
-        await api.post('/supply-catalog', { ...body, stockQty: itemType === 'ASSET' ? 0 : stockQty });
-      }
+      const { trackMode, ...rest } = formData;
+      const body = { ...rest, ...(TRACK_TO_BODY[trackMode] || {}) };
+      // ສະຕ໊ອກບໍ່ແກ້ຜ່ານນີ້ — ໃຊ້ "ປັບສະຕ໊ອກ" (ມີ audit + ເຫດຜົນ)
+      await api.patch(`/supply-catalog/${editingId}`, body);
       setIsModalOpen(false);
       setEditingId(null);
-      setFormData({ name: '', category: '', unit: '', itemType: '', stockQty: 0, lowStockThreshold: 5 });
       fetchCatalog(); // Refresh list
     } catch (error) {
       setErrorMsg(apiMsg(error, 'ເກີດຂໍ້ຜິດພາດໃນການບັນທຶກຂໍ້ມູນ'));
@@ -315,15 +358,10 @@ export default function AssetManagement() {
 
   const activeFilterCount = statusFilter.length + stockFilter.length + categoryFilter.length;
 
-  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ເພີ່ມລາຍການຊັບສິນ ອັດຕະໂນມັດ + ໄປ tab Catalog
+  // ລິ້ງເກົ່າ /assets?create=1 → ໄປໜ້າ "ຮັບເຄື່ອງເຂົ້າຄັງ" (ຊື້ເຄື່ອງໃໝ່)
   useEffect(() => {
-    if (searchParams.get('create') === '1') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setActiveTab('catalog');
-      openCreate();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams.get('create')]);
+    if (searchParams.get('create') === '1') navigate('/goods-receipt?new=1', { replace: true });
+  }, [searchParams, navigate]);
 
   return (
     <MainLayout>
@@ -340,7 +378,7 @@ export default function AssetManagement() {
                   endpoint="/supply-catalog/bulk-import"
                   refresh={fetchCatalog}
                   permitted={canImportCatalog}
-                  csvHint="CSV ຖັນ: name, category, unit — ຈຳເປັນ; stockQty, lowStockThreshold, isActive (true/false) — ເພີ່ມໄດ້"
+                  csvHint="CSV ຖັນ: name, category, unit — ຈຳເປັນ; itemType (ASSET/CONSUMABLE), trackSerial (true/false), stockQty, lowStockThreshold, isActive — ເພີ່ມໄດ້"
                 />
               )}
               <CsvExportButton
@@ -353,6 +391,8 @@ export default function AssetManagement() {
                   { key: 'name', label: 'name' },
                   { key: 'category', label: 'category' },
                   { key: 'unit', label: 'unit' },
+                  { key: 'itemType', label: 'itemType' },
+                  { key: 'trackSerial', label: 'trackSerial' },
                   { key: 'stockQty', label: 'stockQty' },
                   { key: 'lowStockThreshold', label: 'lowStockThreshold' },
                   { key: 'isActive', label: 'isActive' },
@@ -369,11 +409,11 @@ export default function AssetManagement() {
               )}
               {canCreateCatalog && (
                 <button
-                  onClick={openCreate}
-                  className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
+                  onClick={() => navigate('/goods-receipt?new=1')}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm"
                 >
-                  <Plus size={18} />
-                  <span>ເພີ່ມລາຍການ Catalog</span>
+                  <ShoppingCart size={18} />
+                  <span>ຊື້ເຄື່ອງເຂົ້າສະຕັອກ</span>
                 </button>
               )}
             </div>
@@ -582,14 +622,15 @@ export default function AssetManagement() {
                 <th className="p-4 font-medium">ຫົວໜ່ວຍ</th>
                 <th className="p-4 font-medium">ຈຳນວນຄົງເຫຼືອ (Stock)</th>
                 <th className="p-4 font-medium">ຈຳນວນຂັ້ນຕ່ຳ</th>
+                <th className="p-4 font-medium">ຮັບເຂົ້າຄັ້ງຫຼ້າສຸດ</th>
                 <th className="p-4 font-medium">ສະຖານະ</th>
-                {(canUpdateCatalog || canDeleteCatalog) && <th className="p-4 font-medium text-center">ຈັດການ</th>}
+                {(canUpdateCatalog || canDeleteCatalog || canCreateCatalog) && <th className="p-4 font-medium text-center">ຈັດການ</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-gray-600">
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="py-12 text-center text-sm text-gray-400">
+                  <td colSpan="10" className="py-12 text-center text-sm text-gray-400">
                     ກຳລັງໂຫຼດຂໍ້ມູນ...
                   </td>
                 </tr>
@@ -598,11 +639,13 @@ export default function AssetManagement() {
 const isLowStock = item.stockQty <= item.lowStockThreshold;
 
   return (
-                    <tr key={item._id} className="hover:bg-gray-50">
+                    <tr key={item._id} onClick={() => openHistory(item)} className="hover:bg-gray-50 cursor-pointer">
                       <td className="p-4 font-semibold text-gray-900">{item._id}</td>
                       <td className="p-4 font-medium text-gray-800">{item.name}</td>
                       <td className="p-4">{item.category}</td>
-                      <td className="p-4 text-xs">{ITEM_TYPE_LABEL[item.itemType] || '—'}</td>
+                      <td className="p-4 text-xs">
+                        {trackModeOf(item) ? TRACK_LABEL[trackModeOf(item)] : <span className="text-amber-600 font-medium">ຍັງບໍ່ກຳນົດ</span>}
+                      </td>
                       <td className="p-4">{item.unit}</td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
@@ -612,16 +655,34 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                         </span>
                       </td>
                       <td className="p-4">{item.lowStockThreshold}</td>
+                      <td className="p-4 text-xs">
+                        {receiptSummary[item._id] ? (
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-full font-medium ${(MODE_BADGE[receiptSummary[item._id].mode] || MODE_BADGE.RESTOCK).cls}`}>
+                              {(MODE_BADGE[receiptSummary[item._id].mode] || MODE_BADGE.RESTOCK).text}
+                            </span>
+                            <span className="text-gray-500">
+                              {receiptSummary[item._id].receivedDate ? new Date(receiptSummary[item._id].receivedDate).toLocaleDateString() : ''}
+                              {' '}+{receiptSummary[item._id].quantity}
+                            </span>
+                          </div>
+                        ) : '—'}
+                      </td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded-full text-xs ${
-                          item.isActive ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'
+                          item.isActive !== false ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'
                         }`}>
-                          {item.isActive ? 'ເປີດໃຊ້ງານ' : 'ປິດໃຊ້ງານ'}
+                          {item.isActive !== false ? 'ເປີດໃຊ້ງານ' : 'ປິດໃຊ້ງານ'}
                         </span>
                       </td>
-                      {(canUpdateCatalog || canDeleteCatalog) && (
-                        <td className="p-4">
+                      {(canUpdateCatalog || canDeleteCatalog || canCreateCatalog) && (
+                        <td className="p-4" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1.5">
+                            {canCreateCatalog && item.isActive !== false && (
+                              <button onClick={() => navigate(`/goods-receipt?restock=${encodeURIComponent(item._id)}`)} title="ຮັບເຂົ້າ" className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50">
+                                <PackagePlus size={15} />
+                              </button>
+                            )}
                             {canUpdateCatalog && (
                               <button onClick={() => openEdit(item)} title="ແກ້ໄຂ" className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50">
                                 <Pencil size={15} />
@@ -632,7 +693,7 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                                 <ArrowUpDown size={15} />
                               </button>
                             )}
-                            {canDeleteCatalog && item.isActive && (
+                            {canDeleteCatalog && item.isActive !== false && (
                               <button onClick={() => handleDisable(item)} title="ປິດໃຊ້ງານ" className="p-1.5 rounded-lg text-red-500 hover:bg-red-50">
                                 <Ban size={15} />
                               </button>
@@ -645,7 +706,7 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                 })
               ) : (
                 <tr>
-                  <td colSpan="9" className="py-12 text-center text-sm text-gray-400">
+                  <td colSpan="10" className="py-12 text-center text-sm text-gray-400">
                     {assets.length === 0 ? 'ບໍ່ມີຂໍ້ມູນລາຍການອຸປະກອນ' : 'ບໍ່ພົບລາຍການທີ່ກົງກັບການຄົ້ນຫາ'}
                   </td>
                 </tr>
@@ -659,12 +720,12 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
 
       </div>
 
-      {/* Create Item Modal */}
-      {isModalOpen && (
+      {/* Edit Item Modal */}
+      {isModalOpen && editingId && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden animate-in fade-in duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h3 className="text-lg font-bold text-gray-800">{editingId ? `ແກ້ໄຂລາຍການ ${editingId}` : 'ເພີ່ມລາຍການອຸປະກອນໃໝ່'}</h3>
+              <h3 className="text-lg font-bold text-gray-800">ແກ້ໄຂລາຍການ {editingId}</h3>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="text-gray-400 hover:text-gray-600 transition"
@@ -673,7 +734,7 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
               </button>
             </div>
 
-            <form onSubmit={handleCreateSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
               {errorMsg && (
                 <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">
                   {errorMsg}
@@ -720,36 +781,22 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ປະເພດ</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">ວິທີຕິດຕາມ</label>
                 <select
-                  name="itemType"
-                  value={formData.itemType}
+                  name="trackMode"
+                  value={formData.trackMode}
                   onChange={handleInputChange}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 bg-white"
                 >
-                  <option value="">— ບໍ່ລະບຸ —</option>
-                  <option value="ASSET">ຊັບສິນ (ມີ Asset Tag — ສະຕ໊ອກນັບຈາກຊັບສິນວ່າງ)</option>
-                  <option value="CONSUMABLE">ວັດສະດຸສິ້ນເປືອງ (ສະຕ໊ອກປັບດ້ວຍຕົວເລກ)</option>
+                  {!formData.trackMode && <option value="">— ຍັງບໍ່ກຳນົດ —</option>}
+                  <option value="SERIAL">{TRACK_LABEL.SERIAL}</option>
+                  <option value="TAG">{TRACK_LABEL.TAG}</option>
+                  <option value="COUNT">{TRACK_LABEL.COUNT}</option>
                 </select>
+                <p className="text-[11px] text-gray-400 mt-1">ປ່ຽນໄດ້ສະເພາະລາຍການທີ່ຍັງບໍ່ມີສະຕັອກ ແລະ ຊັບສິນ</p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {!editingId && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">ຈຳນວນເລີ່ມຕົ້ນ (Stock Qty)</label>
-                  <input
-                    type="number"
-                    name="stockQty"
-                    min="0"
-                    required
-                    disabled={formData.itemType === 'ASSET'}
-                    value={formData.itemType === 'ASSET' ? 0 : formData.stockQty}
-                    onChange={handleInputChange}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 disabled:bg-gray-50"
-                  />
-                </div>
-                )}
-
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">ຈຳນວນເຕືອນຂັ້ນຕຳ່ (Threshold)</label>
                   <input
@@ -781,6 +828,54 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Receipt History Drawer */}
+      {historyItem && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex justify-end" onClick={() => setHistoryItem(null)}>
+          <div className="bg-white w-full max-w-md h-full shadow-xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><History size={18} /> ປະຫວັດການຮັບເຂົ້າ</h3>
+                <p className="text-xs text-gray-500">{historyItem._id} — {historyItem.name} (ສະຕັອກ {historyItem.stockQty})</p>
+              </div>
+              <button onClick={() => setHistoryItem(null)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {historyLoading ? (
+                <p className="text-center text-sm text-gray-400 py-10">ກຳລັງໂຫຼດ...</p>
+              ) : historyError ? (
+                <p className="text-center text-sm text-red-500 py-10">⚠️ {historyError}</p>
+              ) : historyRows.length === 0 ? (
+                <p className="text-center text-sm text-gray-400 py-10">ຍັງບໍ່ເຄີຍຮັບເຂົ້າ</p>
+              ) : (
+                historyRows.map((r) => {
+                  const m = MODE_BADGE[r.mode] || MODE_BADGE.RESTOCK;
+                  const by = r.createdBy && typeof r.createdBy === 'object'
+                    ? [r.createdBy.firstName, r.createdBy.lastName].filter(Boolean).join(' ') || r.createdBy.employeeCode
+                    : '—';
+                  return (
+                    <div key={r._id} className="border border-gray-100 rounded-xl p-3 text-sm space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${m.cls}`}>{m.text}</span>
+                        <span className="text-xs text-gray-500">{r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}</span>
+                      </div>
+                      <div className="font-semibold text-gray-800">+{r.quantity} {r.unit || ''}
+                        <span className="ml-2 text-xs font-normal text-gray-500">ສະຕັອກ {r.stockBefore ?? '—'} → {r.stockAfter ?? '—'}</span>
+                      </div>
+                      {r.vendor && <div className="text-xs text-gray-600">ຜູ້ຂາຍ: {r.vendor}</div>}
+                      {r.note && <div className="text-xs text-gray-600">ໝາຍເຫດ: {r.note}</div>}
+                      {r.assetTags?.length > 0 && (
+                        <div className="text-xs text-gray-600">Asset Tag: {r.assetTags.slice(0, 6).join(', ')}{r.assetTags.length > 6 ? ` … (+${r.assetTags.length - 6})` : ''}</div>
+                      )}
+                      <div className="text-xs text-gray-400">ບັນທຶກໂດຍ {by}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
