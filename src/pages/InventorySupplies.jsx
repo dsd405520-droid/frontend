@@ -468,15 +468,6 @@ useEffect(() => {
                       {Array.isArray(req.items) && req.items.map((i, idx) => (
                         <div key={idx} className="text-xs flex items-center gap-2">
                           <span>• {i.name} (x{i.quantity})</span>
-                          {req.status === 'APPROVED' && hasPermission('supplies', 'manage') && (
-                            <Link
-                              to={`/assets?popr=${encodeURIComponent(req._id)}&idx=${idx}`}
-                              title="ສ້າງ POPR ຈາກລາຍການນີ້"
-                              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-medium transition"
-                            >
-                              ສ້າງ POPR
-                            </Link>
-                          )}
                         </div>
                       ))}
                     </td>
