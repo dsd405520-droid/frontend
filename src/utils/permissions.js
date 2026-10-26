@@ -51,7 +51,7 @@ const HIDDEN_PAGES_BY_ROLE = {
 // ໜ້າທີ່ຕ້ອງເຊື່ອງຕາມ path (ໃຊ້ເມື່ອ module ຖືກໃຊ້ຮ່ວມກັບໜ້າອື່ນທີ່ຍັງຕ້ອງເຫັນ)
 // ເຊັ່ນ /assets (ຈັດການຊັບສິນ) ໃຊ້ module 'supplies' ຮ່ວມກັບ /supplies (ຂໍອຸປະກອນສິ້ນເປືອງ)
 const HIDDEN_PATHS_BY_ROLE = {
-    EMPLOYEE: ['/assets', '/goods-receipt'],
+    EMPLOYEE: ['/assets', '/goods-receipt', '/purchase-requests'],
 };
 
 export function canSeePath(path) {

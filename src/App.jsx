@@ -27,6 +27,7 @@ import AssetDetail from './pages/AssetDetail';
 import InventorySupplies from './pages/InventorySupplies';
 import SupplyReceipt from './pages/SupplyReceipt';
 import GoodsReceipt from './pages/GoodsReceipt';
+import PurchaseRequests from './pages/PurchaseRequests';
 import KnowledgeBase from './pages/KnowledgeBase';
 import TicketTypesManagement from './pages/TicketTypesManagement';
 import TicketDetail from './pages/TicketDetail';
@@ -74,6 +75,7 @@ export default function App() {
         {/* ທະບຽນຊັບສິນບໍລິສັດ — ຄົນລະ module key ('assets') ຈາກ Supply Catalog ('supplies') ຢູ່ /assets */}
         <Route path="/asset-registry" element={<ProtectedRoute module="assets"><AssetRegistry /></ProtectedRoute>} />
         <Route path="/assets/:id" element={<ProtectedRoute module="assets"><AssetDetail /></ProtectedRoute>} />
+        <Route path="/purchase-requests" element={<ProtectedRoute module="supplies"><PurchaseRequests /></ProtectedRoute>} />
         <Route path="/goods-receipt" element={<ProtectedRoute module="supplies"><GoodsReceipt /></ProtectedRoute>} />
         <Route path="/supplies" element={<ProtectedRoute module="supplies"><InventorySupplies /></ProtectedRoute>} />
         <Route path="/supplies/receipt/:id" element={<ProtectedRoute module="supplies"><SupplyReceipt /></ProtectedRoute>} />

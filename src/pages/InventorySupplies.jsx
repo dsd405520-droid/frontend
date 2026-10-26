@@ -6,17 +6,31 @@ import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
 import axios from '../services/api';
 
+const refId = (value) => (value && typeof value === 'object' ? value._id : value);
+const refName = (value) => {
+  if (!value) return '';
+  if (typeof value !== 'object') return value;
+  return `${value.firstName || ''} ${value.lastName || ''}`.trim() || value.name || value.email || value._id || '';
+};
+const isDeptRequest = (req) => !!(req && refId(req.departmentId));
+
 export default function InventorySupplies() {
   const [searchParams] = useSearchParams();
   const canRequest = hasPermission('supplies', 'create');
 
   const [requests, setRequests] = useState([]);
   const [catalog, setCatalog] = useState([]);
+  const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   
   const [items, setItems] = useState([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
   const [submitError, setSubmitError] = useState('');
+  const [requestFor, setRequestFor] = useState('PERSON');
+  const [custodianCode, setCustodianCode] = useState('');
+
+  const myDepartmentId = refId(me?.departmentId);
+  const myDepartmentName = me?.departmentId?.name || myDepartmentId;
 
   // ຕົວເລືອກຫຼາຍລາຍການຈາກ Catalog — ຕິກຫຼາຍອັນ + ໃສ່ຈຳນວນ ແລ້ວເພີ່ມເຂົ້າໃບຂໍພ້ອມກັນ
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -42,10 +56,12 @@ export default function InventorySupplies() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [reqRes, catRes] = await Promise.all([
+      const [reqRes, catRes, meRes] = await Promise.all([
         axios.get('/supply-requests/my'),
-        axios.get('/supply-catalog')
+        axios.get('/supply-catalog'),
+        axios.get('/auth/me')
       ]);
+      setMe(meRes.data?.data !== undefined ? meRes.data.data : meRes.data);
       
       const reqData = reqRes.data;
       setRequests(Array.isArray(reqData) ? reqData : (reqData.data || reqData.requests || reqData.items || []));
@@ -124,6 +140,13 @@ useEffect(() => {
     setPickerOpen(false);
     setPickerSearch('');
     setPickerSelected({});
+    setRequestFor('PERSON');
+    setCustodianCode('');
+  };
+
+  const chooseDepartmentRequest = () => {
+    setRequestFor('DEPARTMENT');
+    if (!custodianCode.trim()) setCustodianCode(me?.employeeCode || '');
   };
 
   const togglePicked = (id) => {
@@ -198,7 +221,22 @@ useEffect(() => {
         quantity,
         ...(reason ? { reason } : {}),
       }));
-      await axios.post('/supply-requests', { items: payloadItems });
+      if (requestFor === 'DEPARTMENT') {
+        if (!myDepartmentId) {
+          setSubmitError('ບັນຊີຂອງທ່ານຍັງບໍ່ໄດ້ຜູກກັບແຜນກ — ຈຶ່ງຂໍໃນນາມແຜນກບໍ່ໄດ້');
+          return;
+        }
+        if (!custodianCode.trim()) {
+          setSubmitError('ກະລຸນາລະບຸລະຫັດພະນັກງານຜູ້ຮັບຜິດຊອບຂອງແຜນກ');
+          return;
+        }
+      }
+      await axios.post('/supply-requests', {
+        items: payloadItems,
+        ...(requestFor === 'DEPARTMENT'
+          ? { departmentId: myDepartmentId, custodianCode: custodianCode.trim() }
+          : {}),
+      });
       setIsModalOpen(false);
       resetRequestForm();
       fetchData();
@@ -214,7 +252,11 @@ useEffect(() => {
     setReceiveStage(1);
     setAllAssets(null);
     setAssigneeCode(
-      req.requestedBy?.employeeCode || req.userId?.employeeCode || req.createdBy?.employeeCode || getCurrentUser()?.employeeCode || ''
+      (isDeptRequest(req) ? req.custodianId?.employeeCode : req.requestedBy?.employeeCode)
+        || req.userId?.employeeCode
+        || req.createdBy?.employeeCode
+        || getCurrentUser()?.employeeCode
+        || ''
     );
     setReceiveError('');
     setReceiveResult(null);
@@ -297,6 +339,7 @@ useEffect(() => {
   // ແຜນຮັບເຄື່ອງຕໍ່ລາຍການ: ມີ Asset Tag (ຕ້ອງສະແກນຄົບ) ຫຼື ຂອງສິ້ນເປືອງ (ຕິກ "ໄດ້ຮັບແລ້ວ") + ຊັບສິນວ່າງໃນທະບຽນພໍບໍ
   // (ກົດດຽວກັບ Backend: catalog ທີ່ມີຊັບສິນຜູກຢູ່ = ມີ Asset Tag, ນອກນັ້ນ = ຂອງສິ້ນເປືອງ)
   const assetsKnown = Array.isArray(allAssets);
+  const receiveIsDept = isDeptRequest(receiveRequest);
   const reqItems = receiveRequest && Array.isArray(receiveRequest.items) ? receiveRequest.items : [];
   const nameMatch = (itemName, assetType) => {
     const n = (itemName || '').toLowerCase();
@@ -408,9 +451,10 @@ useEffect(() => {
           </span>
         );
       case 'FULFILLED':
+      case 'CLOSED':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600 border border-emerald-200">
-            <Package size={12} /> ຮັບເຄື່ອງແລ້ວ (Fulfilled)
+            <Package size={12} /> ຮັບເຄື່ອງແລ້ວ
           </span>
         );
       case 'REJECTED':
@@ -463,7 +507,21 @@ useEffect(() => {
               ) : requests.length > 0 ? (
                 requests.map((req) => (
                   <tr key={req._id} className="hover:bg-gray-50">
-                    <td className="p-4 font-semibold text-gray-900">{req._id}</td>
+                    <td className="p-4 font-semibold text-gray-900">
+                      {req._id}
+                      {isDeptRequest(req) && (
+                        <div className="mt-1 text-[11px] font-normal text-gray-500 space-y-0.5">
+                          <div>
+                            <span className="inline-flex items-center rounded-full bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5">
+                              ແຜນກ {refName(req.departmentId)}
+                            </span>
+                          </div>
+                          {req.custodianId && (
+                            <div>ຜູ້ຮັບຜິດຊອບ: {refName(req.custodianId)}</div>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className="p-4">
                       {Array.isArray(req.items) && req.items.map((i, idx) => (
                         <div key={idx} className="text-xs flex items-center gap-2">
@@ -521,6 +579,56 @@ useEffect(() => {
               </div>
 
               <form onSubmit={handleSubmitRequest} className="space-y-4">
+                <div className="rounded-xl border border-gray-200 p-3 space-y-3">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRequestFor('PERSON')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                        requestFor === 'PERSON'
+                          ? 'bg-amber-500 text-white border-amber-500'
+                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      ຂໍສ່ວນຕົວ
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!myDepartmentId}
+                      onClick={chooseDepartmentRequest}
+                      title={!myDepartmentId ? 'ບັນຊີຍັງບໍ່ໄດ້ຜູກກັບແຜນກ' : undefined}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 ${
+                        requestFor === 'DEPARTMENT'
+                          ? 'bg-violet-600 text-white border-violet-600'
+                          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      ຂໍໃນນາມແຜນກ
+                    </button>
+                  </div>
+                  {requestFor === 'DEPARTMENT' && (
+                    <>
+                      <div className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                        ແຜນກ: <b>{myDepartmentName}</b> — ຊັບສິນທີ່ໄດ້ຮັບຈະຂຶ້ນກັບແຜນກ ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບທີ່ລະບຸ
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບຜິດຊອບ *</label>
+                        <input
+                          type="text"
+                          required
+                          value={custodianCode}
+                          onChange={(e) => setCustodianCode(e.target.value)}
+                          placeholder="ລະຫັດພະນັກງານ..."
+                          className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white tracking-widest"
+                        />
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          ຕ້ອງເປັນສະມາຊິກ ຫຼື ຫົວໜ້າຂອງແຜນກນີ້ — ຄ່າເລີ່ມຕົ້ນແມ່ນລະຫັດຂອງທ່ານ
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ລາຍການສິນຄ້າທີ່ຕ້ອງການ</label>
@@ -704,6 +812,14 @@ useEffect(() => {
                 <button type="button" onClick={closeReceive} className="text-gray-400 hover:text-gray-600">✕</button>
               </div>
 
+              {receiveIsDept && (
+                <div className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
+                  ໃບຂໍຂອງແຜນກ <b>{refName(receiveRequest.departmentId)}</b>
+                  {receiveRequest.custodianId && <> · ຜູ້ຮັບຜິດຊອບ <b>{refName(receiveRequest.custodianId)}</b></>}
+                  {' '}— ຊັບສິນຈະຂຶ້ນກັບແຜນກ
+                </div>
+              )}
+
               {receiveStage === 1 ? (
                 <form onSubmit={(e) => { e.preventDefault(); gotoStage2(); }} className="space-y-3">
                   <p className="text-xs text-gray-500">
@@ -837,16 +953,20 @@ useEffect(() => {
                       <div key={p.k} className="text-xs text-gray-600">• {p.it.name} x{p.qty} (ຂອງສິ້ນເປືອງ)</div>
                     ))}
                     <div className="pt-1">
-                      <label className="block text-xs text-gray-500 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບ *</label>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        ລະຫັດພະນັກງານຜູ້ຮັບ {receiveIsDept ? '(ທາງເລືອກ)' : '*'}
+                      </label>
                       <input
-                        required
+                        required={!receiveIsDept}
                         value={assigneeCode}
                         onChange={(e) => setAssigneeCode(e.target.value)}
                         placeholder="ລະຫັດພະນັກງານ..."
                         className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm tracking-widest"
                       />
                       <p className="text-xs text-gray-400 mt-1">
-                        ຄ່າເລີ່ມຕົ້ນ = ຜູ້ຂໍຂອງຄຳຂໍນີ້ — ແກ້ໄດ້ຖ້າໃຫ້ຄົນອື່ນຮັບ (ຖ້າບໍ່ມີສິດ assets:assign Backend ຈະປະຕິເສດ)
+                        {receiveIsDept
+                          ? `ເວັ້ນວ່າງ = ຜູ້ຮັບຜິດຊອບຂອງແຜນກ (${refName(receiveRequest.custodianId)}) — ຜູ້ຮັບແທນຕ້ອງເປັນສະມາຊິກ ຫຼື ຫົວໜ້າແຜນກ`
+                          : 'ຄ່າເລີ່ມຕົ້ນ = ຜູ້ຂໍຂອງຄຳຂໍນີ້ — ແກ້ໄດ້ຖ້າໃຫ້ຄົນອື່ນຮັບ (ຖ້າບໍ່ມີສິດ assets:assign Backend ຈະປະຕິເສດ)'}
                       </p>
                       {assigneeInfo.state === 'found' && assigneeInfo.user && (
                         <div className={`mt-2 text-xs rounded-lg px-3 py-2 border ${assigneeInfo.user.isActive === false ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
@@ -865,7 +985,7 @@ useEffect(() => {
                   )}
                   {receiveResult?.ok && (
                     <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                      ✓ ບັນທຶກສຳເລັດ — ຜູກ {receiveResult.assetTags.length} ຊິ້ນ ກັບຜູ້ຮັບ {receiveResult.assigneeCode} ແລະ ຂຶ້ນທະບຽນຊັບສິນແລ້ວ{receiveResult.consumables > 0 ? ` (ຂອງສິ້ນເປືອງ ${receiveResult.consumables} ລາຍການ ຕັດສະຕ໊ອກແລ້ວ)` : ''}
+                      ✓ ບັນທຶກສຳເລັດ — ຜູກ {receiveResult.assetTags.length} ຊິ້ນ ກັບຜູ້ຮັບ {receiveResult.assigneeCode || refName(receiveRequest?.custodianId)} ແລະ ຂຶ້ນທະບຽນຊັບສິນແລ້ວ{receiveResult.consumables > 0 ? ` (ຂອງສິ້ນເປືອງ ${receiveResult.consumables} ລາຍການ ຕັດສະຕ໊ອກແລ້ວ)` : ''}
                     </div>
                   )}
 

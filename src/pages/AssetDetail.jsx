@@ -209,6 +209,8 @@ export default function AssetDetail() {
     ? `${assignee.firstName || ''} ${assignee.lastName || ''}`.trim() + (assignee.employeeCode ? ` (${assignee.employeeCode})` : '')
     : 'ຍັງບໍ່ມີຜູ້ດູແລ';
 
+  const isDeptHeld = asset?.holderType === 'DEPARTMENT' && !!asset?.departmentId;
+
   const assigneeName = (uid) => {
     if (!uid) return '—';
     const u = users.find((x) => x._id === uid);
@@ -304,8 +306,13 @@ export default function AssetDetail() {
               <div className="text-xl font-bold text-gray-800">{asset.assetTag}</div>
               <div className="text-sm text-gray-500 mt-0.5">ປະເພດ: {asset.type}</div>
               <div className="text-sm mt-1 flex items-center gap-1.5">
-                <span className="text-gray-500">ຜູ້ດູແລ:</span>
+                <span className="text-gray-500">{isDeptHeld ? 'ຜູ້ຮັບຜິດຊອບ:' : 'ຜູ້ດູແລ:'}</span>
                 <span className={`font-medium ${assignee ? 'text-blue-600' : 'text-gray-400'}`}>{assigneeLabel}</span>
+                {isDeptHeld && (
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">
+                    ພະແນກ {deptName(asset.departmentId)}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -373,7 +380,7 @@ export default function AssetDetail() {
               <div className="text-xs font-medium text-gray-400 uppercase tracking-wider">ການດູແລຮັກສາ</div>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-gray-500">ຜູ້ດູແລ/ຜູ້ຖືກມອບໝາຍ</span>
+                  <span className="text-gray-500">{isDeptHeld ? 'ຜູ້ຮັບຜິດຊອບ' : 'ຜູ້ດູແລ/ຜູ້ຖືກມອບໝາຍ'}</span>
                   <span className={`font-medium text-right ${assignee ? 'text-blue-600' : 'text-gray-400'}`}>{assigneeLabel}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-100">
@@ -392,7 +399,7 @@ export default function AssetDetail() {
                 <div className="flex justify-between py-2 border-b border-gray-100">
                   <span className="text-gray-500">ພະແນກ</span>
                   <span className="font-medium text-gray-800">
-                    {assignee ? (assignee.departmentId?.name || '—') : '—'}
+                    {isDeptHeld ? `${deptName(asset.departmentId)} (ເຈົ້າຂອງ)` : assignee ? (assignee.departmentId?.name || '—') : '—'}
                   </span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-100">
@@ -448,7 +455,17 @@ export default function AssetDetail() {
               ) : (
                 [...asset.assignmentHistory].reverse().map((h, i) => (
                   <div key={h._id || i} className="p-4 text-sm">
-                    <div className="font-semibold text-gray-800">{assigneeName(h.assigneeId)}</div>
+                    <div className="font-semibold text-gray-800">
+                      {assigneeName(h.assigneeId)}
+                      {h.departmentId && (
+                        <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">
+                          ພະແນກ {deptName(h.departmentId)}
+                        </span>
+                      )}
+                    </div>
+                    {h.receivedById && (
+                      <div className="text-xs text-gray-500 mt-0.5">ຜູ້ມາຮັບແທນ: {assigneeName(h.receivedById)}</div>
+                    )}
                     <div className="text-xs text-gray-500 mt-0.5">
                       {h.assignedAt ? new Date(h.assignedAt).toLocaleString() : '—'} —{' '}
                       {h.returnedAt ? new Date(h.returnedAt).toLocaleString() : <span className="text-blue-600 font-medium">ຍັງຖືຢູ່</span>}

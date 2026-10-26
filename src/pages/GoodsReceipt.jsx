@@ -10,12 +10,15 @@ import {
   ChevronDown,
   ChevronRight,
   Printer,
+  Paperclip,
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
 import AssetTagPrintModal from '../components/AssetTagPrintModal';
 import CsvExportButton from '../components/CsvExportButton';
 import api from '../services/api';
+import GoodsReceiptPrint from '../components/GoodsReceiptPrint';
+import { API_BASE_URL, API_ORIGIN } from '../config';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
 
 const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
@@ -58,22 +61,30 @@ function Field({ label, required, children }) {
 }
 
 /** ຟອມຮັບເຄື່ອງ — ໃຊ້ຮ່ວມກັນທັງ "ເພີ່ມ" (RESTOCK) ແລະ "ຊື້" (NEW_ITEM) */
-function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved }) {
+function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose, onSaved }) {
   const isNew = mode === 'NEW_ITEM';
   const currentUser = getCurrentUser();
   const [catalogItemId, setCatalogItemId] = useState(initialCatalogItemId || '');
-  const [item, setItem] = useState({
-    name: '',
-    category: '',
-    unit: '',
-    type: 'DEVICE_SERIAL',
-  });
+  const prRemaining = pr ? Math.max(1, (pr.quantity || 0) - (pr.receivedQuantity || 0)) : 1;
+  const [item, setItem] = useState(
+    pr?.newItem
+      ? { name: pr.newItem.name, category: pr.newItem.category, unit: pr.newItem.unit, type: pr.newItem.type }
+      : { name: '', category: '', unit: '', type: 'DEVICE_SERIAL' },
+  );
+  const [exceptionReason, setExceptionReason] = useState('');
+  const canException = hasPermission('supplies', 'approve');
   const [hasSerial, setHasSerial] = useState(false); // legacy item ທີ່ຍັງບໍ່ມີ itemType
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(prRemaining);
   const [expectedQuantity, setExpectedQuantity] = useState('');
   const [countNote, setCountNote] = useState('');
   const [receivedDate, setReceivedDate] = useState(today());
-  const [vendor, setVendor] = useState('');
+  const [vendor, setVendor] = useState(pr?.vendor || '');
+  const [unitPrice, setUnitPrice] = useState(pr?.estimatedUnitPrice != null ? String(pr.estimatedUnitPrice) : '');
+  const [storageRoom, setStorageRoom] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [invoiceFile, setInvoiceFile] = useState(null); // { url, name }
+  const [uploading, setUploading] = useState(false);
+  const [receiptPrintOpen, setReceiptPrintOpen] = useState(false);
   const [note, setNote] = useState('');
   const [serials, setSerials] = useState([]);
   const [pasteText, setPasteText] = useState('');
@@ -100,6 +111,8 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
   const mismatch = Number.isInteger(expected) && expected !== qty;
   const stockBefore = selected?.stockQty ?? 0;
   const stockAfter = stockBefore + qty;
+  const priceNum = unitPrice === '' ? null : Number(unitPrice);
+  const totalPrice = priceNum !== null && Number.isFinite(priceNum) ? priceNum * qty : null;
 
   const filledCount = Array.from({ length: qty }, (_, i) => (serials[i] || '').trim()).filter(Boolean).length;
   const dupSet = useMemo(() => {
@@ -180,6 +193,32 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
     });
   };
 
+  const handleInvoiceFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) return setError('ໄຟລ໌ໃຫຍ່ເກີນໄປ (ຈຳກັດ 10MB)');
+    try {
+      setUploading(true);
+      setError('');
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch(`${API_BASE_URL}/uploads`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+        body: fd,
+      });
+      if (!res.ok) throw new Error('upload');
+      const body = await res.json();
+      const info = body.data ?? body;
+      setInvoiceFile({ url: info.url, name: info.originalName || file.name });
+    } catch {
+      setError('ອັບໂຫຼດໃບບິນບໍ່ສຳເລັດ (ຮອງຮັບ PDF / ຮູບ / Word ບໍ່ເກີນ 10MB)');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setError('');
@@ -195,21 +234,33 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
 
     let serialNumbers;
     if (tracking === 'SERIAL') {
-      serialNumbers = Array.from({ length: qty }, (_, i) => (serials[i] || '').trim());
-      if (serialNumbers.some((s) => !s)) return setError('ກະລຸນາໃສ່ Serial Number ໃຫ້ຄົບທຸກໜ່ວຍ');
+      serialNumbers = Array.from({ length: qty }, (_, i) => (serials[i] || '').trim()).filter(Boolean);
       const lower = serialNumbers.map((s) => s.toLowerCase());
       if (new Set(lower).size !== lower.length) return setError('ມີ Serial Number ຊ້ຳກັນໃນລາຍການທີ່ປ້ອນ');
     }
 
+    if (unitPrice !== '' && (!Number.isFinite(priceNum) || priceNum < 0)) return setError('ລາຄາບໍ່ຖືກຕ້ອງ');
+    if (priceNum > 0 && !invoiceNo.trim()) return setError('ເມື່ອໃສ່ລາຄາ ຕ້ອງໃສ່ເລກທີໃບບິນ/ໃບເກັບເງິນ');
+
+    if (!pr && canException && exceptionReason.trim().length < 5)
+      return setError('ຮັບເຄື່ອງໂດຍບໍ່ມີໃບສະເໜີ ຕ້ອງໃສ່ເຫດຜົນ (ຢ່າງໜ້ອຍ 5 ຕົວອັກສອນ)');
+
     const common = {
+      purchaseRequestId: pr?._id,
+      exceptionReason: !pr ? exceptionReason.trim() || undefined : undefined,
       quantity: qty,
+      unitPrice: priceNum !== null ? priceNum : undefined,
+      storageRoom: tracking !== 'COUNT' ? storageRoom.trim() || undefined : undefined,
+      invoiceNo: invoiceNo.trim() || undefined,
+      invoiceFileUrl: invoiceFile?.url,
+      invoiceFileName: invoiceFile?.name,
       expectedQuantity: Number.isInteger(expected) ? expected : undefined,
       countNote: mismatch ? countNote.trim() : undefined,
       receivedDate: receivedDate || undefined,
       vendor: vendor.trim() || undefined,
       note: note.trim() || undefined,
       branchId: tracking !== 'COUNT' ? branchId || undefined : undefined,
-      serialNumbers,
+      serialNumbers: serialNumbers && serialNumbers.length ? serialNumbers : undefined,
     };
     try {
       setSaving(true);
@@ -255,6 +306,18 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
             <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl">
               <CheckCircle2 size={16} /> ບັນທຶກການຮັບເຄື່ອງເຂົ້າສະຕັອກສຳເລັດ
             </div>
+            {result.receiptNo && (
+              <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 text-sm">
+                <span className="text-gray-500">ເລກທີໃບຮັບເຄື່ອງ</span>
+                <span className="font-semibold text-gray-800">{result.receiptNo}</span>
+              </div>
+            )}
+            {result.totalPrice != null && (
+              <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 text-sm">
+                <span className="text-gray-500">ລາຄາລວມ</span>
+                <span className="font-semibold text-gray-800">{Number(result.totalPrice).toLocaleString()}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 text-sm">
               <span className="text-gray-500">ສະຕັອກ</span>
               <span className="font-semibold text-gray-800">
@@ -308,6 +371,15 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
             )}
           </div>
           <div className="flex flex-wrap justify-end gap-2 px-6 py-4 border-t border-gray-100">
+            {result._id && (
+              <button
+                type="button"
+                onClick={() => setReceiptPrintOpen(true)}
+                className="px-4 py-2 border border-emerald-200 text-emerald-700 rounded-xl text-sm hover:bg-emerald-50 flex items-center gap-2"
+              >
+                <Printer size={16} /> ພິມໃບຮັບເຄື່ອງ
+              </button>
+            )}
             {created.length > 0 && (
               <>
                 <button
@@ -346,6 +418,7 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
           </div>
         </div>
 
+        {receiptPrintOpen && <GoodsReceiptPrint receiptId={result._id} onClose={() => setReceiptPrintOpen(false)} />}
         {printOpen && (
           <AssetTagPrintModal assets={created} claimBaseUrl={claimBaseUrl} onClose={() => setPrintOpen(false)} />
         )}
@@ -389,8 +462,31 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
             <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">{error}</div>
           )}
 
+          {pr ? (
+            <div className="p-3 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl">
+              ຮັບເຄື່ອງຕາມໃບສະເໜີ <b>{pr.prNo}</b> — ຂໍ {pr.quantity}, ຮັບແລ້ວ {pr.receivedQuantity || 0}, ເຫຼືອ {prRemaining}
+            </div>
+          ) : canException ? (
+            <div className="space-y-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-xs text-amber-700">
+                ບໍ່ມີໃບສະເໜີ — ຂໍ້ຍົກເວັ້ນສຳລັບຜູ້ມີສິດພິເສດ ຕ້ອງໃສ່ເຫດຜົນ (ຈະຖືກບັນທຶກໃນ audit)
+              </p>
+              <textarea
+                rows={2}
+                className={inputCls}
+                placeholder="ເຫດຜົນ ເຊັ່ນ ຊື້ດ່ວນ / ຂອງບໍລິຈາກ"
+                value={exceptionReason}
+                onChange={(e) => setExceptionReason(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-xl">
+              ການຮັບເຄື່ອງຕ້ອງອ້າງອີງໃບສະເໜີຊື້ທີ່ອະນຸມັດແລ້ວ — ໃຫ້ກົດ "ຮັບເຄື່ອງ" ຈາກໜ້າໃບສະເໜີຊື້
+            </div>
+          )}
+
           {isNew ? (
-            <>
+            <fieldset disabled={!!pr} className="space-y-4">
               <Field label="ຊື່ລາຍການ" required>
                 <input className={inputCls} value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} />
               </Field>
@@ -424,11 +520,11 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
                   <option value="CONSUMABLE">ນັບຈຳນວນ (ສິ້ນເປືອງ)</option>
                 </select>
               </Field>
-            </>
+            </fieldset>
           ) : (
             <>
               <Field label="ລາຍການ" required>
-                <select className={inputCls} value={catalogItemId} onChange={(e) => setCatalogItemId(e.target.value)}>
+                <select className={inputCls} value={catalogItemId} disabled={!!pr} onChange={(e) => setCatalogItemId(e.target.value)}>
                   <option value="">— ເລືອກລາຍການ —</option>
                   {sortedCatalog.map((c) => (
                     <option key={c._id} value={c._id}>
@@ -487,20 +583,71 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
             <input type="date" className={inputCls} value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
           </Field>
           {tracking !== 'COUNT' && (
-            <Field label="ສາຂາ / ບ່ອນເກັບ">
-              <select className={inputCls} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-                {!branchId && <option value="">— ເລືອກສາຂາ —</option>}
-                {branches.map((b) => (
-                  <option key={b._id} value={b._id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="ສາຂາ">
+                <select className={inputCls} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+                  {!branchId && <option value="">— ເລືອກສາຂາ —</option>}
+                  {branches.map((b) => (
+                    <option key={b._id} value={b._id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="ຫ້ອງເກັບ">
+                <input
+                  className={inputCls}
+                  list="gr-rooms"
+                  placeholder="ເຊັ່ນ ຫ້ອງ 201"
+                  value={storageRoom}
+                  onChange={(e) => setStorageRoom(e.target.value)}
+                />
+                <datalist id="gr-rooms">
+                  {(rooms || []).map((r) => (
+                    <option key={r} value={r} />
+                  ))}
+                </datalist>
+              </Field>
+            </div>
           )}
           <Field label="ຜູ້ຂາຍ / ຜູ້ສະໜອງ">
             <input className={inputCls} value={vendor} onChange={(e) => setVendor(e.target.value)} />
           </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="ລາຄາຕໍ່ໜ່ວຍ">
+              <input
+                type="number"
+                min="0"
+                step="any"
+                className={inputCls}
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(e.target.value)}
+              />
+            </Field>
+            <Field label="ລາຄາລວມ (ຄຳນວນອັດຕະໂນມັດ)">
+              <input className={`${inputCls} bg-gray-50`} readOnly value={totalPrice !== null ? totalPrice.toLocaleString() : ''} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="ເລກທີໃບບິນ / ໃບເກັບເງິນ" required={priceNum > 0}>
+              <input className={inputCls} value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} />
+            </Field>
+            <Field label="ແນບໃບບິນ (PDF / ຮູບ)">
+              {invoiceFile ? (
+                <div className="flex items-center justify-between gap-2 px-3 py-2 border border-emerald-200 bg-emerald-50 rounded-xl text-xs text-emerald-700">
+                  <span className="truncate">{invoiceFile.name}</span>
+                  <button type="button" onClick={() => setInvoiceFile(null)} className="text-emerald-700 hover:text-red-600">
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-xl text-xs text-gray-500 cursor-pointer hover:bg-gray-50">
+                  <Paperclip size={14} /> {uploading ? 'ກຳລັງອັບໂຫຼດ...' : 'ເລືອກໄຟລ໌'}
+                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx" className="hidden" onChange={handleInvoiceFile} disabled={uploading} />
+                </label>
+              )}
+            </Field>
+          </div>
           <Field label="ໝາຍເຫດ">
             <textarea rows={2} className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
@@ -513,7 +660,7 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
           {tracking === 'SERIAL' && qty > 0 && (
             <div className="space-y-2">
               <p className="text-xs font-medium text-gray-700">
-                Serial Number ({qty} ໜ່ວຍ) <span className="text-red-500">*</span>
+                Serial Number ({qty} ໜ່ວຍ) <span className="text-gray-400 font-normal">— ທາງເລືອກ, ຕື່ມພາຍຫຼັງໃນທະບຽນຊັບສິນໄດ້</span>
               </p>
               <textarea
                 rows={2}
@@ -572,7 +719,7 @@ function ReceiveModal({ mode, catalog, initialCatalogItemId, onClose, onSaved })
                   </div>
                 );
               })}
-              <p className="text-xs text-gray-400">ລະບົບຈະສ້າງຊັບສິນ + Asset Tag + QR ໃຫ້ຕໍ່ແຕ່ລະໜ່ວຍ ແລະ ເກັບເຂົ້າຄັງ</p>
+              <p className="text-xs text-gray-400">ຖ້າບໍ່ໃສ່ S/N ລະບົບກໍຈະສ້າງຊັບສິນ + Asset Tag ໃຫ້ຄືກັນ; ຕື່ມ S/N ພາຍຫຼັງໄດ້</p>
             </div>
           )}
 
@@ -625,6 +772,7 @@ export default function GoodsReceipt() {
   const [modal, setModal] = useState(null); // { mode, initialCatalogItemId }
   const [success, setSuccess] = useState('');
   const [expandedId, setExpandedId] = useState('');
+  const [printId, setPrintId] = useState('');
 
   const fetchRows = async () => {
     try {
@@ -673,9 +821,24 @@ export default function GoodsReceipt() {
   useEffect(() => {
     const restock = searchParams.get('restock');
     const isNew = searchParams.get('new');
-    if (!restock && !isNew) return;
-    setModal(restock ? { mode: 'RESTOCK', initialCatalogItemId: restock } : { mode: 'NEW_ITEM' });
+    const prId = searchParams.get('pr');
+    if (!restock && !isNew && !prId) return;
     navigate('/goods-receipt', { replace: true });
+    if (prId) {
+      api
+        .get(`/purchase-requests/${prId}`)
+        .then((res) => {
+          const pr = unwrap(res.data);
+          setModal({
+            mode: pr.catalogItemId ? 'RESTOCK' : 'NEW_ITEM',
+            initialCatalogItemId: pr.catalogItemId || undefined,
+            pr,
+          });
+        })
+        .catch((err) => setLoadError(errText(err, 'ໂຫຼດໃບສະເໜີບໍ່ສຳເລັດ')));
+      return;
+    }
+    setModal(restock ? { mode: 'RESTOCK', initialCatalogItemId: restock } : { mode: 'NEW_ITEM' });
   }, [searchParams, navigate]);
 
   const handleSaved = () => {
@@ -691,6 +854,8 @@ export default function GoodsReceipt() {
       : '—';
 
   const branchName = (id) => branches.find((b) => b._id === id)?.name || id || '—';
+
+  const rooms = useMemo(() => [...new Set(rows.map((r) => r.storageRoom).filter(Boolean))], [rows]);
 
   const total = useMemo(() => rows.reduce((s, r) => s + (r.quantity || 0), 0), [rows]);
 
@@ -762,7 +927,12 @@ export default function GoodsReceipt() {
                 label="Export CSV"
                 permitted={hasPermission('supplies', 'read')}
                 columns={[
+                  { key: 'receiptNo', label: 'receiptNo' },
                   { key: 'receivedDate', label: 'date' },
+                  { key: 'unitPrice', label: 'unitPrice' },
+                  { key: 'totalPrice', label: 'totalPrice' },
+                  { key: 'invoiceNo', label: 'invoiceNo' },
+                  { key: 'storageRoom', label: 'storageRoom' },
                   { key: 'itemName', label: 'item' },
                   { key: 'quantity', label: 'quantity' },
                   { key: 'mode', label: 'mode' },
@@ -786,16 +956,18 @@ export default function GoodsReceipt() {
                   <th className="p-4 font-medium">ລາຍການ</th>
                   <th className="p-4 font-medium">ຈຳນວນ</th>
                   <th className="p-4 font-medium">ປະເພດ</th>
+                  <th className="p-4 font-medium">ລາຄາລວມ</th>
                   <th className="p-4 font-medium">ບັນທຶກໂດຍ</th>
+                  <th className="p-4 font-medium" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-600">
                 {loading ? (
-                  <tr><td colSpan="5" className="py-12 text-center text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
+                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
                 ) : loadError ? (
-                  <tr><td colSpan="5" className="py-12 text-center text-red-500 px-4">⚠️ {loadError}</td></tr>
+                  <tr><td colSpan="7" className="py-12 text-center text-red-500 px-4">⚠️ {loadError}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan="5" className="py-12 text-center text-gray-400">ຍັງບໍ່ມີປະຫວັດການຮັບເຄື່ອງ</td></tr>
+                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ຍັງບໍ່ມີປະຫວັດການຮັບເຄື່ອງ</td></tr>
                 ) : (
                   rows.map((r) => {
                     const m = MODE_LABEL[r.mode] || MODE_LABEL.RESTOCK;
@@ -809,6 +981,7 @@ export default function GoodsReceipt() {
                           <td className="p-4">
                             <span className="inline-flex items-center gap-1">
                               {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              {r.receiptNo && <span className="font-mono text-xs text-gray-500 mr-1">{r.receiptNo}</span>}
                               {r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}
                             </span>
                           </td>
@@ -816,6 +989,7 @@ export default function GoodsReceipt() {
                             <div className="font-medium text-gray-800">{r.itemName}</div>
                             <div className="text-xs text-gray-400">
                               {r.catalogItemId}
+                              {r.purchaseRequestNo ? ` · ${r.purchaseRequestNo}` : r.exceptionReason ? ' · ບໍ່ມີໃບສະເໜີ' : ''}
                               {r.vendor ? ` · ${r.vendor}` : ''}
                               {r.serialNumbers?.length ? ` · S/N: ${r.serialNumbers.slice(0, 3).join(', ')}${r.serialNumbers.length > 3 ? '…' : ''}` : ''}
                             </div>
@@ -824,16 +998,48 @@ export default function GoodsReceipt() {
                           <td className="p-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.cls}`}>{m.text}</span>
                           </td>
+                          <td className="p-4">{r.totalPrice != null ? Number(r.totalPrice).toLocaleString() : '—'}</td>
                           <td className="p-4">{personName(r.createdBy)}</td>
+                          <td className="p-4">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPrintId(r._id);
+                              }}
+                              title="ພິມໃບຮັບເຄື່ອງ"
+                              className="p-2 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50"
+                            >
+                              <Printer size={14} />
+                            </button>
+                          </td>
                         </tr>
                         {open && (
                           <tr className="bg-gray-50/60">
-                            <td colSpan="5" className="px-6 py-4">
+                            <td colSpan="7" className="px-6 py-4">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                                 <div>ສະຕັອກ: <b>{r.stockBefore ?? '—'} → {r.stockAfter ?? '—'}</b></div>
                                 <div>ສາຂາ: <b>{branchName(r.branchId)}</b></div>
                                 <div>ຄາດວ່າ / ນັບໄດ້: <b>{r.expectedQuantity ?? '—'} / {r.quantity}</b></div>
                                 <div>ຜູ້ຂາຍ: <b>{r.vendor || '—'}</b></div>
+                                <div>ຫ້ອງເກັບ: <b>{r.storageRoom || '—'}</b></div>
+                                <div>ໃບສະເໜີ: <b>{r.purchaseRequestNo || '—'}</b></div>
+                                {r.exceptionReason && <div className="sm:col-span-2 text-amber-700">ຂໍ້ຍົກເວັ້ນ (ບໍ່ມີໃບສະເໜີ): <b>{r.exceptionReason}</b></div>}
+                                <div>ລາຄາ/ໜ່ວຍ: <b>{r.unitPrice != null ? Number(r.unitPrice).toLocaleString() : '—'}</b></div>
+                                <div>
+                                  ໃບບິນ: <b>{r.invoiceNo || '—'}</b>
+                                  {r.invoiceFileUrl && (
+                                    <a
+                                      href={`${API_ORIGIN}${r.invoiceFileUrl}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="ml-2 text-blue-600 underline"
+                                    >
+                                      ເປີດໄຟລ໌
+                                    </a>
+                                  )}
+                                </div>
                                 <div className="sm:col-span-2">ໝາຍເຫດ: <b>{r.note || '—'}</b></div>
                                 {r.countNote && <div className="sm:col-span-2">ໝາຍເຫດການນັບ: <b>{r.countNote}</b></div>}
                                 {r.serialNumbers?.length > 0 && (
@@ -856,11 +1062,14 @@ export default function GoodsReceipt() {
         </div>
       </div>
 
+      {printId && <GoodsReceiptPrint receiptId={printId} onClose={() => setPrintId('')} />}
       {modal && (
         <ReceiveModal
           mode={modal.mode}
           catalog={catalog}
+          rooms={rooms}
           initialCatalogItemId={modal.initialCatalogItemId}
+          pr={modal.pr}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
         />

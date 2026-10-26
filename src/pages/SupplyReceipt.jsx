@@ -13,6 +13,7 @@ const STATUS_LABEL = {
   REQUESTED: { text: 'ລໍຖ້າອະນຸມັດ', className: 'bg-amber-50 text-amber-600 border-amber-200' },
   APPROVED: { text: 'ອະນຸມັດແລ້ວ — ລໍຖ້າຮັບເຄື່ອງ', className: 'bg-blue-50 text-blue-600 border-blue-200' },
   FULFILLED: { text: 'ຮັບເຄື່ອງແລ້ວ', className: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
+  CLOSED: { text: 'ຮັບເຄື່ອງແລ້ວ', className: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
   REJECTED: { text: 'ຖືກປະຕິເສດ', className: 'bg-rose-50 text-rose-600 border-rose-200' },
 };
 
@@ -68,6 +69,13 @@ export default function SupplyReceipt() {
   const requesterName = requester
     ? `${requester.firstName || ''} ${requester.lastName || ''}`.trim() || requester.employeeCode || '—'
     : '—';
+  const department = receipt?.departmentId && typeof receipt.departmentId === 'object' ? receipt.departmentId : null;
+  const custodian = receipt?.custodianId && typeof receipt.custodianId === 'object' ? receipt.custodianId : null;
+  const custodianName = custodian
+    ? `${custodian.firstName || ''} ${custodian.lastName || ''}`.trim() || custodian.employeeCode || '—'
+    : '—';
+  const isDepartmentRequest = !!receipt?.isDepartmentRequest;
+  const receiverName = isDepartmentRequest ? custodianName : requesterName;
 
   const addTag = (raw) => {
     let value = String(raw || '').trim();
@@ -88,7 +96,10 @@ export default function SupplyReceipt() {
       const payload = { assetTags: tags };
       if (consumableItems.length > 0) payload.confirmConsumables = confirmConsumables;
       // ເຈົ້າໜ້າທີ່ສາງຢືນຢັນແທນຜູ້ຂໍ → ລະບຸລະຫັດຜູ້ຂໍເປັນຜູ້ຮັບ
-      if (!receipt.isRequester && requester?.employeeCode) payload.assigneeCode = requester.employeeCode;
+      // (ໃບຂອງແຜນກ: ບໍ່ສົ່ງ assigneeCode — Backend ຈະມອບໃຫ້ຜູ້ຮັບຜິດຊອບຂອງແຜນກ)
+      if (!isDepartmentRequest && !receipt.isRequester && requester?.employeeCode) {
+        payload.assigneeCode = requester.employeeCode;
+      }
       await axios.patch(`/supply-requests/${id}/receive`, payload);
       setDone(true);
       await load();
@@ -151,6 +162,17 @@ export default function SupplyReceipt() {
                     ຜູ້ຂໍ: <span className="font-medium text-gray-800">{requesterName}</span>
                     {requester?.employeeCode ? ` (${requester.employeeCode})` : ''}
                   </div>
+                  {isDepartmentRequest && (
+                    <>
+                      <div className="text-sm text-gray-500">
+                        ແຜນກ: <span className="font-medium text-violet-700">{department?.name || department?._id || '—'}</span>
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        ຜູ້ຮັບຜິດຊອບ: <span className="font-medium text-gray-800">{custodianName}</span>
+                        {custodian?.employeeCode ? ` (${custodian.employeeCode})` : ''}
+                      </div>
+                    </>
+                  )}
                   <div className="text-sm text-gray-500">
                     ວັນທີຍື່ນ: {receipt.createdAt ? new Date(receipt.createdAt).toLocaleDateString() : '—'}
                   </div>
@@ -204,27 +226,33 @@ export default function SupplyReceipt() {
 
               <div className="hidden print:grid grid-cols-2 gap-8 pt-10 text-xs text-gray-500">
                 <div className="border-t border-gray-400 pt-1 text-center">ຜູ້ຈ່າຍເຄື່ອງ (ສາງ)</div>
-                <div className="border-t border-gray-400 pt-1 text-center">ຜູ້ຮັບເຄື່ອງ</div>
+                <div className="border-t border-gray-400 pt-1 text-center">
+                  ຜູ້ຮັບເຄື່ອງ{isDepartmentRequest ? ' (ຜູ້ຮັບຜິດຊອບແຜນກ)' : ''}
+                </div>
               </div>
             </div>
 
-            {done && receipt.status === 'FULFILLED' && (
+            {done && ['FULFILLED', 'CLOSED'].includes(receipt.status) && (
               <div className="no-print bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-center gap-3 text-emerald-700">
                 <CheckCircle2 size={28} />
                 <div>
                   <div className="font-semibold">ຢືນຢັນຮັບເຄື່ອງສຳເລັດ</div>
-                  <div className="text-xs">ຊັບສິນທີ່ມີ Asset Tag ຖືກບັນທຶກເຂົ້າທະບຽນໃຫ້ຜູ້ຮັບແລ້ວ</div>
+                  <div className="text-xs">
+                    {isDepartmentRequest
+                      ? `ຊັບສິນທີ່ມີ Asset Tag ຖືກບັນທຶກເຂົ້າທະບຽນໃນນາມແຜນກ ${department?.name || ''} ແລ້ວ`
+                      : 'ຊັບສິນທີ່ມີ Asset Tag ຖືກບັນທຶກເຂົ້າທະບຽນໃຫ້ຜູ້ຮັບແລ້ວ'}
+                  </div>
                 </div>
               </div>
             )}
 
-            {receipt.status === 'APPROVED' && !receipt.canConfirm && (
+            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && (
               <div className="no-print bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
-                ມີສະເພາະຜູ້ຂໍ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
+                ມີສະເພາະຜູ້ຂໍ, ຜູ້ຮັບຜິດຊອບ/ຫົວໜ້າແຜນກ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
               </div>
             )}
 
-            {receipt.status === 'APPROVED' && receipt.canConfirm && (
+            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && receipt.canConfirm && (
               <div className="no-print bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5">
                 <h2 className="text-base font-bold text-gray-800">ຢືນຢັນຮັບເຄື່ອງທັງໃບ</h2>
 
@@ -238,11 +266,16 @@ export default function SupplyReceipt() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">ຜູ້ຮັບເຄື່ອງ</span>
-                    <span className="font-medium text-gray-800">{requesterName}</span>
+                    <span className="font-medium text-gray-800">
+                      {receiverName}
+                      {custodian?.employeeCode && isDepartmentRequest ? ` (${custodian.employeeCode})` : ''}
+                    </span>
                   </div>
                   {!receipt.isRequester && (
                     <div className="text-xs text-amber-600 pt-1">
-                      ທ່ານກຳລັງຢືນຢັນໃນນາມເຈົ້າໜ້າທີ່ສາງ — ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ
+                      {isDepartmentRequest
+                        ? `ທ່ານກຳລັງຢືນຢັນໃນນາມເຈົ້າໜ້າທີ່ສາງ — ຊັບສິນຈະຖືກບັນທຶກໃນນາມແຜນກ ${department?.name || ''} ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບ`
+                        : 'ທ່ານກຳລັງຢືນຢັນໃນນາມເຈົ້າໜ້າທີ່ສາງ — ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ'}
                     </div>
                   )}
                 </div>

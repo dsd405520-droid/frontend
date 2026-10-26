@@ -78,6 +78,14 @@ export default function AssetRegistry() {
   const [assignModalAsset, setAssignModalAsset] = useState(null);
   const [assignUserId, setAssignUserId] = useState('');
   const [assignNote, setAssignNote] = useState('');
+  // ມອບໃຫ້ພະແນກ: ຜູ້ຮັບຜິດຊອບ + (ເລືອກ) ຜູ້ຮັບແທນ ທີ່ຢືນຢັນດ້ວຍລະຫັດພະນັກງານ
+  const [assignMode, setAssignMode] = useState('PERSON'); // 'PERSON' | 'DEPARTMENT'
+  const [custodianId, setCustodianId] = useState('');
+  const [proxyOn, setProxyOn] = useState(false);
+  const [proxyCode, setProxyCode] = useState('');
+  const [proxyLookup, setProxyLookup] = useState(null); // { ok, user?, msg? }
+  const [holderTypeFilter, setHolderTypeFilter] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState('');
 
@@ -259,6 +267,18 @@ export default function AssetRegistry() {
     return u ? `${u.firstName} ${u.lastName} (${u.employeeCode})` : id;
   };
   const userDeptId = (u) => u?.departmentId?._id || u?.departmentId?.id || u?.departmentId || '';
+  const deptName = (id) => {
+    const rid = refId(id);
+    if (id && typeof id === 'object' && id.name) return id.name;
+    return departments.find((d) => d._id === rid)?.name || rid || '—';
+  };
+  const isDeptHeld = (a) => a?.holderType === 'DEPARTMENT' && !!a?.departmentId;
+  // ຜູ້ຮັບຜິດຊອບທີ່ເລືອກໄດ້ຂອງພະແນກ: ພະນັກງານໃນພະແນກ + ຫົວໜ້າ (managerIds)
+  const custodianCandidates = (deptId) => {
+    const dept = departments.find((d) => d._id === deptId);
+    const managers = (dept?.managerIds || []).map(refId);
+    return users.filter((u) => u.isActive !== false && (userDeptId(u) === deptId || managers.includes(u._id)));
+  };
 
   const statusInfo = (status) => {
     switch (status) {
@@ -276,6 +296,9 @@ export default function AssetRegistry() {
   const filteredAssets = assets.filter((a) => {
     if (statusFilter && a.status !== statusFilter) return false;
     if (branchFilter && refId(a.branchId) !== branchFilter) return false;
+    if (holderTypeFilter === 'DEPARTMENT' && !isDeptHeld(a)) return false;
+    if (holderTypeFilter === 'PERSON' && isDeptHeld(a)) return false;
+    if (deptFilter && refId(a.departmentId) !== deptFilter) return false;
     if (search) {
       const q = search.toLowerCase();
       if (!a.assetTag.toLowerCase().includes(q)) return false;
@@ -287,7 +310,7 @@ export default function AssetRegistry() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedIds(new Set());
-  }, [search, statusFilter, branchFilter]);
+  }, [search, statusFilter, branchFilter, holderTypeFilter, deptFilter]);
 
   const closeCreate = () => {
     setShowCreateModal(false);
@@ -403,24 +426,46 @@ export default function AssetRegistry() {
     setSelectedDeptId('');
     setAssignNote('');
     setAssignError('');
+    setAssignMode('PERSON');
+    setCustodianId('');
+    setProxyOn(false);
+    setProxyCode('');
+    setProxyLookup(null);
   };
 
   const submitAssign = (e) => {
     e.preventDefault();
-    if (!assignUserId) {
+    const toDept = assignMode === 'DEPARTMENT';
+    if (toDept) {
+      if (!selectedDeptId) return setAssignError('ກະລຸນາເລືອກພະແນກ');
+      if (!custodianId) return setAssignError('ກະລຸນາເລືອກຜູ້ຮັບຜິດຊອບ');
+      if (proxyOn && !(proxyLookup?.ok && proxyLookup.user)) return setAssignError('ກະລຸນາໃສ່ລະຫັດຜູ້ຮັບແທນໃຫ້ຖືກຕ້ອງ');
+    } else if (!assignUserId) {
       setAssignError('ກະລຸນາເລືອກພະນັກງານ');
       return;
     }
     setAssignSubmitting(true);
     setAssignError('');
-    fetch(`${API_BASE_URL}/assets/${assignModalAsset._id}/assign`, {
+    fetch(`${API_BASE_URL}/assets/${assignModalAsset._id}/${toDept ? 'assign-department' : 'assign'}`, {
       method: 'PATCH',
       headers,
-      body: JSON.stringify({ assigneeId: assignUserId, note: assignNote || undefined }),
+      body: JSON.stringify(
+        toDept
+          ? {
+              departmentId: selectedDeptId,
+              custodianId,
+              receivedById: proxyOn ? proxyLookup.user._id : undefined,
+              note: assignNote || undefined,
+            }
+          : { assigneeId: assignUserId, note: assignNote || undefined },
+      ),
     })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
-        if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດມອບໝາຍໄດ້');
+        if (!ok) {
+          const m = body?.msg ?? body?.message;
+          throw new Error((Array.isArray(m) ? m.join(' · ') : m) || 'ບໍ່ສາມາດມອບໝາຍໄດ້');
+        }
         setAssignModalAsset(null);
         fetchAssets();
       })
@@ -491,6 +536,36 @@ export default function AssetRegistry() {
     setBulkClaimCode('');
     setBulkLookup({ state: 'idle', user: null });
   };
+
+  // ກວດລະຫັດຜູ້ຮັບແທນ (ມອບໃຫ້ພະແນກ) — ຕ້ອງຢູ່ພະແນກດຽວກັນ ແລະບໍ່ແມ່ນຜູ້ຮັບຜິດຊອບ
+  useEffect(() => {
+    if (!proxyOn) return undefined;
+    const code = proxyCode.trim();
+    if (!code) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setProxyLookup(null);
+      return undefined;
+    }
+    const t = setTimeout(() => {
+      fetch(`${API_BASE_URL}/users/lookup/${encodeURIComponent(code)}`, { headers })
+        .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
+        .then(({ ok, body }) => {
+          const u = unwrap(body);
+          if (!ok || !u) return setProxyLookup({ ok: false, msg: 'ບໍ່ພົບລະຫັດພະນັກງານນີ້' });
+          if (u.isActive === false) return setProxyLookup({ ok: false, msg: 'ບັນຊີນີ້ຖືກປິດໃຊ້ງານແລ້ວ' });
+          const dept = departments.find((d) => d._id === selectedDeptId);
+          const managers = (dept?.managerIds || []).map(refId);
+          if (userDeptId(u) !== selectedDeptId && !managers.includes(u._id)) {
+            return setProxyLookup({ ok: false, msg: 'ຜູ້ຮັບແທນຕ້ອງເປັນຄົນໃນພະແນກທີ່ເລືອກ' });
+          }
+          if (u._id === custodianId) return setProxyLookup({ ok: false, msg: 'ຜູ້ຮັບແທນຄືຜູ້ຮັບຜິດຊອບແລ້ວ — ບໍ່ຕ້ອງຕິກ "ຮັບແທນ"' });
+          setProxyLookup({ ok: true, user: u });
+        })
+        .catch(() => setProxyLookup({ ok: false, msg: 'ກວດລະຫັດບໍ່ສຳເລັດ' }));
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proxyOn, proxyCode, selectedDeptId, custodianId]);
 
   // ກວດລະຫັດພະນັກງານຜູ້ມາຮັບ (debounce 400ms) — ໃຊ້ /users/lookup ທີ່ບໍ່ຕ້ອງມີສິດ users:read
   const bulkCodeTrim = bulkClaimCode.trim();
@@ -589,6 +664,7 @@ export default function AssetRegistry() {
                   { label: 'branch', value: (r) => branchName(r.branchId) },
                   { label: 'status', value: (r) => statusInfo(r.status).label },
                   { label: 'assignee', value: (r) => (r.currentAssigneeId ? userName(r.currentAssigneeId) : '') },
+                  { label: 'holderDepartment', value: (r) => (isDeptHeld(r) ? deptName(r.departmentId) : '') },
                   { key: 'purchaseDate', label: 'purchaseDate' },
                   { key: 'warrantyExpiry', label: 'warrantyExpiry' },
                   { key: '_id', label: 'id' },
@@ -655,6 +731,15 @@ export default function AssetRegistry() {
               <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
                 <option value="">ທຸກສາຂາ</option>
                 {branches.map((b) => <option key={b._id} value={b._id}>{b.name}</option>)}
+              </select>
+              <select value={holderTypeFilter} onChange={(e) => setHolderTypeFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
+                <option value="">ຜູ້ຖືທັງໝົດ</option>
+                <option value="PERSON">ຖືໂດຍບຸກຄົນ</option>
+                <option value="DEPARTMENT">ຖືໂດຍພະແນກ</option>
+              </select>
+              <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
+                <option value="">ທຸກພະແນກ</option>
+                {departments.filter((d) => d.isActive !== false).map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
               </select>
             </div>
 
@@ -744,7 +829,15 @@ export default function AssetRegistry() {
                         </td>
                         <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
                         <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
-                        <td className="p-3 text-gray-500">{a.currentAssigneeId ? userName(a.currentAssigneeId) : '—'}</td>
+                        <td className="p-3 text-gray-500">
+                          {isDeptHeld(a) && a.currentAssigneeId ? (
+                            <div>
+                              <span className="inline-block text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">ພະແນກ</span>{' '}
+                              <span className="font-medium text-gray-700">{deptName(a.departmentId)}</span>
+                              <div className="text-xs text-gray-400">ຜູ້ຮັບຜິດຊອບ: {userName(a.currentAssigneeId)}</div>
+                            </div>
+                          ) : (a.currentAssigneeId ? userName(a.currentAssigneeId) : '—')}
+                        </td>
                         <td className="p-3 text-gray-500">{a.warrantyExpiry ? new Date(a.warrantyExpiry).toLocaleDateString() : '—'}</td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-1.5 flex-wrap">
@@ -1023,24 +1116,66 @@ export default function AssetRegistry() {
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-bold text-gray-800">ມອບໝາຍ {assignModalAsset.assetTag}</h2>
               </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setAssignMode('PERSON')} className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium border ${assignMode === 'PERSON' ? 'bg-amber-50 border-amber-400 text-amber-700' : 'border-gray-200 text-gray-500'}`}>ມອບໃຫ້ບຸກຄົນ</button>
+                <button type="button" onClick={() => setAssignMode('DEPARTMENT')} className={`flex-1 px-3 py-2 rounded-xl text-sm font-medium border ${assignMode === 'DEPARTMENT' ? 'bg-violet-50 border-violet-400 text-violet-700' : 'border-gray-200 text-gray-500'}`}>ມອບໃຫ້ພະແນກ</button>
+              </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ພະແນກ</label>
-                <select value={selectedDeptId} onChange={(e) => { setSelectedDeptId(e.target.value); setAssignUserId(""); }} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
+                <label className="block text-xs font-medium text-gray-700 mb-1">ພະແນກ{assignMode === 'DEPARTMENT' && <span className="text-red-500"> *</span>}</label>
+                <select value={selectedDeptId} onChange={(e) => { setSelectedDeptId(e.target.value); setAssignUserId(""); setCustodianId(''); setProxyLookup(null); }} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
                   <option value="">-- ເລືອກພະແນກ --</option>
                   {departments.filter((d) => d.isActive !== false).map((d) => (
                     <option key={d._id} value={d._id}>{d.name}</option>
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">ພະນັກງານ</label>
-                <select required value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
-                  <option value="">-- ເລືອກພະນັກງານ --</option>
-                  {users.filter((u) => u.isActive && (!selectedDeptId || userDeptId(u) === selectedDeptId)).map((u) => (
-                    <option key={u._id} value={u._id}>{u.firstName} {u.lastName} ({u.employeeCode})</option>
-                  ))}
-                </select>
-              </div>
+              {assignMode === 'PERSON' ? (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">ພະນັກງານ</label>
+                  <select required value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
+                    <option value="">-- ເລືອກພະນັກງານ --</option>
+                    {users.filter((u) => u.isActive && (!selectedDeptId || userDeptId(u) === selectedDeptId)).map((u) => (
+                      <option key={u._id} value={u._id}>{u.firstName} {u.lastName} ({u.employeeCode})</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">ຜູ້ຮັບຜິດຊອບ (ຫົວໜ້າ ຫຼື ຜູ້ທີ່ພະແນກມອບໝາຍ) <span className="text-red-500">*</span></label>
+                    <select value={custodianId} onChange={(e) => { setCustodianId(e.target.value); setProxyLookup(null); }} disabled={!selectedDeptId} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm disabled:bg-gray-50">
+                      <option value="">{selectedDeptId ? '-- ເລືອກຜູ້ຮັບຜິດຊອບ --' : 'ເລືອກພະແນກກ່ອນ'}</option>
+                      {custodianCandidates(selectedDeptId).map((u) => (
+                        <option key={u._id} value={u._id}>{u.firstName} {u.lastName} ({u.employeeCode})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={proxyOn} onChange={(e) => { setProxyOn(e.target.checked); setProxyCode(''); setProxyLookup(null); }} />
+                    ມີຜູ້ມາຮັບແທນ (ຜູ້ຮັບຜິດຊອບບໍ່ຢູ່)
+                  </label>
+                  {proxyOn && (
+                    <div className="space-y-1">
+                      <input
+                        type="text"
+                        value={proxyCode}
+                        onChange={(e) => setProxyCode(e.target.value)}
+                        placeholder="ລະຫັດພະນັກງານຂອງຜູ້ມາຮັບແທນ"
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                      />
+                      {proxyLookup?.ok && proxyLookup.user && (
+                        <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                          ✓ {proxyLookup.user.firstName} {proxyLookup.user.lastName} · {deptName(proxyLookup.user.departmentId)}
+                        </div>
+                      )}
+                      {proxyLookup && !proxyLookup.ok && (
+                        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{proxyLookup.msg}</div>
+                      )}
+                      <p className="text-[11px] text-gray-400">ຜູ້ຮັບຜິດຊອບເຄື່ອງຍັງຄືເດີມ ຜູ້ຮັບແທນຖືກບັນທຶກໃນປະຫວັດເທົ່ານັ້ນ</p>
+                    </div>
+                  )}
+                </>
+              )}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ໝາຍເຫດ (ບໍ່ບັງຄັບ)</label>
                 <input type="text" value={assignNote} onChange={(e) => setAssignNote(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
@@ -1078,14 +1213,16 @@ export default function AssetRegistry() {
                 const a = barcodeModalAsset;
                 const holder = a.currentAssigneeId ? users.find((u) => u._id === a.currentAssigneeId || u.employeeCode === a.currentAssigneeId) : null;
                 if (!holder) return null;
+                const deptHeld = isDeptHeld(a);
                 const b = branches.find((br) => br._id === holder.branchId);
                 const loc = b?.location;
                 const locText = loc ? `${loc.address || ''}${loc.city ? `, ${loc.city}` : ''}${loc.country ? `, ${loc.country}` : ''}`.replace(/^, /, '') : '';
                 return (
                   <div className="border-t border-gray-100 pt-3 text-left space-y-1">
-                    <div className="text-xs font-semibold text-gray-600">ຜູ້ຖືຢູ່ປັດຈຸບັນ</div>
+                    <div className="text-xs font-semibold text-gray-600">{deptHeld ? 'ເປັນຂອງພະແນກ' : 'ຜູ້ຖືຢູ່ປັດຈຸບັນ'}</div>
+                    {deptHeld && <div className="text-sm font-medium text-violet-700">{deptName(a.departmentId)}</div>}
                     <div className="text-sm font-medium text-gray-800">
-                      {`${holder.firstName || ''} ${holder.lastName || ''}`.trim() || holder.employeeCode}
+                      {deptHeld ? 'ຜູ້ຮັບຜິດຊອບ: ' : ''}{`${holder.firstName || ''} ${holder.lastName || ''}`.trim() || holder.employeeCode}
                     </div>
                     <div className="text-xs text-gray-500">
                       {b ? (locText ? `${b.name} — ${locText}` : b.name) : holder.branchId || '—'}
