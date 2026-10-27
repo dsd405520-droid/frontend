@@ -60,8 +60,7 @@ function Field({ label, required, children }) {
   );
 }
 
-/** ຟອມຮັບເຄື່ອງ — ໃຊ້ຮ່ວມກັນທັງ "ເພີ່ມ" (RESTOCK) ແລະ "ຊື້" (NEW_ITEM) */
-function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose, onSaved }) {
+export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose, onSaved }) {
   const isNew = mode === 'NEW_ITEM';
   const currentUser = getCurrentUser();
   const [catalogItemId, setCatalogItemId] = useState(initialCatalogItemId || '');
@@ -73,7 +72,7 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
   );
   const [exceptionReason, setExceptionReason] = useState('');
   const canException = hasPermission('supplies', 'approve');
-  const [hasSerial, setHasSerial] = useState(false); // legacy item ທີ່ຍັງບໍ່ມີ itemType
+  const [hasSerial, setHasSerial] = useState(false);
   const [quantity, setQuantity] = useState(prRemaining);
   const [expectedQuantity, setExpectedQuantity] = useState('');
   const [countNote, setCountNote] = useState('');
@@ -82,13 +81,13 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
   const [unitPrice, setUnitPrice] = useState(pr?.estimatedUnitPrice != null ? String(pr.estimatedUnitPrice) : '');
   const [storageRoom, setStorageRoom] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
-  const [invoiceFile, setInvoiceFile] = useState(null); // { url, name }
+  const [invoiceFile, setInvoiceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [receiptPrintOpen, setReceiptPrintOpen] = useState(false);
   const [note, setNote] = useState('');
   const [serials, setSerials] = useState([]);
   const [pasteText, setPasteText] = useState('');
-  const [scan, setScan] = useState(null); // { mode: 'single' | 'continuous', index? }
+  const [scan, setScan] = useState(null);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(currentUser?.branchId || '');
   const [saving, setSaving] = useState(false);
@@ -767,9 +766,9 @@ export default function GoodsReceipt() {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') || '');
   const [modeFilter, setModeFilter] = useState('');
-  const [modal, setModal] = useState(null); // { mode, initialCatalogItemId }
+  const [modal, setModal] = useState(null);
   const [success, setSuccess] = useState('');
   const [expandedId, setExpandedId] = useState('');
   const [printId, setPrintId] = useState('');
@@ -804,7 +803,7 @@ export default function GoodsReceipt() {
 
   useEffect(() => {
     if (!canManage) return undefined;
-    const t = setTimeout(fetchRows, 250); // debounce ການຄົ້ນຫາ
+    const t = setTimeout(fetchRows, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, modeFilter, canManage]);
