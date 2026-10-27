@@ -28,9 +28,14 @@ export default function InventorySupplies() {
   const [submitError, setSubmitError] = useState('');
   const [requestFor, setRequestFor] = useState('PERSON');
   const [custodianCode, setCustodianCode] = useState('');
+  const [requestableDepartments, setRequestableDepartments] = useState([]);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
 
-  const myDepartmentId = refId(me?.departmentId);
-  const myDepartmentName = me?.departmentId?.name || myDepartmentId;
+  const selectedDepartment = requestableDepartments.find(
+    (department) => department._id === selectedDepartmentId,
+  );
+  const myDepartmentId = selectedDepartmentId;
+  const myDepartmentName = selectedDepartment?.name || myDepartmentId;
 
   // ຕົວເລືອກຫຼາຍລາຍການຈາກ Catalog — ຕິກຫຼາຍອັນ + ໃສ່ຈຳນວນ ແລ້ວເພີ່ມເຂົ້າໃບຂໍພ້ອມກັນ
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -56,18 +61,35 @@ export default function InventorySupplies() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [reqRes, catRes, meRes] = await Promise.all([
+      const [reqRes, catRes, meRes, departmentsRes] = await Promise.all([
         axios.get('/supply-requests/my'),
         axios.get('/supply-catalog'),
-        axios.get('/auth/me')
+        axios.get('/auth/me'),
+        canRequest
+          ? axios.get('/supply-requests/requestable-departments').catch(() => ({ data: [] }))
+          : Promise.resolve({ data: [] }),
       ]);
-      setMe(meRes.data?.data !== undefined ? meRes.data.data : meRes.data);
-      
+      const profile = meRes.data?.data !== undefined ? meRes.data.data : meRes.data;
+      setMe(profile);
+
       const reqData = reqRes.data;
       setRequests(Array.isArray(reqData) ? reqData : (reqData.data || reqData.requests || reqData.items || []));
 
       const catData = catRes.data;
       setCatalog(Array.isArray(catData) ? catData : (catData.data || catData.items || []));
+
+      const departmentBody = departmentsRes.data;
+      const departmentListValue = Array.isArray(departmentBody)
+        ? departmentBody
+        : (departmentBody?.data || departmentBody?.departments || departmentBody?.items || []);
+      const departmentList = Array.isArray(departmentListValue) ? departmentListValue : [];
+      setRequestableDepartments(departmentList);
+      const profileDepartmentId = refId(profile?.departmentId);
+      setSelectedDepartmentId((current) => {
+        if (current && departmentList.some((department) => department._id === current)) return current;
+        if (departmentList.some((department) => department._id === profileDepartmentId)) return profileDepartmentId;
+        return departmentList.length === 1 ? departmentList[0]._id : '';
+      });
     } catch (err) {
       console.error('Failed to fetch supply data', err);
       setRequests([]);
@@ -222,8 +244,8 @@ useEffect(() => {
         ...(reason ? { reason } : {}),
       }));
       if (requestFor === 'DEPARTMENT') {
-        if (!myDepartmentId) {
-          setSubmitError('ບັນຊີຂອງທ່ານຍັງບໍ່ໄດ້ຜູກກັບແຜນກ — ຈຶ່ງຂໍໃນນາມແຜນກບໍ່ໄດ້');
+        if (!myDepartmentId || !requestableDepartments.some((department) => department._id === myDepartmentId)) {
+          setSubmitError('ກະລຸນາເລືອກພະແນກທີ່ທ່ານມີສິດຂໍເຄື່ອງ');
           return;
         }
         if (!custodianCode.trim()) {
@@ -247,14 +269,32 @@ useEffect(() => {
   };
 
   const openReceive = async (req) => {
-    setReceiveRequest(req);
+    // Load the authoritative receipt detail first: it classifies each item from
+    // Supply Catalog itemType, rather than guessing from whether assets exist yet.
+    let detail;
+    try {
+      const response = await axios.get(`/supply-requests/${req._id}/receipt`);
+      const body = response.data;
+      detail = body?.data !== undefined ? body.data : body;
+      if (!detail || !Array.isArray(detail.items)) {
+        throw new Error('ຂໍ້ມູນໃບຮັບເຄື່ອງບໍ່ຄົບ');
+      }
+    } catch (error) {
+      window.alert(
+        error.response?.data?.msg || error.response?.data?.message ||
+        error.message || 'ບໍ່ສາມາດໂຫຼດປະເພດລາຍການຈາກ Backend ໄດ້',
+      );
+      return;
+    }
+
+    setReceiveRequest(detail);
     setScanTags('');
     setReceiveStage(1);
     setAllAssets(null);
     setAssigneeCode(
-      (isDeptRequest(req) ? req.custodianId?.employeeCode : req.requestedBy?.employeeCode)
-        || req.userId?.employeeCode
-        || req.createdBy?.employeeCode
+      (isDeptRequest(detail) ? detail.custodianId?.employeeCode : detail.requestedBy?.employeeCode)
+        || detail.userId?.employeeCode
+        || detail.createdBy?.employeeCode
         || getCurrentUser()?.employeeCode
         || ''
     );
@@ -321,26 +361,55 @@ useEffect(() => {
     setReceiveError('');
   };
 
-  // ກວດ tag ທີ່ສະແກນກັບທະບຽນຊັບສິນ + ລາຍການທີ່ຂໍ (ສະແດງຜົນກ່ອນຢືນຢັນ)
+  // Backend returns requiresAssetTag for every request item; the flag is the source of truth.
+  const receiveIsDept = isDeptRequest(receiveRequest);
+  const reqItems = receiveRequest && Array.isArray(receiveRequest.items) ? receiveRequest.items : [];
+  const hasCanonicalTracking = reqItems.some((item) => typeof item.requiresAssetTag === 'boolean');
+  const isAssetTrackedItem = (item) => !hasCanonicalTracking || item.requiresAssetTag === true;
+  const assetRequestItems = reqItems.filter(isAssetTrackedItem);
+  const isLinkedToConsumableCatalog = (asset) => {
+    const id = refId(asset?.catalogItemId);
+    if (!id) return false;
+    const linkedItem = catalog.find((item) => String(item._id) === String(id));
+    return linkedItem?.itemType === 'CONSUMABLE';
+  };
+
+  // ກວດ tag ທີ່ສະແກນກັບທະບຽນຊັບສິນ + ລາຍການ ASSET ທີ່ຂໍ (ສະແດງຜົນກ່ອນຢືນຢັນ)
   const scanResults = receiveRequest
     ? scannedTags().map((tag) => {
         if (!Array.isArray(allAssets)) return { tag };
         const a = allAssets.find((x) => (x.assetTag || '').toLowerCase() === tag.toLowerCase());
         if (!a) return { tag, status: 'not-found' };
-        const reqNames = (receiveRequest.items || []).map((i) => (i.name || '').toLowerCase()).filter(Boolean);
-        const typeOk =
-          reqNames.length === 0 ||
-          reqNames.some((n) => n.includes((a.type || '').toLowerCase()) || (a.type || '').toLowerCase().includes(n));
-        const status = a.status === 'AVAILABLE' && typeOk ? 'ok' : (a.status !== 'AVAILABLE' ? 'not-available' : 'type-mismatch');
+        const assetCatalogId = refId(a.catalogItemId);
+        const matchesRequestedConsumable = !!assetCatalogId && reqItems.some((item) =>
+          item.requiresAssetTag === false && refId(item.catalogItemId) === assetCatalogId,
+        );
+        const matchesAssetCatalog = !!assetCatalogId && assetRequestItems.some((item) =>
+          refId(item.catalogItemId) === assetCatalogId,
+        );
+        const assetType = (a.type || '').toLowerCase();
+        const matchesAssetName = assetRequestItems.some((item) => {
+          const n = (item.name || '').toLowerCase();
+          return !!n && !!assetType && (n.includes(assetType) || assetType.includes(n));
+        });
+        const typeOk = !isLinkedToConsumableCatalog(a) && !matchesRequestedConsumable && assetRequestItems.length > 0 && (matchesAssetCatalog || matchesAssetName);
+        const deptBranchId = receiveIsDept ? refId(receiveRequest?.departmentId?.branchId) : '';
+        const assetBranchId = refId(a.branchId);
+        const branchOk = !deptBranchId || assetBranchId === deptBranchId;
+        const status = a.status !== 'AVAILABLE'
+          ? 'not-available'
+          : !branchOk
+            ? 'branch-mismatch'
+            : !typeOk
+              ? 'type-mismatch'
+              : 'ok';
         return { tag, status, asset: a };
       })
     : [];
 
-  // ແຜນຮັບເຄື່ອງຕໍ່ລາຍການ: ມີ Asset Tag (ຕ້ອງສະແກນຄົບ) ຫຼື ຂອງສິ້ນເປືອງ (ຕິກ "ໄດ້ຮັບແລ້ວ") + ຊັບສິນວ່າງໃນທະບຽນພໍບໍ
-  // (ກົດດຽວກັບ Backend: catalog ທີ່ມີຊັບສິນຜູກຢູ່ = ມີ Asset Tag, ນອກນັ້ນ = ຂອງສິ້ນເປືອງ)
+  // ແຜນຮັບເຄື່ອງຕໍ່ລາຍການ: ASSET ຕ້ອງສະແກນຄົບ; CONSUMABLE ຕ້ອງຢືນຢັນແລະຫັກສະຕັອກ.
+  // ຈຳນວນ linked assets ໃຊ້ fallback ສະເພາະ payload ເກົ່າທີ່ບໍ່ມີ requiresAssetTag.
   const assetsKnown = Array.isArray(allAssets);
-  const receiveIsDept = isDeptRequest(receiveRequest);
-  const reqItems = receiveRequest && Array.isArray(receiveRequest.items) ? receiveRequest.items : [];
   const nameMatch = (itemName, assetType) => {
     const n = (itemName || '').toLowerCase();
     const t = (assetType || '').toLowerCase();
@@ -351,10 +420,13 @@ useEffect(() => {
     scanResults.forEach((r) => {
       const a = r.asset;
       if (!a || r.status !== 'ok') return;
-      const same = reqItems.map((_, k) => k).filter((k) => a.catalogItemId && reqItems[k].catalogItemId === a.catalogItemId);
+      const assetCatalogId = refId(a.catalogItemId);
+      const same = reqItems.map((_, k) => k).filter((k) =>
+        isAssetTrackedItem(reqItems[k]) && assetCatalogId && refId(reqItems[k].catalogItemId) === assetCatalogId,
+      );
       let idx;
       if (same.length > 0) idx = same.find((k) => counts[k] < (Number(reqItems[k].quantity) || 0)) ?? same[0];
-      else idx = reqItems.findIndex((it) => nameMatch(it.name, a.type));
+      else idx = reqItems.findIndex((it) => isAssetTrackedItem(it) && nameMatch(it.name, a.type));
       if (idx >= 0) counts[idx] += 1;
     });
     return reqItems.map((it, k) => {
@@ -362,10 +434,22 @@ useEffect(() => {
       const linked = assetsKnown && it.catalogItemId
         ? allAssets.filter((a) => a.status !== 'RETIRED' && a.catalogItemId === it.catalogItemId)
         : [];
-      const kind = !assetsKnown ? 'unknown' : (linked.length > 0 ? 'asset' : 'consumable');
+      // Backend classification is authoritative. The asset-record fallback is
+      // retained only for older request payloads that do not include the flag.
+      const kind = typeof it.requiresAssetTag === 'boolean'
+        ? (it.requiresAssetTag ? 'asset' : 'consumable')
+        : (!assetsKnown ? 'unknown' : (linked.length > 0 ? 'asset' : 'consumable'));
       const scanned = counts[k];
-      const availableAll = assetsKnown
-        ? allAssets.filter((a) => a.status === 'AVAILABLE' && ((it.catalogItemId && a.catalogItemId === it.catalogItemId) || nameMatch(it.name, a.type))).length
+      const requiredBranchId = receiveIsDept
+        ? refId(receiveRequest?.departmentId?.branchId)
+        : '';
+      const availableAll = assetsKnown && kind === 'asset'
+        ? allAssets.filter((a) =>
+            a.status === 'AVAILABLE' &&
+            !isLinkedToConsumableCatalog(a) &&
+            (!requiredBranchId || refId(a.branchId) === requiredBranchId) &&
+            ((it.catalogItemId && refId(a.catalogItemId) === refId(it.catalogItemId)) || nameMatch(it.name, a.type))
+          ).length
         : 0;
       const remainingAvail = Math.max(0, availableAll - scanned);
       const need = Math.max(0, qty - scanned);
@@ -594,9 +678,9 @@ useEffect(() => {
                     </button>
                     <button
                       type="button"
-                      disabled={!myDepartmentId}
+                      disabled={requestableDepartments.length === 0}
                       onClick={chooseDepartmentRequest}
-                      title={!myDepartmentId ? 'ບັນຊີຍັງບໍ່ໄດ້ຜູກກັບແຜນກ' : undefined}
+                      title={requestableDepartments.length === 0 ? 'ທ່ານບໍ່ມີພະແນກທີ່ສາມາດຂໍໃນນາມໄດ້' : undefined}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 ${
                         requestFor === 'DEPARTMENT'
                           ? 'bg-violet-600 text-white border-violet-600'
@@ -608,8 +692,26 @@ useEffect(() => {
                   </div>
                   {requestFor === 'DEPARTMENT' && (
                     <>
+                      {requestableDepartments.length > 1 && (
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">ເລືອກພະແນກ *</label>
+                          <select
+                            required
+                            value={selectedDepartmentId}
+                            onChange={(e) => setSelectedDepartmentId(e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white"
+                          >
+                            <option value="">-- ເລືອກພະແນກ --</option>
+                            {requestableDepartments.map((department) => (
+                              <option key={department._id} value={department._id}>
+                                {department.name}{department.branchId ? ` (${department.branchId})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                       <div className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
-                        ແຜນກ: <b>{myDepartmentName}</b> — ຊັບສິນທີ່ໄດ້ຮັບຈະຂຶ້ນກັບແຜນກ ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບທີ່ລະບຸ
+                        ແຜນກ: <b>{myDepartmentName || 'ກະລຸນາເລືອກພະແນກ'}</b> — ຊັບສິນທີ່ໄດ້ຮັບຈະຂຶ້ນກັບແຜນກ ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບທີ່ລະບຸ
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບຜິດຊອບ *</label>

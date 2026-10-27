@@ -38,6 +38,7 @@ export default function AssetRegistry() {
 
   const [branches, setBranches] = useState([]);
   const [catalog, setCatalog] = useState([]);
+  const assetCatalog = catalog.filter((item) => item.itemType === 'ASSET');
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [selectedDeptId, setSelectedDeptId] = useState("");
@@ -216,7 +217,7 @@ export default function AssetRegistry() {
     setReqData(null);
     setReqError('');
     openCreate();
-    fetch(`${API_BASE_URL}/supply-requests/${encodeURIComponent(fromRequestId)}`, { headers })
+    fetch(`${API_BASE_URL}/supply-requests/${encodeURIComponent(fromRequestId)}/receipt`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດໃບຂໍໄດ້');
@@ -232,9 +233,18 @@ export default function AssetRegistry() {
     const rows = [];
     (reqData.items || []).forEach((it) => {
       const nm = (it.name || '').toLowerCase();
-      const cat = catalog.find((c) => (it.catalogItemId && c._id === it.catalogItemId) || (nm && (c.name || '').toLowerCase() === nm));
+      const catalogMatch = catalog.find((c) => (it.catalogItemId && c._id === it.catalogItemId) || (nm && (c.name || '').toLowerCase() === nm));
+      // Never generate Asset records for consumables or unclassified catalog rows.
+      if (catalogMatch && catalogMatch.itemType !== 'ASSET') return;
+      if (it.catalogItemId && !catalogMatch) return;
+      const cat = catalogMatch;
+      const targetBranchId = reqData.departmentId && typeof reqData.departmentId === 'object'
+        ? reqData.departmentId.branchId
+        : '';
       const available = assets.filter((a) => {
         if (a.status !== 'AVAILABLE') return false;
+        const assetBranchId = a.branchId && typeof a.branchId === 'object' ? a.branchId._id : a.branchId;
+        if (targetBranchId && assetBranchId !== targetBranchId) return false;
         const t = (a.type || '').toLowerCase();
         return (cat && a.catalogItemId === cat._id) || (nm && t && (nm.includes(t) || t.includes(nm)));
       }).length;
@@ -324,7 +334,7 @@ export default function AssetRegistry() {
   // ພິມຊື່/ລະຫັດ Catalog ກົງ → ເຊື່ອມ catalogItemId (ເພື່ອ Backend ສ້າງ Asset Tag ໃຫ້: SC002-001)
   const handleRowCatalog = (id, value) => {
     const clean = value.trim().toLowerCase();
-    const matched = catalog.find((c) => (c.name || '').toLowerCase() === clean || (c._id || '').toLowerCase() === clean);
+    const matched = assetCatalog.find((c) => (c.name || '').toLowerCase() === clean || (c._id || '').toLowerCase() === clean);
     updateRow(id, { catalogSearch: value, catalogItemId: matched ? matched._id : '', ...(matched ? { name: matched.name } : {}) });
   };
 
@@ -343,7 +353,7 @@ export default function AssetRegistry() {
     setBatchRows((prev) => {
       const have = new Set(prev.map((r) => r.catalogItemId).filter(Boolean));
       const keep = prev.filter((r) => !isBlankRow(r));
-      const added = catalog
+      const added = assetCatalog
         .filter((c) => pickerSelected.has(c._id) && !have.has(c._id))
         .map((c) => newRow({ catalogSearch: c.name, catalogItemId: c._id, name: c.name }));
       const merged = [...keep, ...added];
@@ -984,7 +994,7 @@ export default function AssetRegistry() {
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
                   />
                   <div className="max-h-48 overflow-y-auto bg-white border border-gray-100 rounded-lg divide-y divide-gray-100">
-                    {catalog
+                    {assetCatalog
                       .filter((c) => {
                         const q = pickerSearch.trim().toLowerCase();
                         return !q || (c.name || '').toLowerCase().includes(q) || (c._id || '').toLowerCase().includes(q) || (c.category || '').toLowerCase().includes(q);
@@ -1001,7 +1011,7 @@ export default function AssetRegistry() {
                           </label>
                         );
                       })}
-                    {catalog.length === 0 && <div className="px-3 py-3 text-xs text-gray-400">ບໍ່ມີລາຍການໃນ Catalog</div>}
+                    {assetCatalog.length === 0 && <div className="px-3 py-3 text-xs text-gray-400">ບໍ່ມີລາຍການ Catalog ປະເພດ ASSET — ສ້າງ/ແກ້ປະເພດໃນ Supply Catalog ກ່ອນ</div>}
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-500">ເລືອກແລ້ວ {pickerSelected.size} ລາຍການ</span>
@@ -1011,7 +1021,7 @@ export default function AssetRegistry() {
               )}
 
               <datalist id="asset-catalog-options">
-                {catalog.map((c) => (
+                {assetCatalog.map((c) => (
                   <option key={c._id} value={c.name}>{c._id} — {c.category}</option>
                 ))}
               </datalist>
