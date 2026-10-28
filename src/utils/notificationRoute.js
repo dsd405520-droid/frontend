@@ -20,6 +20,10 @@ export function getNotificationPath(n) {
       }
       return `/meeting-rooms?tab=my-bookings`;
 
+    case 'SupplyRequest':
+      // ຖືກກຳນົດໃຫ້ໄປຮັບເຄື່ອງແທນ / ມີຄົນຮັບແທນ → ເປີດໃບຮັບເຄື່ອງຂອງໃບຂໍນັ້ນ
+      return `/supplies/receipt/${id}`;
+
     default:
       return null;
   }

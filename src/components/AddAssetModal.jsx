@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import api from '../services/api';
 
-// ໜ້າຕ່າງ "ເພີ່ມຊັບສິນ" (ທະບຽນຊັບສິນບໍລິສັດ) — ແບບດຽວກັບໜ້າ /asset-registry ແຕ່ເປີດໃນໜ້າອື່ນໄດ້
 const MAX_BATCH = 50;
+const parseTags = (s) => [...new Set(String(s || '').split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean))];
 const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
 const errText = (err, fallback) => {
   const m = err?.response?.data?.msg ?? err?.response?.data?.message ?? err?.message;
@@ -23,7 +23,7 @@ export default function AddAssetModal({ onClose, onDone }) {
   const [branchId, setBranchId] = useState('');
   const [purchase, setPurchase] = useState('');
   const [warranty, setWarranty] = useState('');
-  const [done, setDone] = useState({}); // rowId → ຈຳນວນທີ່ສ້າງແລ້ວ (ກົດບັນທຶກຊ້ຳ = ຂ້າມສ່ວນທີ່ສ້າງແລ້ວ)
+  const [done, setDone] = useState({});
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -49,7 +49,6 @@ export default function AddAssetModal({ onClose, onDone }) {
   const removeRow = (id) => setRows((rs) => (rs.length > 1 ? rs.filter((r) => r.id !== id) : rs));
   const isBlankRow = (r) => !r.catalogItemId && !(r.name || '').trim() && !(r.assetTag || '').trim();
 
-  // ພິມຊື່/ລະຫັດ Catalog ກົງ → ເຊື່ອມ catalogItemId (ເພື່ອ Backend ສ້າງ Asset Tag ໃຫ້: SC002-001)
   const handleRowCatalog = (id, value) => {
     const clean = value.trim().toLowerCase();
     const matched = assetCatalog.find((c) => (c.name || '').toLowerCase() === clean || (c._id || '').toLowerCase() === clean);
@@ -90,7 +89,8 @@ export default function AddAssetModal({ onClose, onDone }) {
       if (!(r.name || '').trim()) { setError(`${label}: ກະລຸນາໃສ່ຊື່/ປະເພດ`); return; }
       if (!r.catalogItemId && !(r.assetTag || '').trim()) { setError(`${label}: ເລືອກລາຍການ Catalog (ສ້າງ Tag ອັດຕະໂນມັດ) ຫຼືໃສ່ Asset Tag`); return; }
       if (qty < 1) { setError(`${label}: ຈຳນວນຕ້ອງຢ່າງໜ້ອຍ 1`); return; }
-      if ((r.assetTag || '').trim() && qty > 1) { setError(`${label}: ໃສ່ Asset Tag ເອງໄດ້ສະເພາະ 1 ຊິ້ນ — ຖ້າຫຼາຍຊິ້ນໃຫ້ປ່ອຍວ່າງ ແລ້ວເລືອກ Catalog`); return; }
+      const tagCount = parseTags(r.assetTag).length;
+      if (tagCount > 0 && tagCount !== qty) { setError(`${label}: ໃສ່ Asset Tag ${tagCount} ອັນ ແຕ່ຈຳນວນ ${qty} — ຕ້ອງເທົ່າກັນ`); return; }
     }
     if (total > MAX_BATCH) { setError(`ສ້າງໄດ້ສູງສຸດ ${MAX_BATCH} ຊິ້ນຕໍ່ຄັ້ງ (ຕອນນີ້ ${total})`); return; }
 
@@ -103,10 +103,11 @@ export default function AddAssetModal({ onClose, onDone }) {
       const want = Math.floor(Number(r.qty) || 1);
       let ok = doneNow[r.id] || 0;
       let errMsg = '';
+      const tagList = parseTags(r.assetTag);
       while (ok < want) {
         try {
           await api.post('/assets', {
-            assetTag: (r.assetTag || '').trim() || undefined,
+            assetTag: tagList[ok],
             catalogItemId: r.catalogItemId || undefined,
             type: r.name.trim(),
             branchId,
@@ -121,7 +122,6 @@ export default function AddAssetModal({ onClose, onDone }) {
           break;
         }
       }
-      // ບໍ່ຕ້ອງປັບສະຕ໊ອກເອງ — backend POST /assets ບວກສະຕ໊ອກ Catalog +1 ໃຫ້ອັດຕະໂນມັດ
       summary.push({ name: r.name || r.assetTag, ok, want, errMsg });
       if (failed) break;
     }
@@ -249,8 +249,8 @@ export default function AddAssetModal({ onClose, onDone }) {
                       <input type="text" value={r.name} onChange={(e) => updateRow(r.id, { name: e.target.value })} placeholder="Laptop, ຈໍ, ບັດພະນັກງານ..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white" />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Asset Tag (ບໍ່ມີ Catalog = ຕ້ອງໃສ່, ຊິ້ນດຽວ)</label>
-                      <input type="text" value={r.assetTag} onChange={(e) => updateRow(r.id, { assetTag: e.target.value })} placeholder="A-1042" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white" />
+                      <label className="block text-xs text-gray-500 mb-1">Asset Tag (ບໍ່ມີ Catalog = ຕ້ອງໃສ່, 1 ແຖວ/ຄອມມາ ຕໍ່ 1 ຊິ້ນ) — {parseTags(r.assetTag).length}/{Math.floor(Number(r.qty) || 0)}</label>
+                      <textarea rows={Math.min(5, Math.max(2, Math.floor(Number(r.qty) || 1)))} value={r.assetTag} onChange={(e) => updateRow(r.id, { assetTag: e.target.value })} placeholder={'A-1042\nA-1043'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white font-mono" />
                     </div>
                   </div>
                 )}

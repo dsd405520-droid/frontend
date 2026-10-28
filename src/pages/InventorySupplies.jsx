@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine, Camera, QrCode } from 'lucide-react';
+import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine, Camera, QrCode, Search, X, UserCheck } from 'lucide-react';
 import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
@@ -13,6 +13,21 @@ const refName = (value) => {
   return `${value.firstName || ''} ${value.lastName || ''}`.trim() || value.name || value.email || value._id || '';
 };
 const isDeptRequest = (req) => !!(req && refId(req.departmentId));
+const OPEN_STATUSES = ['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'];
+const STATUS_FILTERS = [
+  { value: 'ALL', label: 'ທຸກສະຖານະ' },
+  { value: 'OPEN', label: 'ລໍຖ້າຮັບເຄື່ອງ' },
+  { value: 'REQUESTED', label: 'ລໍຖ້າອະນຸມັດ' },
+  { value: 'CLOSED', label: 'ຮັບເຄື່ອງແລ້ວ' },
+  { value: 'REJECTED', label: 'ຖືກປະຕິເສດ' },
+];
+const matchesStatusFilter = (status, filter) => {
+  if (filter === 'ALL') return true;
+  if (filter === 'OPEN') return OPEN_STATUSES.includes(status);
+  if (filter === 'CLOSED') return status === 'CLOSED' || status === 'FULFILLED';
+  return status === filter;
+};
+const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : '—');
 
 export default function InventorySupplies() {
   const [searchParams] = useSearchParams();
@@ -37,26 +52,45 @@ export default function InventorySupplies() {
   const myDepartmentId = selectedDepartmentId;
   const myDepartmentName = selectedDepartment?.name || myDepartmentId;
 
-  // ຕົວເລືອກຫຼາຍລາຍການຈາກ Catalog — ຕິກຫຼາຍອັນ + ໃສ່ຈຳນວນ ແລ້ວເພີ່ມເຂົ້າໃບຂໍພ້ອມກັນ
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
-  const [pickerSelected, setPickerSelected] = useState({}); // { [catalogId]: quantity }
+  const [pickerSelected, setPickerSelected] = useState({});
 
-  // ຮັບເຄື່ອງທີ່ຄັງ — ຫຼັງອະນຸມັດແລ້ວ ພະນັກງານສະແກນ QR/ບາໂຄ໊ດ ຂອງອຸປະກອນ 2 ຂັ້ນ:
-  //   1. ສະແກນເຄື່ອງ → ກວດກັບລາຍການທີ່ຂໍ (ຖ້າມີສິດອ່ານທະບຽນຊັບສິນ)
-  //   2. ຢືນຢັນຜູ້ຮັບ (ລະຫັດພະນັກງານ) → ບັນທຶກ ເຄື່ອງຈະຂຶ້ນກັບທະບຽນຊັບສິນຂອງບໍລິສັດ
   const [receiveRequest, setReceiveRequest] = useState(null);
   const [scanTags, setScanTags] = useState('');
-  const [receiveStage, setReceiveStage] = useState(1); // 1 = ສະແກນເຄື່ອງ, 2 = ຢືນຢັນຜູ້ຮັບ
-  const [allAssets, setAllAssets] = useState(null);    // null = ບໍ່ມີສິດ assets:read → ໃຫ້ Backend ກວດຕອນບັນທຶກ
+  const [receiveStage, setReceiveStage] = useState(1);
+  const [allAssets, setAllAssets] = useState(null);
   const [assigneeCode, setAssigneeCode] = useState('');
-  const [confirmedItems, setConfirmedItems] = useState({}); // ຂອງສິ້ນເປືອງ (ບໍ່ມີ Asset Tag) ທີ່ຕິກ "ໄດ້ຮັບແລ້ວ" — key = index ລາຍການ, 'all' = ກໍລະນີກວດທະບຽນບໍ່ໄດ້
+  const [defaultAssigneeCode, setDefaultAssigneeCode] = useState('');
+  const [changeReceiver, setChangeReceiver] = useState(false);
+  const [confirmedItems, setConfirmedItems] = useState({});
   const [receiving, setReceiving] = useState(false);
-  // ຊື່ຜູ້ຮັບຈາກລະຫັດ (ສະເພາະຜູ້ມີສິດ assets:assign) — ໃຫ້ຜູ້ເບີກຈ່າຍກວດກັບບັດພະນັກງານ
   const [assigneeInfo, setAssigneeInfo] = useState({ state: 'idle', user: null });
   const [receiveError, setReceiveError] = useState('');
   const [receiveResult, setReceiveResult] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+
+  const [listTab, setListTab] = useState('ALL');
+  const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [detailId, setDetailId] = useState(null);
+  const detailRequest = detailId ? requests.find((r) => r._id === detailId) || null : null;
+
+  const [delegatePickerOpen, setDelegatePickerOpen] = useState(false);
+  const [candQuery, setCandQuery] = useState('');
+  const [candDept, setCandDept] = useState('');
+  const [candidates, setCandidates] = useState({ users: [], departments: [] });
+  const [candLoading, setCandLoading] = useState(false);
+  const [candError, setCandError] = useState('');
+  const [delegateSaving, setDelegateSaving] = useState(false);
+
+  const isMe = (ref) => {
+    if (!ref || !me) return false;
+    const id = refId(ref);
+    if (id && (id === me._id || id === me.id || id === me.userId)) return true;
+    return typeof ref === 'object' && !!ref.employeeCode && ref.employeeCode === me.employeeCode;
+  };
+  const isPickupForOther = (req) => isMe(req.delegateId) && !isMe(req.requestedBy);
 
   const fetchData = async () => {
     try {
@@ -100,17 +134,13 @@ export default function InventorySupplies() {
   };
 
 useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, []);
 
-  // Navbar "ສ້າງໃໝ່" → ເປີດ Modal ຂໍອຸປະກອນສິ້ນເປືອງ ອັດຕະໂນມັດ
   useEffect(() => {
     if (searchParams.get('create') === '1') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsModalOpen(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('create')]);
 
   const handleAddItem = () => {
@@ -131,9 +161,6 @@ useEffect(() => {
     setItems(newItems);
   };
 
-  // ຊ່ອງຄົ້ນຫາ+ເລືອກ Catalog — ໃຊ້ <input list> (datalist) ຄົ້ນຫາຊື່ໄດ້ ເຖິງມີເປັນຮ້ອຍລາຍການ.
-  // ເມື່ອຄ່າທີ່ພິມ/ເລືອກກົງກັບຊື່ໃນ Catalog ພໍດີ (ເລືອກຈາກ dropdown ຫຼືພິມຄົບຊື່) ຈຶ່ງຈະຜູກ catalogItemId ໃຫ້;
-  // ຖ້າຍັງພິມບໍ່ຄົບ/ບໍ່ກົງ ຈະຖືວ່າຍັງບໍ່ໄດ້ເລືອກ (catalogItemId ຫວ່າງ, ຊື່ໃນ "ຊື່ອຸປະກອນ" ຍັງແກ້ໄຂເອງໄດ້ຢູ່)
   const handleCatalogSearchChange = (index, value) => {
     const newItems = [...items];
     newItems[index].catalogSearch = value;
@@ -184,7 +211,6 @@ useEffect(() => {
     setPickerSelected((prev) => ({ ...prev, [id]: Math.max(1, parseInt(qty, 10) || 1) }));
   };
 
-  // ເພີ່ມທຸກລາຍການທີ່ຕິກເຂົ້າໃບຂໍ — ຖ້າມີໃນໃບຂໍແລ້ວ ຈະບວກຈຳນວນເພີ່ມ ບໍ່ສ້າງແຖວຊ້ຳ
   const addPickedToRequest = () => {
     const ids = Object.keys(pickerSelected);
     if (ids.length === 0) return;
@@ -207,7 +233,6 @@ useEffect(() => {
     setPickerOpen(false);
   };
 
-  // ລາຍການທີ່ຂໍເກີນສະຕ໊ອກ — ເຕືອນເທົ່ານັ້ນ (ບໍ່ບລັອກ ເພາະອາດລໍຖ້າຂອງເຂົ້າສາງໄດ້)
   const overStockCount = items.filter((it) => {
     const cat = it.catalogItemId ? catalogById(it.catalogItemId) : null;
     return cat && (parseInt(it.quantity, 10) || 0) > (cat.stockQty ?? 0);
@@ -217,7 +242,6 @@ useEffect(() => {
     e.preventDefault();
     setSubmitError('');
     try {
-      // ລວມແຖວທີ່ເລືອກ catalog ອັນດຽວກັນ (ບວກຈຳນວນ, ຕໍ່ເຫດຜົນ) ກ່ອນສົ່ງ ເພື່ອບໍ່ໃຫ້ມີລາຍການຊ້ຳໃນໃບດຽວ
       const merged = [];
       for (const it of items.filter((x) => !isBlankRow(x))) {
         const qty = parseInt(it.quantity, 10) || 1;
@@ -236,7 +260,6 @@ useEffect(() => {
         setSubmitError('ກະລຸນາໃສ່ຊື່ອຸປະກອນຢ່າງໜ້ອຍ 1 ລາຍການ');
         return;
       }
-      // catalogSearch ເປັນ field ໃຊ້ພາຍໃນ UI ເທົ່ານັ້ນ — ບໍ່ສົ່ງໄປໃຫ້ Backend
       const payloadItems = merged.map(({ catalogItemId, name, quantity, reason }) => ({
         ...(catalogItemId ? { catalogItemId } : {}),
         name,
@@ -263,14 +286,11 @@ useEffect(() => {
       resetRequestForm();
       fetchData();
     } catch (err) {
-      // backend ສົ່ງເຫດຜົນມາທີ່ `msg` (ບໍ່ແມ່ນ `message`)
       setSubmitError(err.response?.data?.msg || err.response?.data?.message || 'ສົ່ງຄຳຂໍບໍ່ສຳເລັດ');
     }
   };
 
   const openReceive = async (req) => {
-    // Load the authoritative receipt detail first: it classifies each item from
-    // Supply Catalog itemType, rather than guessing from whether assets exist yet.
     let detail;
     try {
       const response = await axios.get(`/supply-requests/${req._id}/receipt`);
@@ -291,13 +311,14 @@ useEffect(() => {
     setScanTags('');
     setReceiveStage(1);
     setAllAssets(null);
-    setAssigneeCode(
-      (isDeptRequest(detail) ? detail.custodianId?.employeeCode : detail.requestedBy?.employeeCode)
-        || detail.userId?.employeeCode
-        || detail.createdBy?.employeeCode
-        || getCurrentUser()?.employeeCode
-        || ''
-    );
+    const initialAssignee = (isDeptRequest(detail) ? detail.custodianId?.employeeCode : detail.requestedBy?.employeeCode)
+      || detail.userId?.employeeCode
+      || detail.createdBy?.employeeCode
+      || getCurrentUser()?.employeeCode
+      || '';
+    setAssigneeCode(initialAssignee);
+    setDefaultAssigneeCode(initialAssignee);
+    setChangeReceiver(false);
     setReceiveError('');
     setReceiveResult(null);
     setScannerOpen(false);
@@ -305,7 +326,6 @@ useEffect(() => {
     await loadAssets();
   };
 
-  // ໂຫຼດທະບຽນຊັບສິນ (ເພື່ອກວດວ່າ tag ມີຈິງ/ຊະນິດກົງ/ສະຖານະວ່າງ ແລະຮູ້ວ່າແຕ່ລະລາຍການມີຊັບສິນວ່າງພໍບໍ) — ຖ້າບໍ່ມີສິດ ໃຫ້ Backend ກວດຕອນບັນທຶກ
   const loadAssets = async () => {
     if (!hasPermission('assets', 'read')) { setAllAssets(null); return; }
     try {
@@ -320,7 +340,6 @@ useEffect(() => {
   useEffect(() => {
     const code = assigneeCode.trim();
     if (!receiveRequest || receiveStage !== 2 || !code || !hasPermission('assets', 'assign')) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAssigneeInfo({ state: 'idle', user: null });
       return undefined;
     }
@@ -346,14 +365,36 @@ useEffect(() => {
     fetchData();
   };
 
-  const scannedTags = () => scanTags.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const resolveScannedTag = (text) => {
+    let value = String(text || '').trim();
+    const m = value.match(/\/assets\/([A-Za-z0-9_-]+)/);
+    if (m) value = m[1];
+    if (Array.isArray(allAssets)) {
+      const key = value.toLowerCase();
+      const hit = allAssets.find((a) => String(a._id).toLowerCase() === key || (a.assetTag || '').toLowerCase() === key);
+      if (hit?.assetTag) return hit.assetTag;
+    }
+    return value;
+  };
 
-  // ເພີ່ມ tag ທີ່ສະແກນຈາກກ້ອງ (ກັນຊ້ຳ, ແຍກບັນທັດລະແຖວ)
+  const scannedTags = () => {
+    const seen = new Set();
+    return scanTags
+      .split(/\r?\n/)
+      .map((s) => resolveScannedTag(s))
+      .filter((t) => {
+        const k = t.toLowerCase();
+        if (!t || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+  };
+
   const appendScannedTag = (text) => {
-    const tag = String(text || '').trim();
+    const tag = resolveScannedTag(text);
     if (!tag) return;
     setScanTags((prev) => {
-      const existing = prev.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const existing = prev.split(/\r?\n/).map((s) => resolveScannedTag(s)).filter(Boolean);
       if (existing.some((t) => t.toLowerCase() === tag.toLowerCase())) return prev;
       const trimmed = prev.replace(/\s+$/, '');
       return trimmed ? `${trimmed}\n${tag}` : tag;
@@ -361,7 +402,6 @@ useEffect(() => {
     setReceiveError('');
   };
 
-  // Backend returns requiresAssetTag for every request item; the flag is the source of truth.
   const receiveIsDept = isDeptRequest(receiveRequest);
   const reqItems = receiveRequest && Array.isArray(receiveRequest.items) ? receiveRequest.items : [];
   const hasCanonicalTracking = reqItems.some((item) => typeof item.requiresAssetTag === 'boolean');
@@ -374,7 +414,6 @@ useEffect(() => {
     return linkedItem?.itemType === 'CONSUMABLE';
   };
 
-  // ກວດ tag ທີ່ສະແກນກັບທະບຽນຊັບສິນ + ລາຍການ ASSET ທີ່ຂໍ (ສະແດງຜົນກ່ອນຢືນຢັນ)
   const scanResults = receiveRequest
     ? scannedTags().map((tag) => {
         if (!Array.isArray(allAssets)) return { tag };
@@ -407,8 +446,6 @@ useEffect(() => {
       })
     : [];
 
-  // ແຜນຮັບເຄື່ອງຕໍ່ລາຍການ: ASSET ຕ້ອງສະແກນຄົບ; CONSUMABLE ຕ້ອງຢືນຢັນແລະຫັກສະຕັອກ.
-  // ຈຳນວນ linked assets ໃຊ້ fallback ສະເພາະ payload ເກົ່າທີ່ບໍ່ມີ requiresAssetTag.
   const assetsKnown = Array.isArray(allAssets);
   const nameMatch = (itemName, assetType) => {
     const n = (itemName || '').toLowerCase();
@@ -434,8 +471,6 @@ useEffect(() => {
       const linked = assetsKnown && it.catalogItemId
         ? allAssets.filter((a) => a.status !== 'RETIRED' && a.catalogItemId === it.catalogItemId)
         : [];
-      // Backend classification is authoritative. The asset-record fallback is
-      // retained only for older request payloads that do not include the flag.
       const kind = typeof it.requiresAssetTag === 'boolean'
         ? (it.requiresAssetTag ? 'asset' : 'consumable')
         : (!assetsKnown ? 'unknown' : (linked.length > 0 ? 'asset' : 'consumable'));
@@ -479,7 +514,6 @@ useEffect(() => {
       setReceiveError('ກະລຸນາສະແກນ ຫຼື ກຣອກລະຫັດ Asset Tag ຢ່າງໜ້ອຍ 1 ລາຍການ');
       return;
     }
-    // ຖ້າສາມາດກວດໃນໜ້າໄດ້ ຕ້ອງຜ່ານທຸກລາຍການກ່ອນ (ບໍ່ພົບ/ບໍ່ວ່າງ/ຊະນິດບໍ່ກົງ) ຈຶ່ງດຳເນີນຕໍ່ໄດ້
     if (Array.isArray(allAssets) && scanResults.some((r) => r.status && r.status !== 'ok')) {
       setReceiveError('ມີລາຍການທີ່ບໍ່ຜ່ານການກວດ (ເບິ່ງສີແດງ) — ໃຫ້ແກ້/ລຶບແຖວນັ້ນກ່ອນ ຈຶ່ງດຳເນີນການຕໍ່ (ເພື່ອບໍ່ມອບເຄື່ອງຜິດ)');
       return;
@@ -488,8 +522,6 @@ useEffect(() => {
     setReceiveStage(2);
   };
 
-  // ບັນທຶກ: Backend ກວດ ໃບຂໍຕ້ອງເປັນ APPROVED, asset ມີຢູ່ + AVAILABLE + ຊະນິດກົງກັບລາຍການ,
-  // ຢືນຢັນລະຫັດຜູ້ຮັບ ແລ້ວຜູກ asset ກັບຜູ້ຮັບ + ອັບທະບຽນຊັບສິນ ແລະ ຕັ້ງໃບຂໍເປັນ FULFILLED
   const submitReceive = async (e) => {
     e.preventDefault();
     const assetTags = scannedTags();
@@ -552,6 +584,86 @@ useEffect(() => {
     }
   };
 
+  useEffect(() => {
+    setDelegatePickerOpen(false);
+    setCandQuery('');
+    setCandDept('');
+    setCandError('');
+  }, [detailId]);
+
+  useEffect(() => {
+    if (!detailId || !delegatePickerOpen) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setCandLoading(true);
+        setCandError('');
+        const res = await axios.get(`/supply-requests/${detailId}/delegate-candidates`, {
+          params: { q: candQuery.trim() || undefined, departmentId: candDept || undefined },
+        });
+        if (cancelled) return;
+        const body = res.data?.data !== undefined ? res.data.data : res.data;
+        setCandidates({ users: body?.users || [], departments: body?.departments || [] });
+      } catch (err) {
+        if (!cancelled) setCandError(err.response?.data?.msg || err.response?.data?.message || 'ໂຫຼດລາຍຊື່ບໍ່ສຳເລັດ');
+      } finally {
+        if (!cancelled) setCandLoading(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [detailId, delegatePickerOpen, candQuery, candDept]);
+
+  const saveDelegate = async (employeeCode) => {
+    if (!detailId) return;
+    try {
+      setDelegateSaving(true);
+      setCandError('');
+      await axios.patch(`/supply-requests/${detailId}/delegate`, { delegateCode: employeeCode });
+      await fetchData();
+      setDelegatePickerOpen(false);
+      setCandQuery('');
+    } catch (err) {
+      setCandError(err.response?.data?.msg || err.response?.data?.message || 'ບັນທຶກຜູ້ຮັບແທນບໍ່ສຳເລັດ');
+    } finally {
+      setDelegateSaving(false);
+    }
+  };
+
+  const pickupOpenCount = requests.filter((r) => isPickupForOther(r) && OPEN_STATUSES.includes(r.status)).length;
+
+  const visibleRequests = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    return requests.filter((req) => {
+      if (listTab === 'MINE' && !isMe(req.requestedBy)) return false;
+      if (listTab === 'PICKUP' && !isPickupForOther(req)) return false;
+      if (!matchesStatusFilter(req.status, statusFilter)) return false;
+      if (!q) return true;
+      const haystack = [
+        req._id,
+        ...(Array.isArray(req.items) ? req.items.map((i) => `${i.name} ${i.reason || ''}`) : []),
+        refName(req.requestedBy),
+        req.requestedBy?.employeeCode,
+        refName(req.departmentId),
+        refName(req.custodianId),
+        req.custodianId?.employeeCode,
+        refName(req.delegateId),
+        req.delegateId?.employeeCode,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [requests, listTab, statusFilter, searchText, me]);
+
+  const switchTab = (tab) => {
+    setListTab(tab);
+    setStatusFilter(tab === 'PICKUP' ? 'OPEN' : 'ALL');
+  };
+
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -568,6 +680,70 @@ useEffect(() => {
               <Plus size={18} />
               <span>ສ້າງຄຳຂໍອຸປະກອນ</span>
             </button>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { value: 'ALL', label: 'ທັງໝົດ' },
+              { value: 'MINE', label: 'ຄຳຂໍຂອງຂ້ອຍ' },
+              { value: 'PICKUP', label: 'ຮັບແທນຜູ້ອື່ນ', badge: pickupOpenCount },
+            ].map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => switchTab(tab.value)}
+                className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm font-medium border transition ${
+                  listTab === tab.value
+                    ? 'bg-amber-500 border-amber-500 text-white'
+                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {tab.value === 'PICKUP' && <UserCheck size={14} />}
+                {tab.label}
+                {tab.badge > 0 && (
+                  <span className={`text-[11px] rounded-full px-1.5 ${listTab === tab.value ? 'bg-white/30' : 'bg-amber-100 text-amber-700'}`}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="ຄົ້ນຫາ: ເລກໃບຂໍ, ລາຍການ, ຜູ້ຂໍ, ແຜນກ, ຜູ້ຮັບແທນ..."
+                className="w-full border border-gray-200 rounded-xl pl-9 pr-9 py-2 text-sm bg-white"
+              />
+              {searchText && (
+                <button
+                  type="button"
+                  onClick={() => setSearchText('')}
+                  aria-label="ລ້າງການຄົ້ນຫາ"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white"
+              aria-label="ກັ່ນຕອງຕາມສະຖານະ"
+            >
+              {STATUS_FILTERS.map((f) => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+          </div>
+          {!loading && (
+            <div className="text-xs text-gray-400">ສະແດງ {visibleRequests.length} ຈາກ {requests.length} ໃບ — ກົດທີ່ແຖວເພື່ອເບິ່ງລາຍລະອຽດທັງໝົດ</div>
           )}
         </div>
 
@@ -588,11 +764,24 @@ useEffect(() => {
                 <tr>
                   <td colSpan="5" className="py-12 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td>
                 </tr>
-              ) : requests.length > 0 ? (
-                requests.map((req) => (
-                  <tr key={req._id} className="hover:bg-gray-50">
+              ) : visibleRequests.length > 0 ? (
+                visibleRequests.map((req) => (
+                  <tr
+                    key={req._id}
+                    onClick={() => setDetailId(req._id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) setDetailId(req._id); }}
+                    tabIndex={0}
+                    className="hover:bg-gray-50 cursor-pointer focus:outline-none focus:bg-amber-50/40"
+                  >
                     <td className="p-4 font-semibold text-gray-900">
                       {req._id}
+                      {isPickupForOther(req) && (
+                        <div className="mt-1 text-[11px] font-normal">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5">
+                            <UserCheck size={11} /> ຮັບແທນ {refName(req.requestedBy)}
+                          </span>
+                        </div>
+                      )}
                       {isDeptRequest(req) && (
                         <div className="mt-1 text-[11px] font-normal text-gray-500 space-y-0.5">
                           <div>
@@ -623,7 +812,7 @@ useEffect(() => {
                       {renderStatus(req.status)}
                       {req.status === 'APPROVED' && hasPermission('supplies', 'fulfill') && (
                         <button
-                          onClick={() => openReceive(req)}
+                          onClick={(e) => { e.stopPropagation(); openReceive(req); }}
                           title="ສະແກນເຄື່ອງ — ຮັບເຄື່ອງທີ່ຄັງ ແລະ ຜູກເຂົ້າທະບຽນຊັບສິນ"
                           className="mt-1.5 inline-flex items-center gap-1 text-xs px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-medium transition"
                         >
@@ -633,6 +822,7 @@ useEffect(() => {
                       {req.status === 'APPROVED' && (
                         <Link
                           to={`/supplies/receipt/${req._id}`}
+                          onClick={(e) => e.stopPropagation()}
                           title="ເປີດໃບຮັບເຄື່ອງ — ສະແກນ/ພິມ QR ເພື່ອຢືນຢັນຮັບເຄື່ອງທັງໃບ"
                           className="mt-1.5 ml-1.5 inline-flex items-center gap-1 text-xs px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-medium transition"
                         >
@@ -645,7 +835,11 @@ useEffect(() => {
               ) : (
                 <tr>
                   <td colSpan="5" className="py-12 text-center text-sm text-gray-400">
-                    ຍັງບໍ່ມີຄຳຂໍອຸປະກອນໃນລະບົບ
+                    {requests.length === 0
+                      ? 'ຍັງບໍ່ມີຄຳຂໍອຸປະກອນໃນລະບົບ'
+                      : listTab === 'PICKUP'
+                        ? 'ບໍ່ມີໃບຂໍທີ່ຖືກກຳນົດໃຫ້ທ່ານໄປຮັບແທນ'
+                        : 'ບໍ່ພົບໃບຂໍທີ່ກົງກັບການຄົ້ນຫາ/ຕົວກັ່ນຕອງ'}
                   </td>
                 </tr>
               )}
@@ -653,6 +847,231 @@ useEffect(() => {
           </table>
           </div>
         </div>
+
+        {detailRequest && (() => {
+          const d = detailRequest;
+          const totalQty = Array.isArray(d.items) ? d.items.reduce((sum, i) => sum + (i.quantity || 0), 0) : 0;
+          const person = (ref) => {
+            const name = refName(ref);
+            const code = ref && typeof ref === 'object' ? ref.employeeCode : '';
+            return name ? `${name}${code ? ` (${code})` : ''}` : '—';
+          };
+          const Row = ({ label, children }) => (
+            <div className="flex justify-between gap-4 py-2 border-b border-gray-50 text-sm">
+              <span className="text-gray-500 shrink-0">{label}</span>
+              <span className="text-gray-800 font-medium text-right break-words">{children}</span>
+            </div>
+          );
+          return (
+            <div
+              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+              onClick={() => setDetailId(null)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={`ລາຍລະອຽດໃບຂໍ ${d._id}`}
+                className="bg-white rounded-2xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex justify-between items-start gap-3">
+                  <div className="space-y-2">
+                    <h2 className="text-lg font-bold text-gray-800">ໃບຂໍ {d._id}</h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {renderStatus(d.status)}
+                      {d.status === 'APPROVED' && hasPermission('supplies', 'fulfill') && (
+                        <button
+                          type="button"
+                          onClick={() => { setDetailId(null); openReceive(d); }}
+                          title="ສະແກນເຄື່ອງ — ຮັບເຄື່ອງທີ່ຄັງ ແລະ ຜູກເຂົ້າທະບຽນຊັບສິນ"
+                          className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-medium transition"
+                        >
+                          <ScanLine size={13} /> ສະແກນເຄື່ອງ
+                        </button>
+                      )}
+                      {OPEN_STATUSES.includes(d.status) && (
+                        <Link
+                          to={`/supplies/receipt/${d._id}`}
+                          title="ເປີດໃບຮັບເຄື່ອງ — ສະແກນ/ພິມ QR ເພື່ອຢືນຢັນຮັບເຄື່ອງທັງໃບ"
+                          className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-medium transition"
+                        >
+                          <QrCode size={13} /> ໃບຮັບເຄື່ອງ
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setDetailId(null)} aria-label="ປິດ" className="text-gray-400 hover:text-gray-600">✕</button>
+                </div>
+
+                {isPickupForOther(d) && OPEN_STATUSES.includes(d.status) && (
+                  <div className="text-sm bg-blue-50 border border-blue-200 text-blue-700 rounded-xl px-4 py-3 flex items-start gap-2">
+                    <UserCheck size={16} className="mt-0.5 shrink-0" />
+                    <span>
+                      {refName(d.requestedBy)} ຂໍໃຫ້ທ່ານໄປຮັບເຄື່ອງແທນ — ເປີດໃບຮັບເຄື່ອງເພື່ອຢືນຢັນເມື່ອໄດ້ຮັບແລ້ວ. ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ{isDeptRequest(d) ? '/ແຜນກ' : ''}.
+                    </span>
+                  </div>
+                )}
+
+                <div>
+                  <Row label="ຜູ້ຂໍ">{person(d.requestedBy)}</Row>
+                  {isDeptRequest(d) && <Row label="ແຜນກ">{refName(d.departmentId) || '—'}</Row>}
+                  {isDeptRequest(d) && <Row label="ຜູ້ຮັບຜິດຊອບ">{person(d.custodianId)}</Row>}
+                  <Row label="ຜູ້ຮັບແທນ">
+                    {d.delegateId ? (
+                      <>
+                        {person(d.delegateId)}
+                        {d.delegateSetAt && <span className="block text-[11px] font-normal text-gray-400">ກຳນົດເມື່ອ {formatDateTime(d.delegateSetAt)}</span>}
+                      </>
+                    ) : (
+                      <span className="font-normal text-gray-400">ຍັງບໍ່ໄດ້ກຳນົດ</span>
+                    )}
+                  </Row>
+                  <Row label="ວັນທີຍື່ນ">{formatDateTime(d.createdAt)}</Row>
+                  {d.approvedAt && <Row label="ອະນຸມັດ">{person(d.approvedBy)} · {formatDateTime(d.approvedAt)}</Row>}
+                  {d.rejectionReason && <Row label="ເຫດຜົນທີ່ປະຕິເສດ"><span className="text-rose-600">{d.rejectionReason}</span></Row>}
+                  {d.fulfilledAt && <Row label="ຢືນຢັນຮັບເຄື່ອງໂດຍ">{person(d.fulfilledBy)} · {formatDateTime(d.fulfilledAt)}</Row>}
+                  {d.receivedBy && <Row label="ຜູ້ຮັບເຄື່ອງ">{person(d.receivedBy)}</Row>}
+                </div>
+
+                {OPEN_STATUSES.includes(d.status) && (isMe(d.requestedBy) || isMe(d.custodianId)) && (
+                  <div className="border border-gray-100 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-gray-700">ຜູ້ມາຮັບເຄື່ອງແທນຂ້ອຍ</div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDelegatePickerOpen((v) => !v)}
+                          className="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-medium"
+                        >
+                          {delegatePickerOpen ? 'ປິດລາຍຊື່' : d.delegateId ? 'ປ່ຽນຄົນ' : 'ເລືອກຄົນ'}
+                        </button>
+                        {d.delegateId && (
+                          <button
+                            type="button"
+                            disabled={delegateSaving}
+                            onClick={() => saveDelegate(null)}
+                            className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-40"
+                          >
+                            ລຶບ
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {delegatePickerOpen && (
+                      <div className="space-y-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <div className="relative flex-1">
+                            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="text"
+                              autoFocus
+                              value={candQuery}
+                              onChange={(e) => setCandQuery(e.target.value)}
+                              placeholder="ຄົ້ນຫາຊື່ ຫຼື ລະຫັດພະນັກງານ..."
+                              className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-2 text-sm"
+                            />
+                          </div>
+                          <select
+                            value={candDept}
+                            onChange={(e) => setCandDept(e.target.value)}
+                            className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
+                            aria-label="ກັ່ນຕອງຕາມແຜນກ"
+                          >
+                            <option value="">ທຸກແຜນກ</option>
+                            {candidates.departments.map((dep) => (
+                              <option key={dep._id} value={dep._id}>{dep.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {candError && (
+                          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{candError}</div>
+                        )}
+                        <ul className="max-h-56 overflow-y-auto divide-y divide-gray-100 border border-gray-100 rounded-lg">
+                          {candLoading && candidates.users.length === 0 ? (
+                            <li className="p-3 text-xs text-gray-400 text-center">ກຳລັງຄົ້ນຫາ...</li>
+                          ) : candidates.users.length === 0 ? (
+                            <li className="p-3 text-xs text-gray-400 text-center">ບໍ່ພົບຄົນທີ່ຕົງກັບການຄົ້ນຫາ</li>
+                          ) : (
+                            candidates.users.map((u) => {
+                              const isCurrent = refId(d.delegateId) === u._id;
+                              return (
+                                <li key={u._id} className="flex items-center justify-between gap-3 p-2.5 text-sm">
+                                  <div className="min-w-0">
+                                    <div className="font-medium text-gray-800 truncate">
+                                      {refName(u)} <span className="font-mono text-xs text-gray-400">({u.employeeCode})</span>
+                                    </div>
+                                    {u.departmentId?.name && <div className="text-[11px] text-gray-500">{u.departmentId.name}</div>}
+                                  </div>
+                                  {isCurrent ? (
+                                    <span className="text-[11px] text-emerald-600 font-medium shrink-0">ປັດຈຸບັນ</span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={delegateSaving}
+                                      onClick={() => saveDelegate(u.employeeCode)}
+                                      className="shrink-0 text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-40"
+                                    >
+                                      ເລືອກ
+                                    </button>
+                                  )}
+                                </li>
+                              );
+                            })
+                          )}
+                        </ul>
+                        <div className="text-[11px] text-gray-400">
+                          ເລືອກໄດ້ 1 ຄົນ ແລະປ່ຽນໄດ້ຈົນກວ່າຈະຮັບເຄື່ອງ — ເຄື່ອງຍັງບັນທຶກໃຫ້ຜູ້ຂໍ{isDeptRequest(d) ? '/ແຜນກ' : ''}ຄືເກົ່າ
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {d.receiveOverride && (
+                  <div className="text-sm bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-3 space-y-0.5">
+                    <div className="font-semibold">ເຈົ້າໜ້າທີ່ສາງຮັບແທນ (override)</div>
+                    <div>ໂດຍ {person(d.receiveOverride.by)} · {formatDateTime(d.receiveOverride.at)}</div>
+                    <div>ເຫດຜົນ: {d.receiveOverride.reason}</div>
+                  </div>
+                )}
+
+                <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-gray-500 text-xs">
+                      <tr>
+                        <th className="p-3">ລາຍການ</th>
+                        <th className="p-3 text-center">ຈຳນວນ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {(d.items || []).map((i, k) => (
+                        <tr key={k}>
+                          <td className="p-3">
+                            <div className="font-medium text-gray-800">{i.name}</div>
+                            {i.catalogItemId && <div className="text-[11px] font-mono text-gray-400">{i.catalogItemId}</div>}
+                            {i.reason && <div className="text-xs text-gray-500">ເຫດຜົນ: {i.reason}</div>}
+                          </td>
+                          <td className="p-3 text-center font-semibold">{i.quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-50 text-sm">
+                        <td className="p-3 text-gray-500">ລວມ</td>
+                        <td className="p-3 text-center font-semibold">{totalQty} ຊິ້ນ</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button type="button" onClick={() => setDetailId(null)} className="px-4 py-2 text-sm text-gray-600">ປິດ</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {isModalOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1058,18 +1477,38 @@ useEffect(() => {
                       <label className="block text-xs text-gray-500 mb-1">
                         ລະຫັດພະນັກງານຜູ້ຮັບ {receiveIsDept ? '(ທາງເລືອກ)' : '*'}
                       </label>
-                      <input
-                        required={!receiveIsDept}
-                        value={assigneeCode}
-                        onChange={(e) => setAssigneeCode(e.target.value)}
-                        placeholder="ລະຫັດພະນັກງານ..."
-                        className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm tracking-widest"
-                      />
+                      {receiveIsDept || changeReceiver ? (
+                        <input
+                          required={!receiveIsDept}
+                          value={assigneeCode}
+                          onChange={(e) => setAssigneeCode(e.target.value)}
+                          placeholder="ລະຫັດພະນັກງານ..."
+                          className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm tracking-widest"
+                        />
+                      ) : (
+                        <div className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm tracking-widest text-gray-700">
+                          {assigneeCode || '—'}
+                        </div>
+                      )}
                       <p className="text-xs text-gray-400 mt-1">
                         {receiveIsDept
                           ? `ເວັ້ນວ່າງ = ຜູ້ຮັບຜິດຊອບຂອງແຜນກ (${refName(receiveRequest.custodianId)}) — ຜູ້ຮັບແທນຕ້ອງເປັນສະມາຊິກ ຫຼື ຫົວໜ້າແຜນກ`
-                          : 'ຄ່າເລີ່ມຕົ້ນ = ຜູ້ຂໍຂອງຄຳຂໍນີ້ — ແກ້ໄດ້ຖ້າໃຫ້ຄົນອື່ນຮັບ (ຖ້າບໍ່ມີສິດ assets:assign Backend ຈະປະຕິເສດ)'}
+                          : changeReceiver
+                            ? 'ໃສ່ລະຫັດຄົນທີ່ມາຮັບແທນ (ຖ້າບໍ່ມີສິດ assets:assign Backend ຈະປະຕິເສດ)'
+                            : 'ຜູ້ຮັບ = ຜູ້ຂໍຂອງຄຳຂໍນີ້'}
                       </p>
+                      {!receiveIsDept && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (changeReceiver) setAssigneeCode(defaultAssigneeCode);
+                            setChangeReceiver(!changeReceiver);
+                          }}
+                          className="mt-1 text-xs text-blue-600 hover:underline"
+                        >
+                          {changeReceiver ? 'ໃຊ້ຜູ້ຂໍເປັນຜູ້ຮັບ' : 'ຜູ້ຮັບເປັນຄົນອື່ນ'}
+                        </button>
+                      )}
                       {assigneeInfo.state === 'found' && assigneeInfo.user && (
                         <div className={`mt-2 text-xs rounded-lg px-3 py-2 border ${assigneeInfo.user.isActive === false ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
                           ຜູ້ຮັບ: <b>{`${assigneeInfo.user.firstName || ''} ${assigneeInfo.user.lastName || ''}`.trim()}</b> ({assigneeInfo.user.employeeCode})

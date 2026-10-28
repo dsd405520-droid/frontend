@@ -11,6 +11,10 @@ import {
   ChevronRight,
   Printer,
   Paperclip,
+  Folder,
+  FolderOpen,
+  ChevronsDown,
+  ChevronsUp,
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
@@ -771,6 +775,7 @@ export default function GoodsReceipt() {
   const [modal, setModal] = useState(null);
   const [success, setSuccess] = useState('');
   const [expandedId, setExpandedId] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState(() => new Set());
   const [printId, setPrintId] = useState('');
 
   const fetchRows = async () => {
@@ -858,6 +863,42 @@ export default function GoodsReceipt() {
 
   const total = useMemo(() => rows.reduce((s, r) => s + (r.quantity || 0), 0), [rows]);
 
+  const searchActive = !!search.trim();
+  const folders = useMemo(() => {
+    const map = new Map();
+    rows.forEach((r) => {
+      const key = r.catalogItemId || '__none';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return [...map.entries()]
+      .map(([key, list]) => ({
+        key,
+        name: list[0]?.itemName || 'ບໍ່ລະບຸ Catalog',
+        unit: list[0]?.unit || '',
+        qty: list.reduce((s, r) => s + (r.quantity || 0), 0),
+        price: list.reduce((s, r) => s + (Number(r.totalPrice) || 0), 0),
+        modes: list.reduce((m, r) => ({ ...m, [r.mode]: (m[r.mode] || 0) + 1 }), {}),
+        list: [...list].sort((x, y) => String(y.receiptNo || '').localeCompare(String(x.receiptNo || ''))),
+      }))
+      .sort((x, y) => x.key.localeCompare(y.key));
+  }, [rows]);
+  // ເມື່ອຄົ້ນຫາ ໂຟນເດີຈະເປີດອັດຕະໂນມັດ (expandedFolders ໃຊ້ເປັນຕົວກົງກັນຂ້າມ)
+  const isFolderOpen = (key) => (searchActive ? !expandedFolders.has(key) : expandedFolders.has(key));
+  const toggleFolder = (key) =>
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allFoldersOpen = folders.length > 0 && folders.every((f) => isFolderOpen(f.key));
+  const toggleAllFolders = () => {
+    const allKeys = new Set(folders.map((f) => f.key));
+    if (allFoldersOpen) setExpandedFolders(searchActive ? allKeys : new Set());
+    else setExpandedFolders(searchActive ? new Set() : allKeys);
+  };
+
   if (!canManage) {
     return (
       <MainLayout>
@@ -896,7 +937,7 @@ export default function GoodsReceipt() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full self-start">
               {rows.length} ຄັ້ງ · ລວມ {total} ຊິ້ນ
@@ -906,15 +947,15 @@ export default function GoodsReceipt() {
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => { setSearch(e.target.value); setExpandedFolders(new Set()); }}
                   placeholder="ຄົ້ນຫາ ລາຍການ / ຜູ້ຂາຍ / S/N..."
-                  className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-500 w-full sm:w-64"
+                  className="pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 w-full sm:w-64"
                 />
               </div>
               <select
                 value={modeFilter}
                 onChange={(e) => setModeFilter(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
               >
                 <option value="">ທັງໝົດ</option>
                 <option value="RESTOCK">ເພີ່ມ</option>
@@ -944,47 +985,83 @@ export default function GoodsReceipt() {
                   { key: 'assetTags', label: 'assetTags' },
                 ]}
               />
+              <button
+                type="button"
+                onClick={toggleAllFolders}
+                disabled={folders.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              >
+                {allFoldersOpen ? <ChevronsUp size={16} /> : <ChevronsDown size={16} />}
+                {allFoldersOpen ? 'ຫຍໍ້ທັງໝົດ' : 'ຂະຫຍາຍທັງໝົດ'}
+              </button>
             </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
-                  <th className="p-4 font-medium">ວັນທີ</th>
-                  <th className="p-4 font-medium">ລາຍການ</th>
-                  <th className="p-4 font-medium">ຈຳນວນ</th>
-                  <th className="p-4 font-medium">ປະເພດ</th>
-                  <th className="p-4 font-medium">ລາຄາລວມ</th>
-                  <th className="p-4 font-medium">ບັນທຶກໂດຍ</th>
-                  <th className="p-4 font-medium" />
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="p-3 font-medium">ເລກທີ / ວັນທີ</th>
+                  <th className="p-3 font-medium">ລາຍການ</th>
+                  <th className="p-3 font-medium">ຈຳນວນ</th>
+                  <th className="p-3 font-medium">ປະເພດ</th>
+                  <th className="p-3 font-medium">ລາຄາລວມ</th>
+                  <th className="p-3 font-medium">ບັນທຶກໂດຍ</th>
+                  <th className="p-3 font-medium" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-600">
                 {loading ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
+                  <tr><td colSpan="7" className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
                 ) : loadError ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-red-500 px-4">⚠️ {loadError}</td></tr>
+                  <tr><td colSpan="7" className="p-6 text-center text-sm text-red-500">⚠️ {loadError}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ຍັງບໍ່ມີປະຫວັດການຮັບເຄື່ອງ</td></tr>
+                  <tr><td colSpan="7" className="p-6 text-center text-sm text-gray-500">ຍັງບໍ່ມີປະຫວັດການຮັບເຄື່ອງ</td></tr>
                 ) : (
-                  rows.map((r) => {
+                  folders.map((f) => {
+                    const folderOpen = isFolderOpen(f.key);
+                    return (
+                      <Fragment key={f.key}>
+                        <tr onClick={() => toggleFolder(f.key)} className="bg-gray-50/80 hover:bg-amber-50/50 cursor-pointer">
+                          <td className="p-3" colSpan={2}>
+                            <div className="flex items-center gap-2">
+                              {folderOpen ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                              {folderOpen ? <FolderOpen size={18} className="text-amber-500" /> : <Folder size={18} className="text-amber-500" />}
+                              <span className="font-semibold text-gray-900">{f.key === '__none' ? '—' : f.key}</span>
+                              <span className="text-gray-600">{f.name}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 text-xs font-medium text-gray-700">{f.qty}{f.unit ? ` ${f.unit}` : ''}</td>
+                          <td className="p-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(f.modes).map(([md, n]) => {
+                                const mm = MODE_LABEL[md] || MODE_LABEL.RESTOCK;
+                                return <span key={md} className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${mm.cls}`}>{mm.text} {n}</span>;
+                              })}
+                            </div>
+                          </td>
+                          <td className="p-3 text-xs font-medium text-gray-700">{f.price > 0 ? f.price.toLocaleString() : '—'}</td>
+                          <td className="p-3 text-xs font-medium text-gray-500" colSpan={2}>{f.list.length} ຄັ້ງ</td>
+                        </tr>
+                        {folderOpen && f.list.map((r, idx) => {
                     const m = MODE_LABEL[r.mode] || MODE_LABEL.RESTOCK;
                     const open = expandedId === r._id;
+                    const last = idx === f.list.length - 1;
                     return (
                       <Fragment key={r._id}>
                         <tr
                           onClick={() => setExpandedId(open ? '' : r._id)}
-                          className="hover:bg-gray-50 cursor-pointer"
+                          className="hover:bg-amber-50/40 cursor-pointer"
                         >
-                          <td className="p-4">
-                            <span className="inline-flex items-center gap-1">
+                          <td className="p-3">
+                            <span className="inline-flex items-center gap-2 pl-7">
+                              <span className="font-mono text-gray-300 select-none">{last ? '└─' : '├─'}</span>
                               {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                              {r.receiptNo && <span className="font-mono text-xs text-gray-500 mr-1">{r.receiptNo}</span>}
-                              {r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}
+                              {r.receiptNo && <span className="font-semibold text-gray-800 mr-1">{r.receiptNo}</span>}
+                              <span className="text-xs text-gray-400">{r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}</span>
                             </span>
                           </td>
-                          <td className="p-4">
+                          <td className="p-3">
                             <div className="font-medium text-gray-800">{r.itemName}</div>
                             <div className="text-xs text-gray-400">
                               {r.catalogItemId}
@@ -993,13 +1070,13 @@ export default function GoodsReceipt() {
                               {r.serialNumbers?.length ? ` · S/N: ${r.serialNumbers.slice(0, 3).join(', ')}${r.serialNumbers.length > 3 ? '…' : ''}` : ''}
                             </div>
                           </td>
-                          <td className="p-4">{r.quantity}{r.unit ? ` ${r.unit}` : ''}</td>
-                          <td className="p-4">
+                          <td className="p-3">{r.quantity}{r.unit ? ` ${r.unit}` : ''}</td>
+                          <td className="p-3">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.cls}`}>{m.text}</span>
                           </td>
-                          <td className="p-4">{r.totalPrice != null ? Number(r.totalPrice).toLocaleString() : '—'}</td>
-                          <td className="p-4">{personName(r.createdBy)}</td>
-                          <td className="p-4">
+                          <td className="p-3">{r.totalPrice != null ? Number(r.totalPrice).toLocaleString() : '—'}</td>
+                          <td className="p-3">{personName(r.createdBy)}</td>
+                          <td className="p-3">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1051,6 +1128,9 @@ export default function GoodsReceipt() {
                             </td>
                           </tr>
                         )}
+                      </Fragment>
+                    );
+                        })}
                       </Fragment>
                     );
                   })

@@ -39,6 +39,10 @@ export default function SupplyReceipt() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [done, setDone] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [delegateInput, setDelegateInput] = useState('');
+  const [delegateSaving, setDelegateSaving] = useState(false);
+  const [delegateError, setDelegateError] = useState('');
 
   const load = async () => {
     try {
@@ -74,6 +78,10 @@ export default function SupplyReceipt() {
   const custodianName = custodian
     ? `${custodian.firstName || ''} ${custodian.lastName || ''}`.trim() || custodian.employeeCode || '—'
     : '—';
+  const delegate = receipt?.delegateId && typeof receipt.delegateId === 'object' ? receipt.delegateId : null;
+  const delegateName = delegate
+    ? `${delegate.firstName || ''} ${delegate.lastName || ''}`.trim() || delegate.employeeCode || '—'
+    : '';
   const isDepartmentRequest = !!receipt?.isDepartmentRequest;
   const receiverName = isDepartmentRequest ? custodianName : requesterName;
 
@@ -89,6 +97,21 @@ export default function SupplyReceipt() {
 
   const removeTag = (value) => setTags((prev) => prev.filter((t) => t !== value));
 
+  // ຜູ້ຂໍກຳນົດ/ປ່ຽນ/ລຶບ ຜູ້ຮັບແທນ (1 ຄົນ) — ສົ່ງ null ເພື່ອລຶບ
+  const saveDelegate = async (code) => {
+    setDelegateError('');
+    setDelegateSaving(true);
+    try {
+      await axios.patch(`/supply-requests/${id}/delegate`, { delegateCode: code });
+      setDelegateInput('');
+      await load();
+    } catch (err) {
+      setDelegateError(err.response?.data?.msg || err.response?.data?.message || 'ບັນທຶກຜູ້ຮັບແທນບໍ່ສຳເລັດ');
+    } finally {
+      setDelegateSaving(false);
+    }
+  };
+
   const submit = async () => {
     setSubmitError('');
     setSubmitting(true);
@@ -100,6 +123,8 @@ export default function SupplyReceipt() {
       if (!isDepartmentRequest && !receipt.isRequester && requester?.employeeCode) {
         payload.assigneeCode = requester.employeeCode;
       }
+      // ເຈົ້າໜ້າທີ່ສາງທີ່ບໍ່ແມ່ນຜູ້ຂໍ/ຜູ້ຮັບແທນ → override ຕ້ອງມີເຫດຜົນ (ບັນທຶກ audit + ແຈ້ງຜູ້ຂໍ)
+      if (receipt.requiresOverride) payload.overrideReason = overrideReason.trim();
       await axios.patch(`/supply-requests/${id}/receive`, payload);
       setDone(true);
       await load();
@@ -114,6 +139,7 @@ export default function SupplyReceipt() {
   const canSubmit =
     receipt?.canConfirm &&
     !submitting &&
+    (!receipt.requiresOverride || overrideReason.trim().length >= 5) &&
     (requiredTagCount === 0 || tags.length >= requiredTagCount) &&
     (consumableItems.length === 0 || confirmConsumables);
 
@@ -172,6 +198,12 @@ export default function SupplyReceipt() {
                         {custodian?.employeeCode ? ` (${custodian.employeeCode})` : ''}
                       </div>
                     </>
+                  )}
+                  {delegate && (
+                    <div className="text-sm text-gray-500">
+                      ຜູ້ຮັບແທນ: <span className="font-medium text-gray-800">{delegateName}</span>
+                      {delegate.employeeCode ? ` (${delegate.employeeCode})` : ''}
+                    </div>
                   )}
                   <div className="text-sm text-gray-500">
                     ວັນທີຍື່ນ: {receipt.createdAt ? new Date(receipt.createdAt).toLocaleDateString() : '—'}
@@ -246,9 +278,65 @@ export default function SupplyReceipt() {
               </div>
             )}
 
+            {receipt.receiveOverride && (
+              <div className="no-print bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
+                ເຈົ້າໜ້າທີ່ສາງຢືນຢັນຮັບເຄື່ອງແທນ (override) — ເຫດຜົນ: {receipt.receiveOverride.reason}
+              </div>
+            )}
+
+            {receipt.canSetDelegate && (
+              <div className="no-print bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
+                <h2 className="text-base font-bold text-gray-800">ຜູ້ຮັບແທນ</h2>
+                <div className="text-xs text-gray-500">
+                  ກຳນົດໄດ້ 1 ຄົນ ແລະປ່ຽນໄດ້ຕະຫຼອດຈົນກວ່າຈະຮັບເຄື່ອງ. ຜູ້ຮັບແທນມາຢືນຢັນຮັບເຄື່ອງຈາກໃບນີ້ໄດ້; ເຄື່ອງຍັງບັນທຶກໃຫ້ຜູ້ຂໍ{isDepartmentRequest ? '/ແຜນກ' : ''}ຄືເກົ່າ.
+                </div>
+                <div className="text-sm text-gray-600">
+                  ປັດຈຸບັນ:{' '}
+                  {delegate ? (
+                    <span className="font-medium text-gray-800">
+                      {delegateName}
+                      {delegate.employeeCode ? ` (${delegate.employeeCode})` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">ຍັງບໍ່ໄດ້ກຳນົດ</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={delegateInput}
+                    onChange={(e) => setDelegateInput(e.target.value)}
+                    placeholder="ລະຫັດພະນັກງານຂອງຜູ້ຮັບແທນ (ເຊັ່ນ EMP002)"
+                    className="flex-1 border border-gray-200 rounded-lg p-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveDelegate(delegateInput.trim())}
+                    disabled={delegateSaving || !delegateInput.trim()}
+                    className="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-40"
+                  >
+                    {delegate ? 'ປ່ຽນ' : 'ບັນທຶກ'}
+                  </button>
+                  {delegate && (
+                    <button
+                      type="button"
+                      onClick={() => saveDelegate(null)}
+                      disabled={delegateSaving}
+                      className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-40"
+                    >
+                      ລຶບ
+                    </button>
+                  )}
+                </div>
+                {delegateError && (
+                  <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{delegateError}</div>
+                )}
+              </div>
+            )}
+
             {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && (
               <div className="no-print bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
-                ມີສະເພາະຜູ້ຂໍ, ຜູ້ຮັບຜິດຊອບ/ຫົວໜ້າແຜນກ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
+                ມີສະເພາະຜູ້ຂໍ, ຜູ້ຮັບແທນທີ່ຖືກກຳນົດ, ຜູ້ຮັບຜິດຊອບ/ຫົວໜ້າແຜນກ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill ແລະ assets.assign) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
               </div>
             )}
 
@@ -271,14 +359,40 @@ export default function SupplyReceipt() {
                       {custodian?.employeeCode && isDepartmentRequest ? ` (${custodian.employeeCode})` : ''}
                     </span>
                   </div>
-                  {!receipt.isRequester && (
-                    <div className="text-xs text-amber-600 pt-1">
+                  {receipt.isDelegate && !receipt.isRequester && (
+                    <div className="text-xs text-blue-600 pt-1">
+                      ທ່ານຢືນຢັນໃນນາມຜູ້ຮັບແທນ —{' '}
                       {isDepartmentRequest
-                        ? `ທ່ານກຳລັງຢືນຢັນໃນນາມເຈົ້າໜ້າທີ່ສາງ — ຊັບສິນຈະຖືກບັນທຶກໃນນາມແຜນກ ${department?.name || ''} ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບ`
-                        : 'ທ່ານກຳລັງຢືນຢັນໃນນາມເຈົ້າໜ້າທີ່ສາງ — ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ'}
+                        ? `ຊັບສິນຈະຖືກບັນທຶກໃນນາມແຜນກ ${department?.name || ''} ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບ`
+                        : 'ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ'}
+                    </div>
+                  )}
+                  {receipt.requiresOverride && (
+                    <div className="text-xs text-amber-600 pt-1">
+                      ທ່ານບໍ່ແມ່ນຜູ້ຂໍ ຫຼື ຜູ້ຮັບແທນ — ການຢືນຢັນນີ້ເປັນ override: ຕ້ອງໃສ່ເຫດຜົນ, ຖືກບັນທຶກໃນ audit log ແລະຜູ້ຂໍຈະໄດ້ຮັບການແຈ້ງເຕືອນ.{' '}
+                      {isDepartmentRequest
+                        ? `ຊັບສິນຈະຖືກບັນທຶກໃນນາມແຜນກ ${department?.name || ''} ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບ`
+                        : 'ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ'}
                     </div>
                   )}
                 </div>
+
+                {receipt.requiresOverride && (
+                  <div className="space-y-1">
+                    <label className="text-sm font-semibold text-gray-700" htmlFor="override-reason">
+                      ເຫດຜົນທີ່ຮັບແທນ (ຈຳເປັນ)
+                    </label>
+                    <textarea
+                      id="override-reason"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      maxLength={500}
+                      rows={2}
+                      placeholder="ເຊັ່ນ: ຜູ້ຂໍລາພັກ, ຕ້ອງການເຄື່ອງດ່ວນ"
+                      className="w-full border border-gray-200 rounded-lg p-2 text-sm"
+                    />
+                  </div>
+                )}
 
                 {taggedItems.length > 0 && (
                   <div className="space-y-3">

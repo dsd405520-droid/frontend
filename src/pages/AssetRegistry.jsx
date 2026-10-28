@@ -11,6 +11,7 @@ import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import CameraScanner from '../components/CameraScanner';
 import AssetTagVisual from '../components/AssetTagVisual';
+import AssetTagPrintModal from '../components/AssetTagPrintModal';
 import { API_BASE_URL } from '../config';
 
 function DetailField({ label, children, wide }) {
@@ -60,6 +61,7 @@ export default function AssetRegistry() {
   const canUpdate = hasPermission('assets', 'update');
   const canDelete = hasPermission('assets', 'delete');
   const canAssign = hasPermission('assets', 'assign');
+  const canSelect = canRead || canAssign || canUpdate || canDelete;
 
   const [activeTab, setActiveTab] = useState('registry');
 
@@ -83,6 +85,7 @@ export default function AssetRegistry() {
   const [branchFilter, setBranchFilter] = useState('');
 
   const MAX_BATCH = 50;
+  const parseTags = (s) => [...new Set(String(s || '').split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean))];
   const rowSeq = useRef(0);
   const newRow = (over = {}) => ({
     id: ++rowSeq.current, catalogSearch: '', catalogItemId: '', name: '', qty: 1,
@@ -126,13 +129,24 @@ export default function AssetRegistry() {
   const [busyId, setBusyId] = useState(null);
   const [expandedFolders, setExpandedFolders] = useState(() => new Set());
   const [detailAssetId, setDetailAssetId] = useState(null);
+  const [receipts, setReceipts] = useState(null);
+  const [collapsedSubs, setCollapsedSubs] = useState(() => new Set());
 
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkOpBusy, setBulkOpBusy] = useState(false);
+  const [bulkPrintOpen, setBulkPrintOpen] = useState(false);
+  const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
+  const [bulkAssignUserId, setBulkAssignUserId] = useState('');
+  const [bulkAssignNote, setBulkAssignNote] = useState('');
+  const [bulkUserSearch, setBulkUserSearch] = useState('');
+  const [bulkUserDept, setBulkUserDept] = useState('');
+  const [bulkAssignError, setBulkAssignError] = useState('');
   const [bulkClaimOpen, setBulkClaimOpen] = useState(false);
   const [bulkClaimSubmitting, setBulkClaimSubmitting] = useState(false);
   const [bulkClaimError, setBulkClaimError] = useState('');
   const [bulkClaimResults, setBulkClaimResults] = useState(null);
   const [bulkClaimCode, setBulkClaimCode] = useState('');
+  const [bulkClaimDept, setBulkClaimDept] = useState('');
   const [bulkLookup, setBulkLookup] = useState({ state: 'idle', user: null });
 
   const currentUser = getCurrentUser();
@@ -186,6 +200,13 @@ export default function AssetRegistry() {
       .catch(() => setCatalog([]));
   }
 
+  function fetchReceipts() {
+    fetch(`${API_BASE_URL}/goods-receipt`, { headers })
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((body) => setReceipts(Array.isArray(unwrap(body)) ? unwrap(body) : null))
+      .catch(() => setReceipts(null));
+  }
+
   const resetBatch = () => {
     setBatchRows([newRow()]);
     setBatchBranch('');
@@ -219,27 +240,23 @@ export default function AssetRegistry() {
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchAssets();
     fetchBranches();
     fetchUsers();
     fetchDepartments();
+    fetchReceipts();
     if (canCreate) fetchCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchFilter]);
 
   useEffect(() => {
     if (searchParams.get('create') === '1') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       openCreate();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('create')]);
 
   useEffect(() => {
     if (!fromRequestId || !canCreate) return;
     prefilledFor.current = '';
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setReqData(null);
     setReqError('');
     openCreate();
@@ -250,7 +267,6 @@ export default function AssetRegistry() {
         setReqData(unwrap(body));
       })
       .catch((err) => setReqError(err.message));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromRequestId]);
 
   useEffect(() => {
@@ -281,10 +297,8 @@ export default function AssetRegistry() {
 
   useEffect(() => {
     if (activeTab === 'overdue') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchOverdue();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const refId = (v) => (v && typeof v === 'object' ? v._id : v);
@@ -353,8 +367,32 @@ export default function AssetRegistry() {
         name: catalog.find((c) => c._id === key)?.name || list[0]?.type || 'ບໍ່ລະບຸ Catalog',
         list: [...list].sort((x, y) => String(x.assetTag).localeCompare(String(y.assetTag))),
       }))
+      .map((f) => {
+        if (!receipts) return f;
+        const byAsset = new Map();
+        receipts.forEach((r) => (r.assetIds || []).forEach((id) => byAsset.set(String(id), r)));
+        const gm = new Map();
+        f.list.forEach((a) => {
+          const r = byAsset.get(String(a._id));
+          const k = r ? r._id : '__norcpt';
+          if (!gm.has(k)) gm.set(k, { key: k, receipt: r || null, label: r ? (r.receiptNo || r._id) : 'ບໍ່ມີໃບຮັບເຄື່ອງ', list: [] });
+          gm.get(k).list.push(a);
+        });
+        const groups = [...gm.values()].sort((x, y) => {
+          if (!x.receipt) return 1;
+          if (!y.receipt) return -1;
+          return String(y.label).localeCompare(String(x.label));
+        });
+        groups.forEach((g, i) => { g.last = i === groups.length - 1; });
+        return { ...f, groups };
+      })
       .sort((x, y) => x.key.localeCompare(y.key));
   })();
+  const toggleSub = (key) => setCollapsedSubs((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   const isFolderOpen = (key) => (searchActive ? !expandedFolders.has(key) : expandedFolders.has(key));
   const toggleFolder = (key) => setExpandedFolders((prev) => {
     const next = new Set(prev);
@@ -382,7 +420,6 @@ export default function AssetRegistry() {
   }, [detailAssetId]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedIds(new Set());
   }, [search, statusFilter, branchFilter, holderTypeFilter, deptFilter]);
 
@@ -447,7 +484,8 @@ export default function AssetRegistry() {
       if (!(r.name || '').trim()) { setBatchError(`${label}: ກະລຸນາໃສ່ຊື່/ປະເພດ`); return; }
       if (!r.catalogItemId && !(r.assetTag || '').trim()) { setBatchError(`${label}: ເລືອກລາຍການ Catalog (ສ້າງ Tag ອັດຕະໂນມັດ) ຫຼືໃສ່ Asset Tag`); return; }
       if (qty < 1) { setBatchError(`${label}: ຈຳນວນຕ້ອງຢ່າງໜ້ອຍ 1`); return; }
-      if ((r.assetTag || '').trim() && qty > 1) { setBatchError(`${label}: ໃສ່ Asset Tag ເອງໄດ້ສະເພາະ 1 ຊິ້ນ — ຖ້າຫຼາຍຊິ້ນໃຫ້ປ່ອຍວ່າງ ແລ້ວເລືອກ Catalog`); return; }
+      const tagCount = parseTags(r.assetTag).length;
+      if (tagCount > 0 && tagCount !== qty) { setBatchError(`${label}: ໃສ່ Asset Tag ${tagCount} ອັນ ແຕ່ຈຳນວນ ${qty} — ຕ້ອງເທົ່າກັນ`); return; }
     }
     if (batchTotal > MAX_BATCH) { setBatchError(`ສ້າງໄດ້ສູງສຸດ ${MAX_BATCH} ຊິ້ນຕໍ່ຄັ້ງ (ຕອນນີ້ ${batchTotal})`); return; }
 
@@ -461,10 +499,11 @@ export default function AssetRegistry() {
       const startOk = done[r.id] || 0;
       let ok = startOk;
       let errMsg = '';
+      const tagList = parseTags(r.assetTag);
       while (ok < want) {
         try {
           await postAsset({
-            assetTag: (r.assetTag || '').trim() || undefined,
+            assetTag: tagList[ok],
             catalogItemId: r.catalogItemId || undefined,
             type: r.name.trim(),
             branchId: batchBranch,
@@ -565,7 +604,8 @@ export default function AssetRegistry() {
   const handleSetStatus = (a, status) => callAction(a._id, '/status', 'PATCH', { status });
   const handleDelete = (a) => callAction(a._id, '', 'DELETE', null, `ລຶບຊັບສິນ ${a.assetTag} ຖາວອນ? ບໍ່ສາມາດກູ້ຄືນໄດ້`);
 
-  const selectableAssets = canAssign ? filteredAssets.filter((a) => a.status === 'AVAILABLE') : [];
+  const selectableAssets = canSelect ? filteredAssets : [];
+  const selectedAssets = filteredAssets.filter((a) => selectedIds.has(a._id));
   const allVisibleSelected =
     selectableAssets.length > 0 && selectableAssets.every((a) => selectedIds.has(a._id));
   const someVisibleSelected = selectableAssets.some((a) => selectedIds.has(a._id));
@@ -590,10 +630,70 @@ export default function AssetRegistry() {
 
   const clearSelection = () => setSelectedIds(new Set());
 
+  const runBulk = async (targets, buildReq, confirmMsg) => {
+    if (targets.length === 0) return;
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    setBulkOpBusy(true);
+    const failed = [];
+    for (const a of targets) {
+      const { path, method, body } = buildReq(a);
+      try {
+        const res = await fetch(`${API_BASE_URL}/assets/${a._id}${path}`, {
+          method,
+          headers,
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const rb = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const m = rb?.msg ?? rb?.message;
+          throw new Error((Array.isArray(m) ? m.join(' · ') : m) || 'ບໍ່ສຳເລັດ');
+        }
+      } catch (err) {
+        failed.push(`${a.assetTag}: ${err.message}`);
+      }
+    }
+    setBulkOpBusy(false);
+    clearSelection();
+    fetchAssets();
+    if (failed.length) alert(`ສຳເລັດ ${targets.length - failed.length}/${targets.length} ລາຍການ\n\n${failed.join('\n')}`);
+  };
+
+  const bulkRepair = () => {
+    const t = selectedAssets.filter((a) => a.status !== 'RETIRED' && a.status !== 'UNDER_REPAIR');
+    runBulk(t, () => ({ path: '/status', method: 'PATCH', body: { status: 'UNDER_REPAIR' } }), `ສົ່ງສ້ອມແປງ ${t.length} ລາຍການ?`);
+  };
+  const bulkFixed = () => {
+    const t = selectedAssets.filter((a) => a.status === 'UNDER_REPAIR');
+    runBulk(t, () => ({ path: '/status', method: 'PATCH', body: { status: 'AVAILABLE' } }), `ຢືນຢັນວ່າສ້ອມແລ້ວ ${t.length} ລາຍການ?`);
+  };
+  const bulkRetire = () => {
+    const t = selectedAssets.filter((a) => a.status !== 'RETIRED');
+    runBulk(t, () => ({ path: '/status', method: 'PATCH', body: { status: 'RETIRED' } }), `ປົດລະວາງ / ເລີກໃຊ້ ${t.length} ລາຍການ?`);
+  };
+  const bulkReturn = () => {
+    const t = selectedAssets.filter((a) => a.status === 'ASSIGNED');
+    runBulk(t, () => ({ path: '/return', method: 'PATCH', body: {} }), `ຢືນຢັນວ່າ ${t.length} ລາຍການຖືກສົ່ງຄືນແລ້ວ?`);
+  };
+  const bulkDelete = () => {
+    runBulk(selectedAssets, () => ({ path: '', method: 'DELETE' }), `ລຶບຊັບສິນ ${selectedAssets.length} ລາຍການຖາວອນ? ບໍ່ສາມາດກູ້ຄືນໄດ້`);
+  };
+  const claimableCount = selectedAssets.filter((a) => a.status === 'AVAILABLE').length;
+  const assignableSelected = selectedAssets.filter((a) => a.status === 'AVAILABLE');
+  const submitBulkAssign = async (e) => {
+    e.preventDefault();
+    if (!bulkAssignUserId) { setBulkAssignError('ກະລຸນາເລືອກພະນັກງານ'); return; }
+    setBulkAssignOpen(false);
+    await runBulk(
+      assignableSelected,
+      () => ({ path: '/assign', method: 'PATCH', body: { assigneeId: bulkAssignUserId, note: bulkAssignNote || undefined } }),
+    );
+  };
+
   const openBulkClaim = () => {
     setBulkClaimError('');
     setBulkClaimResults(null);
     setBulkClaimCode('');
+    setBulkClaimDept('');
     setBulkLookup({ state: 'idle', user: null });
     setBulkClaimOpen(true);
   };
@@ -610,7 +710,6 @@ export default function AssetRegistry() {
     if (!proxyOn) return undefined;
     const code = proxyCode.trim();
     if (!code) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setProxyLookup(null);
       return undefined;
     }
@@ -632,13 +731,11 @@ export default function AssetRegistry() {
         .catch(() => setProxyLookup({ ok: false, msg: 'ກວດລະຫັດບໍ່ສຳເລັດ' }));
     }, 400);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proxyOn, proxyCode, selectedDeptId, custodianId]);
 
   const bulkCodeTrim = bulkClaimCode.trim();
   useEffect(() => {
     if (!bulkClaimOpen || !canAssign || !bulkCodeTrim) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBulkLookup({ state: 'idle', user: null });
       return undefined;
     }
@@ -650,13 +747,12 @@ export default function AssetRegistry() {
         .catch(() => setBulkLookup({ state: 'error', user: null }));
     }, 400);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bulkCodeTrim, bulkClaimOpen, canAssign]);
 
   const confirmBulkClaim = () => {
-    const targetAssets = filteredAssets.filter((a) => selectedIds.has(a._id));
+    const targetAssets = filteredAssets.filter((a) => selectedIds.has(a._id) && a.status === 'AVAILABLE');
     if (targetAssets.length === 0) {
-      setBulkClaimError('ກະລຸນາເລືອກຊັບສິນຢ່າງໜ້ອຍ 1 ລາຍການ');
+      setBulkClaimError('ກະລຸນາເລືອກຊັບສິນທີ່ສະຖານະ "ວ່າງ" ຢ່າງໜ້ອຍ 1 ລາຍການ');
       return;
     }
     const code = bulkClaimCode.trim();
@@ -690,7 +786,7 @@ export default function AssetRegistry() {
           if (!res.ok) throw new Error(body?.msg || 'ບໍ່ສຳເລັດ');
           results.push({ assetTag: a.assetTag, ok: true });
         } catch (err) {
-          results.push({ assetTag: a.assetTag, ok: false, message: err.message });
+          results.push({ assetTag: a.assetTag, ok: false, message: /no approved supply request/i.test(err.message) ? 'ບໍ່ມີໃບຂໍທີ່ອະນຸມັດ' : err.message, noRequest: /no approved supply request/i.test(err.message) });
         }
       }
       setBulkClaimResults(results);
@@ -698,6 +794,67 @@ export default function AssetRegistry() {
       clearSelection();
       fetchAssets();
     })();
+  };
+
+  const vLine = (left, half) => (
+    <span className="absolute w-px bg-gray-300 pointer-events-none" style={{ left, top: 0, bottom: half ? '50%' : 0 }} />
+  );
+  const hTick = (left, width) => (
+    <span className="absolute h-px bg-gray-300 pointer-events-none" style={{ left, width, top: '50%' }} />
+  );
+  const renderAssetRow = (a, last, indent, grouped = false, parentLast = false) => {
+    const info = statusInfo(a.status);
+    const checkbox = canSelect ? (
+      <input
+        type="checkbox"
+        aria-label={`ເລືອກ ${a.assetTag}`}
+        checked={selectedIds.has(a._id)}
+        onChange={() => toggleSelect(a._id)}
+        className="rounded"
+      />
+    ) : null;
+    return (
+          <tr key={a._id} onClick={() => setDetailAssetId(a._id)} title="ກົດເພື່ອເບິ່ງລາຍລະອຽດ" className="hover:bg-amber-50/40 cursor-pointer">
+            {grouped ? (
+              <td className="p-3 relative" colSpan={2}>
+                {!parentLast && vLine(20, false)}
+                {vLine(56, last)}
+                {hTick(56, 12)}
+                <div className="flex items-center gap-2" style={{ paddingLeft: 60 }}>
+                  <span className="inline-block w-4 shrink-0" onClick={(e) => e.stopPropagation()}>{checkbox}</span>
+                  <span className="font-semibold text-gray-800">{a.assetTag}</span>
+                  {a.serialNumber && <span className="text-xs text-gray-400">S/N {a.serialNumber}</span>}
+                </div>
+              </td>
+            ) : (
+              <>
+                <td className="p-3" onClick={(e) => e.stopPropagation()}>{checkbox}</td>
+                <td className="p-3">
+                  <div className={`flex items-center gap-2 ${indent}`}>
+                    <span className="font-mono text-gray-300 select-none">{last ? '└─' : '├─'}</span>
+                    <span className="font-semibold text-gray-800">{a.assetTag}</span>
+                    {a.serialNumber && <span className="text-xs text-gray-400">S/N {a.serialNumber}</span>}
+                  </div>
+                </td>
+              </>
+            )}
+            <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
+            <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
+            <td className="p-3 text-gray-500">
+              {isDeptHeld(a) && a.currentAssigneeId ? (
+                <div>
+                  <span className="inline-block text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">ພະແນກ</span>{' '}
+                  <span className="font-medium text-gray-700">{deptName(a.departmentId)}</span>
+                  <div className="text-xs text-gray-400">ຜູ້ຮັບຜິດຊອບ: {userName(a.currentAssigneeId)}</div>
+                </div>
+              ) : (a.currentAssigneeId ? userName(a.currentAssigneeId) : '—')}
+            </td>
+            <td className="p-3 text-gray-500">{a.warrantyExpiry ? new Date(a.warrantyExpiry).toLocaleDateString() : '—'}</td>
+            <td className="p-3 text-center">
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">ເບິ່ງລາຍລະອຽດ<ChevronRight size={14} /></span>
+            </td>
+          </tr>
+    );
   };
 
   return (
@@ -766,7 +923,8 @@ export default function AssetRegistry() {
         </div>
 
         {activeTab === 'registry' && (
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm" style={{ overflow: 'clip' }}>
+            <div className="sticky top-16 z-[5] bg-white rounded-t-2xl shadow-sm">
             <div className="p-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[200px]">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -822,24 +980,41 @@ export default function AssetRegistry() {
                 <div className="text-sm text-blue-800">
                   ເລືອກແລ້ວ <span className="font-semibold">{selectedIds.size}</span> ລາຍການ
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={clearSelection}
-                    className="px-3 py-1.5 text-xs text-gray-600 hover:bg-white rounded-lg transition"
-                  >
-                    ລ້າງການເລືອກ
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openBulkClaim}
-                    className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition flex items-center gap-1.5 shadow-sm"
-                  >
-                    <UserCheck size={14} /> ຢືນຢັນຮັບເຄື່ອງທັງໝົດ
-                  </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={clearSelection} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-white rounded-lg transition">ລ້າງການເລືອກ</button>
+                  {selectedAssets.length === 1 && (
+                    <>
+                      <DetailBtn onClick={() => setHistoryModalAsset(selectedAssets[0])} Icon={History} label="ປະຫວັດການມອບໝາຍ" tone="gray" />
+                      <DetailBtn onClick={() => navigate(`/assets/${selectedAssets[0]._id}`)} Icon={ExternalLink} label="ເປີດໜ້າລາຍລະອຽດເຕັມ" tone="amber" />
+                    </>
+                  )}
+                  <DetailBtn onClick={() => setBulkPrintOpen(true)} Icon={Barcode} label="Barcode / QR" tone="gray" disabled={bulkOpBusy} />
+                  {canAssign && assignableSelected.length > 0 && (
+                    <DetailBtn onClick={() => { setBulkAssignUserId(''); setBulkUserSearch(''); setBulkUserDept(''); setBulkAssignNote(''); setBulkAssignError(''); setBulkAssignOpen(true); }} Icon={UserCheck} label={`ມອບໝາຍ (${assignableSelected.length})`} tone="blue" disabled={bulkOpBusy} />
+                  )}
+                  {canAssign && selectedAssets.some((a) => a.status === 'AVAILABLE') && (
+                    <DetailBtn onClick={openBulkClaim} Icon={UserCheck} label="ຢືນຢັນຮັບເຄື່ອງ" tone="blue" disabled={bulkOpBusy} />
+                  )}
+                  {canAssign && selectedAssets.some((a) => a.status === 'ASSIGNED') && (
+                    <DetailBtn onClick={bulkReturn} Icon={Undo2} label="ຮັບຄືນ" tone="green" disabled={bulkOpBusy} />
+                  )}
+                  {canUpdate && selectedAssets.some((a) => a.status !== 'RETIRED' && a.status !== 'UNDER_REPAIR') && (
+                    <DetailBtn onClick={bulkRepair} Icon={Wrench} label="ສົ່ງສ້ອມແປງ" tone="amber" disabled={bulkOpBusy} />
+                  )}
+                  {canUpdate && selectedAssets.some((a) => a.status === 'UNDER_REPAIR') && (
+                    <DetailBtn onClick={bulkFixed} Icon={CheckCircle2} label="ສ້ອມແລ້ວ" tone="green" disabled={bulkOpBusy} />
+                  )}
+                  {canUpdate && selectedAssets.some((a) => a.status !== 'RETIRED') && (
+                    <DetailBtn onClick={bulkRetire} Icon={Archive} label="ປົດລະວາງ / ເລີກໃຊ້" tone="gray" disabled={bulkOpBusy} />
+                  )}
+                  {canDelete && (
+                    <DetailBtn onClick={bulkDelete} Icon={Trash2} label="ລຶບ" tone="red" disabled={bulkOpBusy} />
+                  )}
                 </div>
               </div>
             )}
+
+            </div>
 
             {assetsError && <div className="p-4 text-sm text-red-600 flex items-center gap-2"><AlertCircle size={16} />{assetsError}</div>}
             <div className="overflow-x-auto">
@@ -847,7 +1022,7 @@ export default function AssetRegistry() {
                 <thead className="bg-gray-50 text-gray-500">
                   <tr>
                     <th className="p-3 w-10">
-                      {canAssign && <input
+                      {canSelect && <input
                         type="checkbox"
                         aria-label="ເລືອກທັງໝົດ"
                         checked={allVisibleSelected}
@@ -878,14 +1053,14 @@ export default function AssetRegistry() {
                   )}
                   {folders.map((f) => {
                     const open = isFolderOpen(f.key);
-                    const availIds = f.list.filter((a) => a.status === 'AVAILABLE').map((a) => a._id);
+                    const availIds = f.list.map((a) => a._id);
                     const allSel = availIds.length > 0 && availIds.every((id) => selectedIds.has(id));
                     const counts = f.list.reduce((m, a) => ({ ...m, [a.status]: (m[a.status] || 0) + 1 }), {});
                     return (
                       <Fragment key={f.key}>
                         <tr onClick={() => toggleFolder(f.key)} className="bg-gray-50/80 hover:bg-amber-50/50 cursor-pointer">
                           <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                            {canAssign && availIds.length > 0 && (
+                            {canSelect && availIds.length > 0 && (
                               <input
                                 type="checkbox"
                                 aria-label={`ເລືອກທີ່ວ່າງທັງໝົດໃນ ${f.key}`}
@@ -913,47 +1088,62 @@ export default function AssetRegistry() {
                           </td>
                           <td className="p-3 text-center text-xs font-medium text-gray-500">{f.list.length} ລາຍການ</td>
                         </tr>
-                        {open && f.list.map((a, idx) => {
-                          const info = statusInfo(a.status);
-                          const last = idx === f.list.length - 1;
-                          return (
-                            <tr key={a._id} onClick={() => setDetailAssetId(a._id)} title="ກົດເພື່ອເບິ່ງລາຍລະອຽດ" className="hover:bg-amber-50/40 cursor-pointer">
-                              <td className="p-3" onClick={(e) => e.stopPropagation()}>
-                                {canAssign && a.status === 'AVAILABLE' && (
-                                  <input
-                                    type="checkbox"
-                                    aria-label={`ເລືອກ ${a.assetTag}`}
-                                    checked={selectedIds.has(a._id)}
-                                    onChange={() => toggleSelect(a._id)}
-                                    className="rounded"
-                                  />
-                                )}
-                              </td>
-                              <td className="p-3">
-                                <div className="flex items-center gap-2 pl-7">
-                                  <span className="font-mono text-gray-300 select-none">{last ? '└─' : '├─'}</span>
-                                  <span className="font-semibold text-gray-800">{a.assetTag}</span>
-                                  {a.serialNumber && <span className="text-xs text-gray-400">S/N {a.serialNumber}</span>}
-                                </div>
-                              </td>
-                              <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
-                              <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
-                              <td className="p-3 text-gray-500">
-                                {isDeptHeld(a) && a.currentAssigneeId ? (
-                                  <div>
-                                    <span className="inline-block text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">ພະແນກ</span>{' '}
-                                    <span className="font-medium text-gray-700">{deptName(a.departmentId)}</span>
-                                    <div className="text-xs text-gray-400">ຜູ້ຮັບຜິດຊອບ: {userName(a.currentAssigneeId)}</div>
-                                  </div>
-                                ) : (a.currentAssigneeId ? userName(a.currentAssigneeId) : '—')}
-                              </td>
-                              <td className="p-3 text-gray-500">{a.warrantyExpiry ? new Date(a.warrantyExpiry).toLocaleDateString() : '—'}</td>
-                              <td className="p-3 text-center">
-                                <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">ເບິ່ງລາຍລະອຽດ<ChevronRight size={14} /></span>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {open && (f.groups
+                          ? f.groups.map((g) => {
+                              const subKey = `${f.key}::${g.key}`;
+                              const subOpen = !collapsedSubs.has(subKey);
+                              const gAvail = g.list.map((a) => a._id);
+                              const gAllSel = gAvail.length > 0 && gAvail.every((id) => selectedIds.has(id));
+                              return (
+                                <Fragment key={subKey}>
+                                  <tr onClick={() => toggleSub(subKey)} className="bg-white hover:bg-amber-50/40 cursor-pointer">
+                                    <td className="p-3 relative" colSpan={6}>
+                                      {vLine(20, g.last)}
+                                      {hTick(20, 12)}
+                                      <div className="flex items-center gap-2" style={{ paddingLeft: 26 }}>
+                                        <span className="inline-block w-4 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                          {canSelect && gAvail.length > 0 && (
+                                            <input
+                                              type="checkbox"
+                                              aria-label={`ເລືອກທີ່ວ່າງທັງໝົດໃນ ${g.label}`}
+                                              checked={gAllSel}
+                                              onChange={() => toggleFolderSelect(gAvail, gAllSel)}
+                                              className="rounded"
+                                            />
+                                          )}
+                                        </span>
+                                        {subOpen ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+                                        {subOpen ? <FolderOpen size={16} className={g.receipt ? 'text-emerald-500' : 'text-gray-400'} /> : <Folder size={16} className={g.receipt ? 'text-emerald-500' : 'text-gray-400'} />}
+                                        <span className={`font-semibold ${g.receipt ? 'text-gray-800' : 'text-gray-500'}`}>{g.label}</span>
+                                        {g.receipt && (
+                                          <span className="text-xs text-gray-400">
+                                            {g.receipt.receivedDate ? new Date(g.receipt.receivedDate).toLocaleDateString() : ''}
+                                            {g.receipt.vendor ? ` · ${g.receipt.vendor}` : ''}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {g.receipt && (
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px]" style={{ paddingLeft: 50 }}>
+                                          <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">ຈຳນວນ {g.receipt.quantity ?? g.list.length} ໜ່ວຍ</span>
+                                          {g.receipt.unitPrice != null && (
+                                            <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">ລາຄາ/ໜ່ວຍ {Number(g.receipt.unitPrice).toLocaleString()}</span>
+                                          )}
+                                          {g.receipt.totalPrice != null && (
+                                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">ລວມ {Number(g.receipt.totalPrice).toLocaleString()}</span>
+                                          )}
+                                          {g.receipt.createdBy && typeof g.receipt.createdBy === 'object' && (
+                                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">ບັນທຶກໂດຍ {userName(g.receipt.createdBy)}</span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-3 text-center text-xs font-medium text-gray-500">{g.list.length} ລາຍການ</td>
+                                  </tr>
+                                  {subOpen && g.list.map((a, i) => renderAssetRow(a, i === g.list.length - 1, '', true, g.last))}
+                                </Fragment>
+                              );
+                            })
+                          : f.list.map((a, i) => renderAssetRow(a, i === f.list.length - 1, 'pl-7')))}
                       </Fragment>
                     );
                   })}
@@ -1137,8 +1327,8 @@ export default function AssetRegistry() {
                             <input type="text" value={r.name} onChange={(e) => updateRow(r.id, { name: e.target.value })} placeholder="Laptop, ຈໍ, ບັດພະນັກງານ..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white" />
                           </div>
                           <div>
-                            <label className="block text-xs text-gray-500 mb-1">Asset Tag (ບໍ່ມີ Catalog = ຕ້ອງໃສ່, ຊິ້ນດຽວ)</label>
-                            <input type="text" value={r.assetTag} onChange={(e) => updateRow(r.id, { assetTag: e.target.value })} placeholder="A-1042" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white" />
+                            <label className="block text-xs text-gray-500 mb-1">Asset Tag (ບໍ່ມີ Catalog = ຕ້ອງໃສ່, 1 ແຖວ/ຄອມມາ ຕໍ່ 1 ຊິ້ນ) — {parseTags(r.assetTag).length}/{Math.floor(Number(r.qty) || 0)}</label>
+                            <textarea rows={Math.min(5, Math.max(2, Math.floor(Number(r.qty) || 1)))} value={r.assetTag} onChange={(e) => updateRow(r.id, { assetTag: e.target.value })} placeholder={'A-1042\nA-1043'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white font-mono" />
                           </div>
                         </div>
                       )}
@@ -1230,7 +1420,7 @@ export default function AssetRegistry() {
                     <div className="flex flex-wrap gap-2">
                       <DetailBtn onClick={() => setHistoryModalAsset(a)} Icon={History} label="ປະຫວັດການມອບໝາຍ" tone="gray" />
                       <DetailBtn onClick={() => setBarcodeModalAsset(a)} Icon={Barcode} label="Barcode / QR" tone="gray" />
-                      {canAssign && a.status !== 'RETIRED' && a.status !== 'ASSIGNED' && (
+                      {canAssign && a.status === 'AVAILABLE' && (
                         <DetailBtn onClick={() => openAssignModal(a)} Icon={UserCheck} label="ມອບໝາຍ" tone="blue" disabled={busy} />
                       )}
                       {canAssign && a.status === 'ASSIGNED' && (
@@ -1458,6 +1648,78 @@ export default function AssetRegistry() {
           </div>
         )}
 
+        {bulkPrintOpen && (
+          <AssetTagPrintModal assets={selectedAssets} claimBaseUrl={claimBaseUrl} onClose={() => setBulkPrintOpen(false)} />
+        )}
+
+        {bulkAssignOpen && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <form onSubmit={submitBulkAssign} className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-3">
+              <h2 className="text-lg font-bold text-gray-800">ມອບໝາຍ {assignableSelected.length} ລາຍການ</h2>
+              <p className="text-xs text-gray-500">ສະເພາະລາຍການທີ່ສະຖານະ "ວ່າງ" ເທົ່ານັ້ນ</p>
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-700">ພະນັກງານ</label>
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={bulkUserSearch}
+                    onChange={(e) => setBulkUserSearch(e.target.value)}
+                    placeholder="ຄົ້ນຫາຊື່ ຫຼື ລະຫັດພະນັກງານ..."
+                    className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-xl text-sm"
+                  />
+                </div>
+                <select value={bulkUserDept} onChange={(e) => setBulkUserDept(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm">
+                  <option value="">ທຸກພະແນກ</option>
+                  {departments.filter((d) => d.isActive !== false).map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
+                </select>
+                {(() => {
+                  const q = bulkUserSearch.trim().toLowerCase();
+                  const list = users.filter((u) => {
+                    if (!u.isActive) return false;
+                    if (bulkUserDept && userDeptId(u) !== bulkUserDept) return false;
+                    if (!q) return true;
+                    return `${u.firstName || ''} ${u.lastName || ''} ${u.employeeCode || ''}`.toLowerCase().includes(q);
+                  });
+                  return (
+                    <div className="border border-gray-200 rounded-xl max-h-52 overflow-y-auto divide-y divide-gray-100">
+                      {list.length === 0 && <div className="p-3 text-xs text-gray-400 text-center">ບໍ່ພົບພະນັກງານ</div>}
+                      {list.map((u) => {
+                        const on = bulkAssignUserId === u._id;
+                        return (
+                          <button
+                            key={u._id}
+                            type="button"
+                            onClick={() => setBulkAssignUserId(u._id)}
+                            className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 ${on ? 'bg-amber-50 text-amber-800' : 'hover:bg-gray-50 text-gray-700'}`}
+                          >
+                            <span>
+                              <span className="font-medium">{u.firstName} {u.lastName}</span>
+                              <span className="text-xs text-gray-400"> ({u.employeeCode})</span>
+                              <span className="block text-[11px] text-gray-400">{deptName(u.departmentId)}</span>
+                            </span>
+                            {on && <CheckCircle2 size={16} className="text-amber-500 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">ໝາຍເຫດ (ບໍ່ບັງຄັບ)</label>
+                <input type="text" value={bulkAssignNote} onChange={(e) => setBulkAssignNote(e.target.value)} className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm" />
+              </div>
+              {bulkAssignError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{bulkAssignError}</div>}
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setBulkAssignOpen(false)} className="px-4 py-2 text-sm text-gray-600">ຍົກເລີກ</button>
+                <button type="submit" className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium">ມອບໝາຍ</button>
+              </div>
+            </form>
+          </div>
+        )}
+
         {bulkClaimOpen && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl p-6 w-full max-w-md space-y-4 max-h-[85vh] overflow-y-auto">
@@ -1471,11 +1733,18 @@ export default function AssetRegistry() {
               {bulkClaimResults ? (
                 <div className="space-y-3">
                   <div className="text-center space-y-2 py-1">
-                    <CheckCircle2 size={40} className="mx-auto text-emerald-500" />
+                    {bulkClaimResults.some((r) => r.ok)
+                      ? <CheckCircle2 size={40} className="mx-auto text-emerald-500" />
+                      : <XCircle size={40} className="mx-auto text-red-500" />}
                     <div className="font-semibold text-gray-800">
                       ສຳເລັດ {bulkClaimResults.filter((r) => r.ok).length}/{bulkClaimResults.length} ລາຍການ
                     </div>
                   </div>
+                  {bulkClaimResults.some((r) => r.noRequest) && (
+                    <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      ພະນັກງານຄົນນີ້ບໍ່ມີໃບຂໍເບີກທີ່ອະນຸມັດແລ້ວ ແລະ ມີໂຄຕ້າເຫຼືອສຳລັບລາຍການນີ້ — ໃຫ້ຂໍ/ອະນຸມັດໃບຂໍກ່ອນ ແລ້ວຮັບເຄື່ອງຜ່ານໜ້າໃບຂໍ (ປຸ່ມ "ສະແກນເຄື່ອງ")
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     {bulkClaimResults.map((r, i) => (
                       <div
@@ -1504,8 +1773,8 @@ export default function AssetRegistry() {
                 <div className="space-y-3">
                   <p className="text-xs text-gray-500">
                     {canAssign
-                      ? `ຈະມອບໝາຍຊັບສິນ ${selectedIds.size} ລາຍການ ໃຫ້ຜູ້ທີ່ກຳລັງຈະມາຮັບ — ພິມລະຫັດພະນັກງານເພື່ອກວດຊື່ກ່ອນຢືນຢັນ:`
-                      : `ຈະມອບໝາຍຊັບສິນ ${selectedIds.size} ລາຍການ ໃຫ້ບັນຊີທີ່ກຳລັງ login ເທົ່ານັ້ນ:`}
+                      ? `ຈະມອບໝາຍຊັບສິນ ${claimableCount} ລາຍການ ໃຫ້ຜູ້ທີ່ກຳລັງຈະມາຮັບ — ພິມລະຫັດພະນັກງານເພື່ອກວດຊື່ກ່ອນຢືນຢັນ:`
+                      : `ຈະມອບໝາຍຊັບສິນ ${claimableCount} ລາຍການ ໃຫ້ບັນຊີທີ່ກຳລັງ login ເທົ່ານັ້ນ:`}
                   </p>
                   {canAssign && (
                     <div>
@@ -1514,10 +1783,50 @@ export default function AssetRegistry() {
                         type="text"
                         value={bulkClaimCode}
                         onChange={(e) => { setBulkClaimCode(e.target.value); setBulkClaimError(''); }}
-                        placeholder="ເຊັ່ນ USR200"
+                        placeholder="ຄົ້ນຫາຊື່ ຫຼື ລະຫັດພະນັກງານ ເຊັ່ນ USR200"
                         autoFocus
                         className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
                       />
+                      <select
+                        value={bulkClaimDept}
+                        onChange={(e) => setBulkClaimDept(e.target.value)}
+                        className="w-full mt-2 border border-gray-300 rounded-xl px-3 py-2 text-sm"
+                      >
+                        <option value="">ທຸກພະແນກ</option>
+                        {departments.filter((d) => d.isActive !== false).map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
+                      </select>
+                      {(() => {
+                        const q = bulkClaimCode.trim().toLowerCase();
+                        const list = users.filter((u) => {
+                          if (!u.isActive) return false;
+                          if (bulkClaimDept && userDeptId(u) !== bulkClaimDept) return false;
+                          if (!q) return true;
+                          return `${u.firstName || ''} ${u.lastName || ''} ${u.employeeCode || ''}`.toLowerCase().includes(q);
+                        });
+                        return (
+                          <div className="mt-2 border border-gray-200 rounded-xl max-h-44 overflow-y-auto divide-y divide-gray-100">
+                            {list.length === 0 && <div className="p-3 text-xs text-gray-400 text-center">ບໍ່ພົບພະນັກງານ</div>}
+                            {list.map((u) => {
+                              const on = bulkCodeTrim.toLowerCase() === String(u.employeeCode || '').toLowerCase();
+                              return (
+                                <button
+                                  key={u._id}
+                                  type="button"
+                                  onClick={() => { setBulkClaimCode(u.employeeCode || ''); setBulkClaimError(''); }}
+                                  className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 ${on ? 'bg-amber-50 text-amber-800' : 'hover:bg-gray-50 text-gray-700'}`}
+                                >
+                                  <span>
+                                    <span className="font-medium">{u.firstName} {u.lastName}</span>
+                                    <span className="text-xs text-gray-400"> ({u.employeeCode})</span>
+                                    <span className="block text-[11px] text-gray-400">{deptName(u.departmentId)}</span>
+                                  </span>
+                                  {on && <CheckCircle2 size={16} className="text-amber-500 shrink-0" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                   {canAssign && bulkCodeTrim && bulkLookup.state === 'found' && bulkLookup.user && (
@@ -1557,7 +1866,7 @@ export default function AssetRegistry() {
                     </div>
                     <div className="flex justify-between py-1">
                       <span className="text-gray-500">ຈຳນວນຊັບສິນ</span>
-                      <span className="font-medium text-gray-800">{selectedIds.size} ລາຍການ</span>
+                      <span className="font-medium text-gray-800">{claimableCount} ລາຍການ</span>
                     </div>
                   </div>
                   <div className="max-h-44 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-100">
@@ -1652,4 +1961,4 @@ export default function AssetRegistry() {
       </div>
     </MainLayout>
   );
-}
+}
