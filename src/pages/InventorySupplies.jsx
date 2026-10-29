@@ -1,12 +1,14 @@
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Package, Plus, CheckCircle, Clock, XCircle, PackageCheck, ScanLine, Camera, QrCode, Search, X, UserCheck } from 'lucide-react';
 import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
+import RequestProgress, { shouldHideProgress } from '../components/RequestProgress';
 import PurchaseRequestModal from '../components/PurchaseRequestModal';
 import axios from '../services/api';
 import { CatalogThumb, imageSrc } from '../components/CatalogImage';
+import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 
 const refId = (value) => (value && typeof value === 'object' ? value._id : value);
 const refName = (value) => {
@@ -62,7 +64,13 @@ export default function InventorySupplies() {
   const [items, setItems] = useState([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
   const [submitError, setSubmitError] = useState('');
   const [requestFor, setRequestFor] = useState('PERSON');
-  const [custodianCode, setCustodianCode] = useState('');
+  const [custodian, setCustodian] = useState(null);
+  const custodianCode = custodian?.employeeCode || '';
+  const [custPickerOpen, setCustPickerOpen] = useState(false);
+  const [custQuery, setCustQuery] = useState('');
+  const [custResults, setCustResults] = useState([]);
+  const [custLoading, setCustLoading] = useState(false);
+  const [custError, setCustError] = useState('');
   const [requestableDepartments, setRequestableDepartments] = useState([]);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
 
@@ -113,9 +121,10 @@ export default function InventorySupplies() {
   };
   const isPickupForOther = (req) => isMe(req.delegateId) && !isMe(req.requestedBy);
 
-  const fetchData = async () => {
+  const fetchData = async (opts) => {
+    const silent = opts?.silent === true;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const [reqRes, catRes, meRes, departmentsRes] = await Promise.all([
         axios.get('/supply-requests/my'),
         axios.get('/supply-catalog'),
@@ -147,12 +156,16 @@ export default function InventorySupplies() {
       });
     } catch (err) {
       console.error('Failed to fetch supply data', err);
-      setRequests([]);
-      setCatalog([]);
+      if (!silent) {
+        setRequests([]);
+        setCatalog([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  useRealtimeRefresh(() => fetchData({ silent: true }));
 
 useEffect(() => {
     fetchData();
@@ -164,14 +177,12 @@ useEffect(() => {
     }
   }, [searchParams.get('create')]);
 
-  // ຍົກເລີກການຜູກກັບໃບສະເໜີຊື້ຂອງແຖວນີ້ (ໃບສະເໜີຍັງຢູ່ ແຕ່ບໍ່ຜູກກັບຄຳຂໍນີ້ແລ້ວ)
   const clearPurchaseLink = (row) => {
     delete row.purchaseRequestId;
     delete row.purchaseRequestNo;
     delete row.purchaseQty;
   };
 
-  // ຄ່າທີ່ຜູກໄວ້ຍັງໃຊ້ໄດ້ບໍ: ຊື້ບໍ່ເກີນທີ່ຂໍ ແລະ ຄຸມສ່ວນທີ່ສະຕັອກບໍ່ພໍ (ຄືກັບທີ່ backend ກວດ)
   const purchaseLinkIssue = (row) => {
     if (!row.purchaseRequestId) return '';
     const qty = parseInt(row.quantity, 10) || 0;
@@ -208,15 +219,65 @@ useEffect(() => {
     setShopCategory('');
     setCustomName('');
     setRequestFor('PERSON');
-    setCustodianCode('');
+    setCustodian(null);
+    setCustPickerOpen(false);
+    setCustQuery('');
+    setCustResults([]);
+    setCustError('');
   };
+
+  const meAsCustodian = () =>
+    me?.employeeCode ? { employeeCode: me.employeeCode, name: refName(me) } : null;
 
   const chooseDepartmentRequest = () => {
     setRequestFor('DEPARTMENT');
-    if (!custodianCode.trim()) setCustodianCode(me?.employeeCode || '');
+    if (!custodian) setCustodian(meAsCustodian());
   };
 
-  // ── ກະຕ່າສິນຄ້າ (ຂັ້ນຕອນທີ 1) ──
+  const changeRequestDepartment = (departmentId) => {
+    setSelectedDepartmentId(departmentId);
+    setCustodian(meAsCustodian());
+    setCustPickerOpen(false);
+    setCustQuery('');
+    setCustResults([]);
+  };
+
+  const pickCustodian = (u) => {
+    setCustodian({ employeeCode: u.employeeCode, name: refName(u) });
+    setCustPickerOpen(false);
+    setCustQuery('');
+  };
+
+  useEffect(() => {
+    if (!isModalOpen || requestFor !== 'DEPARTMENT' || !custPickerOpen || !selectedDepartmentId) {
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setCustLoading(true);
+        setCustError('');
+        const res = await axios.get('/supply-requests/custodian-candidates', {
+          params: { departmentId: selectedDepartmentId, q: custQuery.trim() || undefined },
+        });
+        if (cancelled) return;
+        const body = res.data?.data !== undefined ? res.data.data : res.data;
+        setCustResults(body?.users || []);
+      } catch (err) {
+        if (!cancelled) {
+          setCustResults([]);
+          setCustError(err.response?.data?.msg || err.response?.data?.message || 'ໂຫຼດລາຍຊື່ບໍ່ສຳເລັດ');
+        }
+      } finally {
+        if (!cancelled) setCustLoading(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isModalOpen, requestFor, custPickerOpen, selectedDepartmentId, custQuery]);
+
   const shopAdd = (c) =>
     setItems((prev) => {
       const base = prev.filter((it) => !isBlankRow(it));
@@ -268,7 +329,6 @@ useEffect(() => {
         }
         const qty = parseInt(it.quantity, 10) || 1;
         const name = String(it.name || '').trim();
-        // ແຖວທີ່ຜູກໃບສະເໜີຊື້ ບໍ່ລວມກັບແຖວອື່ນ (ຈຳນວນຊື້ຜູກກັບຈຳນວນຂໍຂອງແຖວນັ້ນ)
         const prev =
           it.catalogItemId && !it.purchaseRequestId
             ? merged.find((m) => m.catalogItemId === it.catalogItemId && !m.purchaseRequestId)
@@ -305,7 +365,7 @@ useEffect(() => {
           return;
         }
         if (!custodianCode.trim()) {
-          setSubmitError('ກະລຸນາລະບຸລະຫັດພະນັກງານຜູ້ຮັບຜິດຊອບຂອງແຜນກ');
+          setSubmitError('ກະລຸນາເລືອກຜູ້ຮັບຜິດຊອບຂອງແຜນກ');
           return;
         }
       }
@@ -812,8 +872,8 @@ useEffect(() => {
                 </tr>
               ) : visibleRequests.length > 0 ? (
                 visibleRequests.map((req) => (
+                  <Fragment key={req._id}>
                   <tr
-                    key={req._id}
                     onClick={() => setDetailId(req._id)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) setDetailId(req._id); }}
                     tabIndex={0}
@@ -877,6 +937,18 @@ useEffect(() => {
                       )}
                     </td>
                   </tr>
+                  {!shouldHideProgress(req) && (
+                    <tr
+                      onClick={() => setDetailId(req._id)}
+                      style={{ borderTopWidth: 0 }}
+                      className="hover:bg-gray-50 cursor-pointer"
+                    >
+                      <td colSpan="5" className="px-4 pb-4 pt-0">
+                        <RequestProgress req={req} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))
               ) : (
                 <tr>
@@ -1182,7 +1254,6 @@ useEffect(() => {
           return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4">
               <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-xl">
-                {/* ຫົວ + ຂັ້ນຕອນ */}
                 <div className="px-6 pt-5 pb-4 border-b border-gray-100">
                   <div className="flex justify-between items-center">
                     <h2 className="text-lg font-bold text-gray-800">ສ້າງຄຳຂໍເບີກອຸປະກອນ</h2>
@@ -1326,7 +1397,6 @@ useEffect(() => {
                       </div>
                     </div>
 
-                    {/* ແຖບກະຕ່າ */}
                     <div className="px-6 py-3 border-t border-gray-100 bg-white flex items-center justify-between gap-3">
                       <div className="text-sm text-gray-600">
                         {cartRows.length === 0 ? (
@@ -1351,7 +1421,6 @@ useEffect(() => {
                 ) : (
                   <form onSubmit={handleSubmitRequest} className="flex-1 min-h-0 flex flex-col">
                     <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
-                      {/* ລາຍການທີ່ເລືອກ */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ລາຍການທີ່ເລືອກ ({cartRows.length})</div>
@@ -1437,7 +1506,6 @@ useEffect(() => {
                         })}
                       </div>
 
-                      {/* ຂໍໃຫ້ໃຜ */}
                       <div className="rounded-xl border border-gray-200 p-3 space-y-3">
                         <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ຂໍໃນນາມ</div>
                         <div className="flex gap-2">
@@ -1470,7 +1538,7 @@ useEffect(() => {
                                 <select
                                   required
                                   value={selectedDepartmentId}
-                                  onChange={(e) => setSelectedDepartmentId(e.target.value)}
+                                  onChange={(e) => changeRequestDepartment(e.target.value)}
                                   className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white"
                                 >
                                   <option value="">-- ເລືອກພະແນກ --</option>
@@ -1486,17 +1554,89 @@ useEffect(() => {
                               ແຜນກ: <b>{myDepartmentName || 'ກະລຸນາເລືອກພະແນກ'}</b> — ຊັບສິນທີ່ໄດ້ຮັບຈະຂຶ້ນກັບແຜນກ ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບທີ່ລະບຸ
                             </div>
                             <div>
-                              <label className="block text-xs text-gray-500 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບຜິດຊອບ *</label>
-                              <input
-                                type="text"
-                                required
-                                value={custodianCode}
-                                onChange={(e) => setCustodianCode(e.target.value)}
-                                placeholder="ລະຫັດພະນັກງານ..."
-                                className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white tracking-widest"
-                              />
+                              <label className="block text-xs text-gray-500 mb-1">ຜູ້ຮັບຜິດຊອບ *</label>
+                              {custodian ? (
+                                <div className="flex items-center justify-between gap-3 border border-gray-200 rounded-lg p-2.5 bg-white">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-medium text-gray-800 truncate">
+                                      {custodian.name || custodian.employeeCode}
+                                      <span className="ml-1 font-mono text-xs text-gray-400">({custodian.employeeCode})</span>
+                                    </div>
+                                    {custodian.employeeCode === me?.employeeCode && (
+                                      <div className="text-[11px] text-violet-600">ທ່ານເອງ (ຄ່າເລີ່ມຕົ້ນ)</div>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setCustPickerOpen((v) => !v)}
+                                    className="shrink-0 text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                                  >
+                                    {custPickerOpen ? 'ປິດ' : 'ປ່ຽນຄົນ'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={!selectedDepartmentId}
+                                  onClick={() => setCustPickerOpen(true)}
+                                  className="w-full text-sm px-3 py-2 rounded-lg border border-dashed border-violet-300 text-violet-700 hover:bg-violet-50 disabled:opacity-40"
+                                >
+                                  + ເລືອກຜູ້ຮັບຜິດຊອບ
+                                </button>
+                              )}
+
+                              {custPickerOpen && (
+                                <div className="mt-2 space-y-2">
+                                  <div className="relative">
+                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                    <input
+                                      type="text"
+                                      autoFocus
+                                      value={custQuery}
+                                      onChange={(e) => setCustQuery(e.target.value)}
+                                      placeholder="ຄົ້ນຫາຊື່ ຫຼື ລະຫັດພະນັກງານ..."
+                                      className="w-full border border-gray-200 rounded-lg pl-8 pr-3 py-2 text-sm bg-white"
+                                    />
+                                  </div>
+                                  {custError && (
+                                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{custError}</div>
+                                  )}
+                                  <ul className="max-h-48 overflow-y-auto divide-y divide-gray-100 border border-gray-100 rounded-lg bg-white">
+                                    {custLoading && custResults.length === 0 ? (
+                                      <li className="p-3 text-xs text-gray-400 text-center">ກຳລັງຄົ້ນຫາ...</li>
+                                    ) : custResults.length === 0 ? (
+                                      <li className="p-3 text-xs text-gray-400 text-center">ບໍ່ພົບຄົນທີ່ຕົງກັບການຄົ້ນຫາ</li>
+                                    ) : (
+                                      custResults.map((u) => {
+                                        const isCurrent = u.employeeCode === custodianCode;
+                                        return (
+                                          <li key={u._id}>
+                                            <button
+                                              type="button"
+                                              onClick={() => pickCustodian(u)}
+                                              className={`w-full text-left flex items-center justify-between gap-3 p-2.5 text-sm hover:bg-violet-50 ${
+                                                isCurrent ? 'bg-violet-50' : ''
+                                              }`}
+                                            >
+                                              <span className="min-w-0">
+                                                <span className="block font-medium text-gray-800 truncate">
+                                                  {refName(u)} <span className="font-mono text-xs text-gray-400">({u.employeeCode})</span>
+                                                </span>
+                                                {u.departmentId?.name && (
+                                                  <span className="block text-[11px] text-gray-500">{u.departmentId.name}</span>
+                                                )}
+                                              </span>
+                                              {isCurrent && <span className="shrink-0 text-[11px] text-violet-600 font-medium">ເລືອກແລ້ວ</span>}
+                                            </button>
+                                          </li>
+                                        );
+                                      })
+                                    )}
+                                  </ul>
+                                </div>
+                              )}
                               <p className="text-[11px] text-gray-400 mt-1">
-                                ຕ້ອງເປັນສະມາຊິກ ຫຼື ຫົວໜ້າຂອງແຜນກນີ້ — ຄ່າເລີ່ມຕົ້ນແມ່ນລະຫັດຂອງທ່ານ
+                                ເລືອກໄດ້ສະເພາະສະມາຊິກ ຫຼື ຫົວໜ້າຂອງແຜນກນີ້ — ຄ່າເລີ່ມຕົ້ນແມ່ນຕົວທ່ານເອງ
                               </p>
                             </div>
                           </>
@@ -1554,7 +1694,6 @@ useEffect(() => {
               const rowIndex = restockPrefill.itemIndex;
               setRestockPrefill(null);
               if (pr?._id && Number.isInteger(rowIndex)) {
-                // ຜູກໃບສະເໜີຊື້ກັບແຖວນີ້ — ຈະຖືກບັນທຶກພ້ອມຄຳຂໍເບີກຕອນກົດ "ສົ່ງຄຳຂໍ"
                 setItems((prev) =>
                   prev.map((row, i) =>
                     i === rowIndex

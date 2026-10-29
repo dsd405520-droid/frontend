@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Printer, ScanLine, CheckCircle2, AlertCircle, Package } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -17,7 +17,6 @@ const STATUS_LABEL = {
   REJECTED: { text: 'ຖືກປະຕິເສດ', className: 'bg-rose-50 text-rose-600 border-rose-200' },
 };
 
-// ໃບຮັບເຄື່ອງ 1 ໃບ ຕໍ່ 1 ໃບຂໍ — QR ຂອງໜ້ານີ້ = ເລກໃບຂໍ. ຜູ້ຂໍສະແກນ (login ຢູ່ແລ້ວ) ແລ້ວຢືນຢັນຮັບທຸກລາຍການໃນຄັ້ງດຽວ
 export default function SupplyReceipt() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -32,10 +31,10 @@ export default function SupplyReceipt() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
-  const [tags, setTags] = useState([]); // asset tag ຫຼື _id ທີ່ສະແກນ/ພິມ
-  const [tagInput, setTagInput] = useState('');
-  const [confirmConsumables, setConfirmConsumables] = useState(false);
-  const [scannerOpen, setScannerOpen] = useState(false);
+  const [tagsByItem, setTagsByItem] = useState({});
+  const [tagInputs, setTagInputs] = useState({});
+  const [checkedConsumables, setCheckedConsumables] = useState({});
+  const [scanTarget, setScanTarget] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [done, setDone] = useState(false);
@@ -65,9 +64,13 @@ export default function SupplyReceipt() {
   }, [id]);
 
   const items = receipt?.items || [];
-  const taggedItems = items.filter((i) => i.requiresAssetTag);
-  const consumableItems = items.filter((i) => !i.requiresAssetTag);
-  const requiredTagCount = taggedItems.reduce((sum, i) => sum + (i.quantity || 0), 0);
+  const entries = items.map((it, k) => ({ it, k }));
+  const taggedEntries = entries.filter((e) => e.it.requiresAssetTag);
+  const consumableEntries = entries.filter((e) => !e.it.requiresAssetTag);
+  const requiredTagCount = taggedEntries.reduce((sum, e) => sum + (e.it.quantity || 0), 0);
+  const tags = Object.values(tagsByItem).flat();
+  const allConsumablesChecked = consumableEntries.every((e) => checkedConsumables[e.k]);
+  const allTagsDone = taggedEntries.every((e) => (tagsByItem[e.k] || []).length >= (e.it.quantity || 0));
 
   const requester = receipt?.requestedBy && typeof receipt.requestedBy === 'object' ? receipt.requestedBy : null;
   const requesterName = requester
@@ -85,29 +88,38 @@ export default function SupplyReceipt() {
   const isDepartmentRequest = !!receipt?.isDepartmentRequest;
   const receiverName = isDepartmentRequest ? custodianName : requesterName;
 
-  const addTag = (raw) => {
+  const addTag = (raw, k) => {
     let value = String(raw || '').trim();
-    if (!value) return;
-    // QR ຂອງຊັບສິນເປັນລິ້ງ …/assets/<_id>?claim=1 → ເອົາ _id
+    if (!value || k === null || k === undefined) return;
     const m = value.match(/\/assets\/([A-Za-z0-9_-]+)/);
     if (m) value = m[1];
-    setTags((prev) => (prev.some((t) => t.toLowerCase() === value.toLowerCase()) ? prev : [...prev, value]));
+    const quantity = items[k]?.quantity || 0;
+    setTagsByItem((prev) => {
+      const current = prev[k] || [];
+      const exists = Object.values(prev).flat().some((t) => t.toLowerCase() === value.toLowerCase());
+      if (exists || current.length >= quantity) return prev;
+      return { ...prev, [k]: [...current, value] };
+    });
     setSubmitError('');
   };
 
-  // ສະແກນຄົບຕາມຈຳນວນທີ່ຂໍ → ປິດກ້ອງອັດຕະໂນມັດ (ໜ່ວງສັ້ນໆ ໃຫ້ເຫັນ ✓ ສະແກນແລ້ວ ກ່ອນ)
-  const prevTagCount = useRef(0);
+  const scanCount = scanTarget === null ? 0 : (tagsByItem[scanTarget] || []).length;
+  const scanQuantity = scanTarget === null ? 0 : items[scanTarget]?.quantity || 0;
   useEffect(() => {
-    const reached = prevTagCount.current < requiredTagCount && tags.length >= requiredTagCount;
-    prevTagCount.current = tags.length;
-    if (!scannerOpen || requiredTagCount <= 0 || !reached) return undefined;
-    const t = setTimeout(() => setScannerOpen(false), 700);
+    if (scanTarget === null || scanQuantity <= 0 || scanCount < scanQuantity) return undefined;
+    const t = setTimeout(() => setScanTarget(null), 700);
     return () => clearTimeout(t);
-  }, [tags, requiredTagCount, scannerOpen]);
+  }, [scanTarget, scanCount, scanQuantity]);
 
-  const removeTag = (value) => setTags((prev) => prev.filter((t) => t !== value));
+  const removeTag = (k, value) =>
+    setTagsByItem((prev) => ({ ...prev, [k]: (prev[k] || []).filter((t) => t !== value) }));
 
-  // ຜູ້ຂໍກຳນົດ/ປ່ຽນ/ລຶບ ຜູ້ຮັບແທນ (1 ຄົນ) — ສົ່ງ null ເພື່ອລຶບ
+  const toggleConsumable = (k) => setCheckedConsumables((prev) => ({ ...prev, [k]: !prev[k] }));
+  const toggleAllConsumables = () => {
+    const next = !allConsumablesChecked;
+    setCheckedConsumables(Object.fromEntries(consumableEntries.map((e) => [e.k, next])));
+  };
+
   const saveDelegate = async (code) => {
     setDelegateError('');
     setDelegateSaving(true);
@@ -127,13 +139,10 @@ export default function SupplyReceipt() {
     setSubmitting(true);
     try {
       const payload = { assetTags: tags };
-      if (consumableItems.length > 0) payload.confirmConsumables = confirmConsumables;
-      // ເຈົ້າໜ້າທີ່ສາງຢືນຢັນແທນຜູ້ຂໍ → ລະບຸລະຫັດຜູ້ຂໍເປັນຜູ້ຮັບ
-      // (ໃບຂອງແຜນກ: ບໍ່ສົ່ງ assigneeCode — Backend ຈະມອບໃຫ້ຜູ້ຮັບຜິດຊອບຂອງແຜນກ)
+      if (consumableEntries.length > 0) payload.confirmConsumables = allConsumablesChecked;
       if (!isDepartmentRequest && !receipt.isRequester && requester?.employeeCode) {
         payload.assigneeCode = requester.employeeCode;
       }
-      // ເຈົ້າໜ້າທີ່ສາງທີ່ບໍ່ແມ່ນຜູ້ຂໍ/ຜູ້ຮັບແທນ → override ຕ້ອງມີເຫດຜົນ (ບັນທຶກ audit + ແຈ້ງຜູ້ຂໍ)
       if (receipt.requiresOverride) payload.overrideReason = overrideReason.trim();
       await axios.patch(`/supply-requests/${id}/receive`, payload);
       setDone(true);
@@ -156,8 +165,8 @@ export default function SupplyReceipt() {
     receipt?.canConfirm &&
     !submitting &&
     (!receipt.requiresOverride || overrideReason.trim().length >= 5) &&
-    (requiredTagCount === 0 || tags.length >= requiredTagCount) &&
-    (consumableItems.length === 0 || confirmConsumables);
+    allTagsDone &&
+    allConsumablesChecked;
 
   return (
     <MainLayout>
@@ -433,76 +442,105 @@ export default function SupplyReceipt() {
                   </div>
                 )}
 
-                {taggedItems.length > 0 && (
+                {taggedEntries.length > 0 && (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-semibold text-gray-700">
-                        ຂອງມີ Asset Tag — ສະແກນ {tags.length}/{requiredTagCount} ຊິ້ນ
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setScannerOpen(true)}
-                        className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-medium"
-                      >
-                        <ScanLine size={14} /> ສະແກນ QR / ບາໂຄ໊ດ
-                      </button>
+                    <div className="text-sm font-semibold text-gray-700">
+                      ຂອງມີ Asset Tag — ສະແກນ {tags.length}/{requiredTagCount} ຊິ້ນ
                     </div>
-                    <ul className="text-xs text-gray-500 list-disc pl-5">
-                      {taggedItems.map((it, k) => (
-                        <li key={k}>{it.name} × {it.quantity}</li>
-                      ))}
-                    </ul>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={tagInput}
-                        onChange={(e) => setTagInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            addTag(tagInput);
-                            setTagInput('');
-                          }
-                        }}
-                        placeholder="ພິມ Asset Tag ແລ້ວກົດ Enter (ຫຼື ສະແກນ)"
-                        className="flex-1 border border-gray-200 rounded-lg p-2 text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => { addTag(tagInput); setTagInput(''); }}
-                        className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg"
-                      >
-                        ເພີ່ມ
-                      </button>
-                    </div>
-                    {tags.length > 0 && (
-                      <div className="flex flex-wrap gap-2">
-                        {tags.map((t) => (
-                          <span key={t} className="inline-flex items-center gap-1 text-xs font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2.5 py-1">
-                            {t}
-                            <button type="button" onClick={() => removeTag(t)} className="text-emerald-400 hover:text-red-500" aria-label={`ລຶບ ${t}`}>✕</button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    {taggedEntries.map(({ it, k }) => {
+                      const list = tagsByItem[k] || [];
+                      const full = list.length >= (it.quantity || 0);
+                      const input = tagInputs[k] || '';
+                      const submitInput = () => {
+                        addTag(input, k);
+                        setTagInputs((prev) => ({ ...prev, [k]: '' }));
+                      };
+                      return (
+                        <div
+                          key={k}
+                          className={`border rounded-xl p-3 space-y-2 ${full ? 'border-emerald-200 bg-emerald-50/40' : 'border-gray-200'}`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-gray-800 truncate">{it.name}</div>
+                              <div className={`text-xs ${full ? 'text-emerald-600' : 'text-gray-500'}`}>
+                                {full ? '✓ ' : ''}ສະແກນແລ້ວ {list.length}/{it.quantity} ຊິ້ນ
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={full}
+                              onClick={() => setScanTarget(k)}
+                              className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-medium disabled:opacity-40"
+                            >
+                              <ScanLine size={14} /> ສະແກນ QR / ບາໂຄ໊ດ
+                            </button>
+                          </div>
+                          {!full && (
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={input}
+                                onChange={(e) => setTagInputs((prev) => ({ ...prev, [k]: e.target.value }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    submitInput();
+                                  }
+                                }}
+                                placeholder="ພິມ Asset Tag ແລ້ວກົດ Enter (ຫຼື ສະແກນ)"
+                                className="flex-1 border border-gray-200 rounded-lg p-2 text-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={submitInput}
+                                className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg"
+                              >
+                                ເພີ່ມ
+                              </button>
+                            </div>
+                          )}
+                          {list.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {list.map((t) => (
+                                <span key={t} className="inline-flex items-center gap-1 text-xs font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2.5 py-1">
+                                  {t}
+                                  <button type="button" onClick={() => removeTag(k, t)} className="text-emerald-400 hover:text-red-500" aria-label={`ລຶບ ${t}`}>✕</button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
-                {consumableItems.length > 0 && (
-                  <label className="flex items-start gap-3 text-sm bg-gray-50 border border-gray-200 rounded-xl p-4 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={confirmConsumables}
-                      onChange={(e) => setConfirmConsumables(e.target.checked)}
-                      className="mt-0.5 rounded"
-                    />
-                    <span>
-                      ໄດ້ຮັບຂອງໃຊ້ສິ້ນເປືອງຄົບຕາມຈຳນວນ:
-                      <span className="block text-xs text-gray-500 mt-0.5">
-                        {consumableItems.map((i) => `${i.name} × ${i.quantity}`).join(', ')}
-                      </span>
-                    </span>
-                  </label>
+                {consumableEntries.length > 0 && (
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 bg-gray-50 px-4 py-2.5">
+                      <div className="text-sm font-semibold text-gray-700">
+                        ຂອງໃຊ້ສິ້ນເປືອງ — ຕິກຮັບທີ່ລະລາຍການ ({consumableEntries.filter((e) => checkedConsumables[e.k]).length}/{consumableEntries.length})
+                      </div>
+                      <button type="button" onClick={toggleAllConsumables} className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+                        {allConsumablesChecked ? 'ຍົກເລີກທັງໝົດ' : 'ຕິກທັງໝົດ'}
+                      </button>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {consumableEntries.map(({ it, k }) => (
+                        <label key={k} className="flex items-start gap-3 text-sm px-4 py-3 cursor-pointer hover:bg-gray-50/60">
+                          <input
+                            type="checkbox"
+                            checked={!!checkedConsumables[k]}
+                            onChange={() => toggleConsumable(k)}
+                            className="mt-0.5 rounded"
+                          />
+                          <span className="flex-1 min-w-0 text-gray-800">{it.name}</span>
+                          <span className="shrink-0 font-semibold text-gray-700">× {it.quantity}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {submitError && (
@@ -522,13 +560,13 @@ export default function SupplyReceipt() {
           </>
         )}
 
-        {scannerOpen && (
+        {scanTarget !== null && (
           <CameraScanner
             continuous
-            title="ສະແກນ Asset Tag"
-            hint="ຈ່ອງກ້ອງໃສ່ QR/ບາໂຄ໊ດຂອງເຄື່ອງ — ສະແກນໄດ້ຫຼາຍຊິ້ນຕິດຕໍ່ກັນ"
-            onScan={addTag}
-            onClose={() => setScannerOpen(false)}
+            title={`ສະແກນ Asset Tag — ${items[scanTarget]?.name || ''}`}
+            hint={`ສະແກນແລ້ວ ${scanCount}/${scanQuantity} ຊິ້ນ — ສະແກນໄດ້ຫຼາຍຊິ້ນຕິດຕໍ່ກັນ`}
+            onScan={(v) => addTag(v, scanTarget)}
+            onClose={() => setScanTarget(null)}
           />
         )}
       </div>

@@ -6,6 +6,7 @@ import api from '../services/api';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
 import PurchaseRequestModal from '../components/PurchaseRequestModal';
 import PurchaseRequestDetailModal from '../components/PurchaseRequestDetailModal';
+import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 
 const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
 const STATUS = {
@@ -49,20 +50,24 @@ export default function PurchaseRequests() {
 
   const approving = tab === 'APPROVING';
 
-  const fetchPendingCount = async () => {
+  const fetchPendingCount = async (opts) => {
     try {
       const res = await api.get('/purchase-requests', { params: { status: 'PENDING' } });
       const list = unwrap(res.data);
       setPendingCount(Array.isArray(list) ? list.length : 0);
     } catch {
-      setPendingCount(0);
+      if (opts?.silent !== true) setPendingCount(0);
     }
   };
 
-  const fetchRows = async () => {
+  // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner ແລະບໍ່ລ້າງລາຍການຖ້າ error
+  const fetchRows = async (opts) => {
+    const silent = opts?.silent === true;
     try {
-      setLoading(true);
-      setLoadError('');
+      if (!silent) {
+        setLoading(true);
+        setLoadError('');
+      }
       const params = {};
       if (approving) params.status = 'PENDING';
       else if (status) params.status = status;
@@ -70,13 +75,16 @@ export default function PurchaseRequests() {
       const res = await api.get('/purchase-requests', { params });
       const list = unwrap(res.data);
       setRows(Array.isArray(list) ? list : []);
+      setLoadError('');
     } catch (err) {
-      setLoadError(errText(err, 'ໂຫຼດໃບສະເໜີບໍ່ສຳເລັດ'));
-      setRows([]);
+      if (!silent) {
+        setLoadError(errText(err, 'ໂຫຼດໃບສະເໜີບໍ່ສຳເລັດ'));
+        setRows([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-    fetchPendingCount();
+    await fetchPendingCount({ silent });
   };
 
   useEffect(() => {
@@ -90,6 +98,20 @@ export default function PurchaseRequests() {
       .then((res) => setCatalog(Array.isArray(unwrap(res.data)) ? unwrap(res.data) : []))
       .catch(() => setCatalog([]));
   }, []);
+
+  // ໃບສະເໜີຊື້/ການຮັບເຄື່ອງ/catalog ປ່ຽນຈາກຜູ້ໃຊ້ອື່ນ ຫຼື ໜ້າອື່ນ → ດຶງໃໝ່ທັນທີ ບໍ່ຕ້ອງ reload
+  useRealtimeRefresh(() =>
+    Promise.all([
+      fetchRows({ silent: true }),
+      api
+        .get('/supply-catalog')
+        .then((res) => {
+          const list = unwrap(res.data);
+          if (Array.isArray(list)) setCatalog(list);
+        })
+        .catch(() => {}),
+    ]),
+  );
 
   const flash = (msg) => {
     setSuccess(msg);

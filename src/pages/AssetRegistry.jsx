@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Plus, X, AlertCircle, Search, UserCheck, Undo2,
   Wrench, History, AlertTriangle, Trash2, Barcode, Archive, Camera,
-  CheckCircle2, XCircle, Folder, FolderOpen, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ExternalLink,
+  CheckCircle2, XCircle, Folder, FolderOpen, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, ExternalLink, FileText, FileSpreadsheet,
 } from 'lucide-react';
 import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
@@ -15,6 +15,8 @@ import AssetTimeline from '../components/AssetTimeline';
 import { CatalogThumb } from '../components/CatalogImage';
 import AssetTagPrintModal from '../components/AssetTagPrintModal';
 import { API_BASE_URL } from '../config';
+import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
+import { buildAssetExport, downloadAssetCsv, printAssetPdf } from '../utils/assetExport';
 
 function DetailField({ label, children, wide }) {
   return (
@@ -131,6 +133,7 @@ export default function AssetRegistry() {
   const [busyId, setBusyId] = useState(null);
   const [expandedFolders, setExpandedFolders] = useState(() => new Set());
   const [detailAssetId, setDetailAssetId] = useState(null);
+  const [exportingAssetId, setExportingAssetId] = useState(null);
   const [receipts, setReceipts] = useState(null);
   const [collapsedSubs, setCollapsedSubs] = useState(() => new Set());
 
@@ -160,18 +163,26 @@ export default function AssetRegistry() {
     return body?.data !== undefined ? body.data : body;
   }
 
-  function fetchAssets() {
-    setLoadingAssets(true);
-    setAssetsError('');
+  function fetchAssets(opts) {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoadingAssets(true);
+      setAssetsError('');
+    }
     const branchParam = branchFilter ? `?branchId=${encodeURIComponent(branchFilter)}` : '';
-    fetch(`${API_BASE_URL}/assets${branchParam}`, { headers })
+    return fetch(`${API_BASE_URL}/assets${branchParam}`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດທະບຽນຊັບສິນໄດ້');
         setAssets(unwrap(body) || []);
+        setAssetsError('');
       })
-      .catch((err) => setAssetsError(err.message))
-      .finally(() => setLoadingAssets(false));
+      .catch((err) => {
+        if (!silent) setAssetsError(err.message);
+      })
+      .finally(() => {
+        if (!silent) setLoadingAssets(false);
+      });
   }
 
   function fetchBranches() {
@@ -195,18 +206,24 @@ export default function AssetRegistry() {
       .catch(() => setDepartments([]));
   }
 
-  function fetchCatalog() {
-    fetch(`${API_BASE_URL}/supply-catalog`, { headers })
+  function fetchCatalog(opts) {
+    const silent = opts?.silent === true;
+    return fetch(`${API_BASE_URL}/supply-catalog`, { headers })
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((body) => setCatalog(unwrap(body) || []))
-      .catch(() => setCatalog([]));
+      .catch(() => {
+        if (!silent) setCatalog([]);
+      });
   }
 
-  function fetchReceipts() {
-    fetch(`${API_BASE_URL}/goods-receipt`, { headers })
+  function fetchReceipts(opts) {
+    const silent = opts?.silent === true;
+    return fetch(`${API_BASE_URL}/goods-receipt`, { headers })
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((body) => setReceipts(Array.isArray(unwrap(body)) ? unwrap(body) : null))
-      .catch(() => setReceipts(null));
+      .catch(() => {
+        if (!silent) setReceipts(null);
+      });
   }
 
   const resetBatch = () => {
@@ -228,18 +245,35 @@ export default function AssetRegistry() {
     setShowCreateModal(true);
   };
 
-  function fetchOverdue() {
-    setLoadingOverdue(true);
-    setOverdueError('');
-    fetch(`${API_BASE_URL}/assets/overdue`, { headers })
+  function fetchOverdue(opts) {
+    const silent = opts?.silent === true;
+    if (!silent) {
+      setLoadingOverdue(true);
+      setOverdueError('');
+    }
+    return fetch(`${API_BASE_URL}/assets/overdue`, { headers })
       .then((res) => res.json().then((body) => ({ ok: res.ok, body })))
       .then(({ ok, body }) => {
         if (!ok) throw new Error(body?.msg || 'ບໍ່ສາມາດໂຫຼດລາຍງານໄດ້');
         setOverdue(unwrap(body) || []);
+        setOverdueError('');
       })
-      .catch((err) => setOverdueError(err.message))
-      .finally(() => setLoadingOverdue(false));
+      .catch((err) => {
+        if (!silent) setOverdueError(err.message);
+      })
+      .finally(() => {
+        if (!silent) setLoadingOverdue(false);
+      });
   }
+
+  useRealtimeRefresh(() =>
+    Promise.all([
+      fetchAssets({ silent: true }),
+      fetchReceipts({ silent: true }),
+      canCreate ? fetchCatalog({ silent: true }) : null,
+      activeTab === 'overdue' ? fetchOverdue({ silent: true }) : null,
+    ]),
+  );
 
   useEffect(() => {
     fetchAssets();
@@ -335,6 +369,52 @@ export default function AssetRegistry() {
       case 'UNDER_REPAIR': return { label: 'ກຳລັງສ້ອມແປງ', className: 'bg-amber-100 text-amber-700' };
       case 'RETIRED': return { label: 'ປົດລະວາງແລ້ວ', className: 'bg-gray-200 text-gray-600' };
       default: return { label: 'ວ່າງ', className: 'bg-green-100 text-green-700' };
+    }
+  };
+
+  const handleExportAsset = async (a, cat, kind) => {
+    setExportingAssetId(a._id);
+    try {
+      const fmt = (d) => (d ? new Date(d).toLocaleDateString() : '—');
+      const fmtTime = (d) => (d ? new Date(d).toLocaleString() : '');
+      const expired = a.warrantyExpiry && new Date(a.warrantyExpiry) < new Date();
+      const fields = [
+        ['Asset Tag', a.assetTag],
+        ['ສະຖານະ', statusInfo(a.status).label],
+        ['Serial Number', a.serialNumber || 'ບໍ່ມີ S/N'],
+        ['ລາຍການ Catalog', a.catalogItemId ? `${refId(a.catalogItemId)} · ${cat?.name || ''}` : '—'],
+        ['ໝວດໝູ່ / ປະເພດ', [cat?.category, a.type].filter(Boolean).join(' / ') || '—'],
+        ['ສາຂາ', branchName(a.branchId) || '—'],
+        ['ປະເພດຜູ້ຖື', isDeptHeld(a) ? 'ພະແນກ' : 'ບຸກຄົນ'],
+        ...(isDeptHeld(a) ? [['ພະແນກ', deptName(a.departmentId)]] : []),
+        [isDeptHeld(a) ? 'ຜູ້ຮັບຜິດຊອບ' : 'ຜູ້ຖືປັດຈຸບັນ', a.currentAssigneeId ? userName(a.currentAssigneeId) : '—'],
+        ['ວັນທີຊື້', fmt(a.purchaseDate)],
+        ['ລາຄາຊື້', a.purchasePrice != null ? Number(a.purchasePrice).toLocaleString() : '—'],
+        ['ຮັບປະກັນຮອດ', `${fmt(a.warrantyExpiry)}${expired ? ' (ໝົດແລ້ວ)' : ''}`],
+        ['ເພີ່ມເຂົ້າລະບົບ', fmt(a.createdAt)],
+      ];
+      const history = [...(a.assignmentHistory || [])].reverse().map((h) => ({
+        assignee: userName(h.assigneeId),
+        department: h.departmentId ? deptName(h.departmentId) : '',
+        receivedBy: h.receivedById ? userName(h.receivedById) : '',
+        assignedAt: fmtTime(h.assignedAt),
+        returnedAt: h.returnedAt ? fmtTime(h.returnedAt) : 'ຍັງຖືຢູ່',
+        note: h.note || '',
+      }));
+      const data = await buildAssetExport({
+        assetId: a._id,
+        title: a.assetTag,
+        status: statusInfo(a.status).label,
+        subtitle: a.catalogItemId ? `${refId(a.catalogItemId)} · ${cat?.name || a.type || ''}` : a.type || '',
+        fields,
+        history,
+      });
+      if (kind === 'csv') downloadAssetCsv(data);
+      else printAssetPdf(data);
+    } catch (err) {
+      alert(err.response?.data?.msg || err.response?.data?.message || err.message || 'Export ບໍ່ສຳເລັດ');
+    } finally {
+      setExportingAssetId(null);
     }
   };
 
@@ -1445,6 +1525,8 @@ export default function AssetRegistry() {
                         <DetailBtn onClick={() => handleDelete(a)} Icon={Trash2} label="ລຶບ" tone="red" disabled={busy} />
                       )}
                       <DetailBtn onClick={() => navigate(`/assets/${a._id}`)} Icon={ExternalLink} label="ເປີດໜ້າລາຍລະອຽດເຕັມ" tone="amber" />
+                      <DetailBtn onClick={() => handleExportAsset(a, cat, 'pdf')} Icon={FileText} label="ສົ່ງອອກ PDF" tone="gray" disabled={exportingAssetId === a._id} />
+                      <DetailBtn onClick={() => handleExportAsset(a, cat, 'csv')} Icon={FileSpreadsheet} label="ສົ່ງອອກ CSV" tone="gray" disabled={exportingAssetId === a._id} />
                     </div>
                   </div>
 

@@ -12,6 +12,7 @@ import AddAssetModal from '../components/AddAssetModal';
 import CatalogImageUpload, { CatalogThumb, imageSrc } from '../components/CatalogImage';
 import GoodsReceiptPrint from '../components/GoodsReceiptPrint';
 import { AssignAssetModal, AssetBarcodeModal, AssignmentHistoryModal } from '../components/AssetRowModals';
+import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 
 const ASSET_STATUS = {
   AVAILABLE: { text: 'ວ່າງ', cls: 'bg-green-100 text-green-700' },
@@ -23,6 +24,13 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : '—');
 const fmtMoney = (n) => (n != null && n !== '' ? Number(n).toLocaleString() : '—');
 const personOf = (u) =>
   u && typeof u === 'object' ? [u.firstName, u.lastName].filter(Boolean).join(' ') || u.employeeCode || '—' : '—';
+
+const requesterNameOf = (req) =>
+  [req?.requestedBy?.firstName, req?.requestedBy?.lastName].filter(Boolean).join(' ') ||
+  req?.requestedBy?.name || req?.requestedBy?.email ||
+  req?.userId?.name || req?.userId?.email ||
+  req?.createdBy?.name || 'ບໍ່ລະບຸຜູ້ຂໍ';
+const fmtDateTime = (d) => (d ? new Date(d).toLocaleString() : '—');
 
 const holderOf = (a, lk) => {
   if (!a.currentAssigneeId) return '';
@@ -437,10 +445,16 @@ export default function AssetManagement() {
   const [loadingPending, setLoadingPending] = useState(true);
   const [pendingError, setPendingError] = useState('');
   const [reviewingId, setReviewingId] = useState(null);
+  const [detailReqId, setDetailReqId] = useState(null); // ໃບຂໍທີ່ເປີດເບິ່ງລາຍລະອຽດ
+  const [confirmType, setConfirmType] = useState(null); // 'approve' | 'reject' | null
+  const [rejectReason, setRejectReason] = useState('');
+  const [reviewError, setReviewError] = useState('');
 
-  const fetchCatalog = async () => {
+  // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner
+  const fetchCatalog = async (opts) => {
+    const silent = opts?.silent === true;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const url = lowStockOnly ? '/supply-catalog?lowStockOnly=true' : '/supply-catalog';
       const response = await api.get(url);
       
@@ -463,14 +477,17 @@ export default function AssetManagement() {
     } catch (error) {
       console.error('Failed to fetch supply catalog:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
-  const fetchPendingRequests = async () => {
+  const fetchPendingRequests = async (opts) => {
+    const silent = opts?.silent === true;
     try {
-      setLoadingPending(true);
-      setPendingError('');
+      if (!silent) {
+        setLoadingPending(true);
+        setPendingError('');
+      }
       const response = await api.get('/supply-requests?status=REQUESTED');
 
       const responseData = response.data;
@@ -487,8 +504,10 @@ export default function AssetManagement() {
       }
 
       setPendingRequests(allRequests);
+      setPendingError('');
     } catch (error) {
       console.error('Failed to fetch supply requests:', error);
+      if (silent) return; // ດຶງງຽບໆລົ້ມ — ຄົງລາຍການເດີມໄວ້
       const status = error.response?.status;
       if (status === 403) {
         setPendingError('ບັນຊີນີ້ບໍ່ມີສິດອະນຸມັດຄຳຂໍອຸປະກອນ (supplies:approve)');
@@ -499,9 +518,41 @@ export default function AssetManagement() {
       }
       setPendingRequests([]);
     } finally {
-      setLoadingPending(false);
+      if (!silent) setLoadingPending(false);
     }
   };
+
+  // ໂຫຼດປະຫວັດການຮັບເຂົ້າ + ທະບຽນຊັບສິນຂອງລາຍການທີ່ເປີດ popup ຢູ່ ໃໝ່ແບບງຽບໆ (ບໍ່ລ້າງໜ້າຈໍ)
+  const reloadOpenItemSilently = async (item) => {
+    const itemId = item._id;
+    const canReadAssets = item.itemType !== 'CONSUMABLE' && hasPermission('assets', 'read');
+    try {
+      const [receiptsRes, assetsRes] = await Promise.all([
+        api.get('/goods-receipt', { params: { catalogItemId: itemId } }),
+        canReadAssets ? api.get('/assets', { params: { catalogItemId: itemId } }) : Promise.resolve(null),
+      ]);
+      if (openedItemId.current !== itemId) return;
+      const receiptBody = receiptsRes.data?.data ?? receiptsRes.data;
+      setHistoryRows(Array.isArray(receiptBody) ? receiptBody : []);
+      if (assetsRes) {
+        const assetBody = assetsRes.data?.data ?? assetsRes.data;
+        const list = Array.isArray(assetBody) ? assetBody : [];
+        list.sort((x, y) => String(x.assetTag).localeCompare(String(y.assetTag)));
+        setAssetRows(list);
+      }
+    } catch {
+      // ຮັກສາຂໍ້ມູນທີ່ສະແດງຢູ່ — ຮອບຕໍ່ໄປຈະລອງໃໝ່
+    }
+  };
+
+  // catalog/stock/ຄຳຂໍ/ຊັບສິນປ່ຽນຈາກຜູ້ໃຊ້ອື່ນ ຫຼື ໜ້າອື່ນ → ດຶງໃໝ່ທັນທີ ບໍ່ຕ້ອງ reload
+  useRealtimeRefresh(() =>
+    Promise.all([
+      fetchCatalog({ silent: true }),
+      fetchPendingRequests({ silent: true }),
+      historyItem ? reloadOpenItemSilently(historyItem) : null,
+    ]),
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -514,35 +565,272 @@ export default function AssetManagement() {
     fetchPendingRequests();
   }, []);
 
-  const handleApprove = async (id) => {
+  const detailReq = detailReqId ? pendingRequests.find((r) => r._id === detailReqId) || null : null;
+
+  const closeConfirm = () => {
+    if (reviewingId) return;
+    setConfirmType(null);
+    setRejectReason('');
+    setReviewError('');
+  };
+  const closeDetail = () => {
+    if (reviewingId) return;
+    setDetailReqId(null);
+    setConfirmType(null);
+    setRejectReason('');
+    setReviewError('');
+  };
+  const openConfirm = (type) => {
+    setReviewError('');
+    setRejectReason('');
+    setConfirmType(type);
+  };
+
+  // Esc ປິດ popup ຊັ້ນເທິງສຸດ
+  useEffect(() => {
+    if (!detailReqId) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || reviewingId) return;
+      if (confirmType) closeConfirm();
+      else closeDetail();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailReqId, confirmType, reviewingId]);
+
+  // ຢືນຢັນໃນ popup → ອະນຸມັດ ຫຼື ປະຕິເສດ (ປະຕິເສດຕ້ອງມີເຫດຜົນ)
+  const submitReview = async () => {
+    if (!detailReq || !confirmType) return;
+    const id = detailReq._id;
+    if (confirmType === 'reject' && !rejectReason.trim()) {
+      setReviewError('ຕ້ອງລະບຸເຫດຜົນຈຶ່ງຈະປະຕິເສດໄດ້');
+      return;
+    }
     try {
       setReviewingId(id);
-      await api.patch(`/supply-requests/${id}/approve`);
+      setReviewError('');
+      if (confirmType === 'approve') {
+        await api.patch(`/supply-requests/${id}/approve`);
+      } else {
+        await api.patch(`/supply-requests/${id}/reject`, { reason: rejectReason.trim() });
+      }
+      const wasApprove = confirmType === 'approve';
+      setConfirmType(null);
+      setDetailReqId(null);
+      setRejectReason('');
       await fetchPendingRequests();
-      fetchCatalog();
+      if (wasApprove) fetchCatalog();
     } catch (error) {
-      alert(error.response?.data?.msg || error.response?.data?.message || 'ອະນຸມັດບໍ່ສຳເລັດ');
+      setReviewError(
+        error.response?.data?.msg || error.response?.data?.message ||
+          (confirmType === 'approve' ? 'ອະນຸມັດບໍ່ສຳເລັດ' : 'ປະຕິເສດບໍ່ສຳເລັດ'),
+      );
     } finally {
       setReviewingId(null);
     }
   };
 
-  const handleReject = async (id) => {
-    const reason = window.prompt('ກະລຸນາລະບຸເຫດຜົນທີ່ປະຕິເສດຄຳຂໍນີ້:');
-    if (reason === null) return;
-    if (!reason.trim()) {
-      alert('ຕ້ອງລະບຸເຫດຜົນຈຶ່ງຈະປະຕິເສດໄດ້');
-      return;
-    }
-    try {
-      setReviewingId(id);
-      await api.patch(`/supply-requests/${id}/reject`, { reason: reason.trim() });
-      await fetchPendingRequests();
-    } catch (error) {
-      alert(error.response?.data?.msg || error.response?.data?.message || 'ປະຕິເສດບໍ່ສຳເລັດ');
-    } finally {
-      setReviewingId(null);
-    }
+  const renderPendingModals = () => {
+    if (!detailReq) return null;
+    const req = detailReq;
+    const items = Array.isArray(req.items) ? req.items : [];
+    const totalQty = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
+    const busy = reviewingId === req._id;
+    const stockOf = (it) => assets.find((a) => a._id === it.catalogItemId);
+    const overStock = items.filter((it) => {
+      const cat = stockOf(it);
+      return cat && !it.purchaseRequestId && (it.quantity || 0) > (cat.stockQty ?? 0);
+    }).length;
+    const deptName = req.departmentId && typeof req.departmentId === 'object' ? req.departmentId.name : req.departmentId;
+    const info = (label, value) => (
+      <div>
+        <div className="text-[11px] text-gray-400">{label}</div>
+        <div className="text-sm text-gray-800 break-words">{value || '—'}</div>
+      </div>
+    );
+
+    return (
+      <>
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={closeDetail}>
+          <div
+            className="bg-white rounded-2xl w-full max-w-2xl shadow-xl max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <h3 className="text-lg font-bold text-gray-800">{req._id}</h3>
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">ລໍຖ້າອະນຸມັດ</span>
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">{totalQty} ຊິ້ນ</span>
+              </div>
+              <button type="button" onClick={closeDetail} className="text-gray-400 hover:text-gray-600 transition" aria-label="ປິດ">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+                {info('ຜູ້ຂໍ', `${requesterNameOf(req)}${req.requestedBy?.employeeCode ? ` (${req.requestedBy.employeeCode})` : ''}`)}
+                {info('ວັນທີ-ເວລາຍື່ນ', fmtDateTime(req.createdAt))}
+                {info('ຂໍໃນນາມ', deptName ? `ແຜນກ ${deptName}` : 'ສ່ວນຕົວ')}
+                {req.custodianId && info('ຜູ້ຮັບຜິດຊອບ', `${personOf(req.custodianId)}${req.custodianId.employeeCode ? ` (${req.custodianId.employeeCode})` : ''}`)}
+                {req.delegateId && info('ຜູ້ຮັບແທນ', `${personOf(req.delegateId)}${req.delegateId.employeeCode ? ` (${req.delegateId.employeeCode})` : ''}`)}
+              </div>
+
+              <div>
+                <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-2">ລາຍການທີ່ຂໍ ({items.length})</div>
+                <div className="border border-gray-100 rounded-xl overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-50 text-gray-500 text-xs">
+                      <tr>
+                        <th className="p-3">ລາຍການ</th>
+                        <th className="p-3 text-right whitespace-nowrap">ຈຳນວນຂໍ</th>
+                        <th className="p-3 text-right whitespace-nowrap">ສະຕັອກ</th>
+                        <th className="p-3">ເຫດຜົນ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {items.map((it, idx) => {
+                        const cat = stockOf(it);
+                        const short = cat && !it.purchaseRequestId && (it.quantity || 0) > (cat.stockQty ?? 0);
+                        return (
+                          <tr key={idx} className="align-top">
+                            <td className="p-3">
+                              <div className="flex items-center gap-2">
+                                <CatalogThumb url={cat?.imageUrl} name={it.name} size={36} />
+                                <div className="min-w-0">
+                                  <div className="font-medium text-gray-800">{it.name}</div>
+                                  {it.catalogItemId && <div className="text-[11px] text-gray-400">{it.catalogItemId}</div>}
+                                  {it.purchaseRequestNo && (
+                                    <div className="text-[11px] text-emerald-600">
+                                      ຜູກໃບສະເໜີຊື້ {it.purchaseRequestNo}{it.purchaseQty ? ` (ຊື້ ${it.purchaseQty})` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3 text-right font-semibold text-gray-800">{it.quantity}</td>
+                            <td className={`p-3 text-right whitespace-nowrap ${short ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>
+                              {cat ? `${cat.stockQty ?? 0} ${cat.unit || ''}` : '—'}
+                            </td>
+                            <td className="p-3 text-gray-600">{it.reason || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {overStock > 0 && (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ມີ {overStock} ລາຍການທີ່ຂໍເກີນສະຕັອກປັດຈຸບັນ ແລະ ບໍ່ໄດ້ຜູກກັບໃບສະເໜີຊື້
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
+              {canApproveRequests ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => openConfirm('reject')}
+                    disabled={busy}
+                    className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <XCircle size={16} />
+                    <span>ປະຕິເສດ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openConfirm('approve')}
+                    disabled={busy}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <CheckCircle size={16} />
+                    <span>ອະນຸມັດ</span>
+                  </button>
+                </>
+              ) : (
+                <span className="text-xs text-gray-400">ບໍ່ມີສິດອະນຸມັດ</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {confirmType && (
+          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={closeConfirm}>
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <div className="p-6 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
+                      confirmType === 'approve' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                    }`}
+                  >
+                    {confirmType === 'approve' ? <CheckCircle size={22} /> : <XCircle size={22} />}
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-gray-800">
+                      {confirmType === 'approve' ? 'ຢືນຢັນການອະນຸມັດ' : 'ຢືນຢັນການປະຕິເສດ'}
+                    </h4>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {confirmType === 'approve'
+                        ? `ອະນຸມັດຄຳຂໍ ${req._id} (${totalQty} ຊິ້ນ) ຂອງ ${requesterNameOf(req)} ແມ່ນບໍ?`
+                        : `ປະຕິເສດຄຳຂໍ ${req._id} ຂອງ ${requesterNameOf(req)} — ກະລຸນາບອກເຫດຜົນ`}
+                    </p>
+                  </div>
+                </div>
+
+                {confirmType === 'reject' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">ເຫດຜົນທີ່ປະຕິເສດ *</label>
+                    <textarea
+                      autoFocus
+                      rows={3}
+                      value={rejectReason}
+                      onChange={(e) => {
+                        setRejectReason(e.target.value);
+                        if (reviewError) setReviewError('');
+                      }}
+                      disabled={busy}
+                      placeholder="ເຊັ່ນ: ເກີນງົບປະມານ, ຂໍຊ້ຳ, ຍັງມີສະຕັອກພໍ..."
+                      className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 disabled:bg-gray-50"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">ຜູ້ຂໍຈະເຫັນເຫດຜົນນີ້</p>
+                  </div>
+                )}
+
+                {reviewError && (
+                  <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{reviewError}</div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={closeConfirm}
+                  disabled={busy}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                >
+                  ຍົກເລີກ
+                </button>
+                <button
+                  type="button"
+                  onClick={submitReview}
+                  disabled={busy || (confirmType === 'reject' && !rejectReason.trim())}
+                  className={`px-4 py-2 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 ${
+                    confirmType === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
+                >
+                  {busy ? 'ກຳລັງດຳເນີນການ...' : confirmType === 'approve' ? 'ຢືນຢັນອະນຸມັດ' : 'ຢືນຢັນປະຕິເສດ'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
   };
 
   const handleInputChange = (e) => {
@@ -1214,16 +1502,25 @@ export default function AssetManagement() {
           ) : pendingRequests.length > 0 ? (
             <div className="divide-y divide-gray-100">
               {pendingRequests.map((req) => {
-                const requesterName =
-                  [req.requestedBy?.firstName, req.requestedBy?.lastName].filter(Boolean).join(' ') ||
-                  req.requestedBy?.name || req.requestedBy?.email ||
-                  req.userId?.name || req.userId?.email ||
-                  req.createdBy?.name || 'ບໍ່ລະບຸຜູ້ຂໍ';
+                const requesterName = requesterNameOf(req);
                 const totalQty = Array.isArray(req.items) ? req.items.reduce((sum, i) => sum + (i.quantity || 0), 0) : 0;
 
                 return (
-                  <div key={req._id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="space-y-1">
+                  <div
+                    key={req._id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetailReqId(req._id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setDetailReqId(req._id);
+                      }
+                    }}
+                    title="ກົດເພື່ອເບິ່ງລາຍລະອຽດ"
+                    className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-amber-50/40 focus:outline-none focus-visible:bg-amber-50/60 transition"
+                  >
+                    <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-gray-800">{req._id}</span>
                         <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">{totalQty} ຊິ້ນ</span>
@@ -1237,30 +1534,7 @@ export default function AssetManagement() {
                         ຜູ້ຂໍ: {requesterName} · ວັນທີຍື່ນ: {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : '-'}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {canApproveRequests ? (
-                        <>
-                          <button
-                            onClick={() => handleApprove(req._id)}
-                            disabled={reviewingId === req._id}
-                            className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium transition disabled:opacity-50 flex items-center gap-1"
-                          >
-                            <CheckCircle size={14} />
-                            <span>{reviewingId === req._id ? 'ກຳລັງດຳເນີນການ...' : 'ອະນຸມັດ'}</span>
-                          </button>
-                          <button
-                            onClick={() => handleReject(req._id)}
-                            disabled={reviewingId === req._id}
-                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-medium transition disabled:opacity-50 flex items-center gap-1"
-                          >
-                            <XCircle size={14} />
-                            <span>ປະຕິເສດ</span>
-                          </button>
-                        </>
-                      ) : (
-                        <span className="text-xs text-gray-400">ບໍ່ມີສິດອະນຸມັດ</span>
-                      )}
-                    </div>
+                    <ChevronRight size={18} className="shrink-0 text-gray-300" />
                   </div>
                 );
               })}
@@ -1486,6 +1760,8 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
       </div>
 
       {historyItem && renderDetailModal()}
+
+      {renderPendingModals()}
 
       {isModalOpen && editingId && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">

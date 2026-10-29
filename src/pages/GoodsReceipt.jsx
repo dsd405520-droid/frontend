@@ -23,6 +23,7 @@ import CsvExportButton from '../components/CsvExportButton';
 import api from '../services/api';
 import GoodsReceiptPrint from '../components/GoodsReceiptPrint';
 import CatalogImageUpload, { CatalogThumb } from '../components/CatalogImage';
+import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
 
@@ -924,33 +925,47 @@ export default function GoodsReceipt() {
   const [expandedFolders, setExpandedFolders] = useState(() => new Set());
   const [printId, setPrintId] = useState('');
 
-  const fetchRows = async () => {
+  // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner ແລະບໍ່ລ້າງລາຍການຖ້າ error
+  const fetchRows = async (opts) => {
+    const silent = opts?.silent === true;
     try {
-      setLoading(true);
-      setLoadError('');
+      if (!silent) {
+        setLoading(true);
+        setLoadError('');
+      }
       const params = {};
       if (search.trim()) params.q = search.trim();
       if (modeFilter) params.mode = modeFilter;
       const res = await api.get('/goods-receipt', { params });
       const list = unwrap(res.data);
       setRows(Array.isArray(list) ? list : []);
+      setLoadError('');
     } catch (err) {
-      setLoadError(errText(err, 'ບໍ່ສາມາດໂຫຼດປະຫວັດການຮັບເຄື່ອງໄດ້'));
-      setRows([]);
+      if (!silent) {
+        setLoadError(errText(err, 'ບໍ່ສາມາດໂຫຼດປະຫວັດການຮັບເຄື່ອງໄດ້'));
+        setRows([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
-  const fetchCatalog = async () => {
+  const fetchCatalog = async (opts) => {
     try {
       const res = await api.get('/supply-catalog');
       const list = unwrap(res.data);
       setCatalog(Array.isArray(list) ? list : []);
     } catch {
-      setCatalog([]);
+      if (opts?.silent !== true) setCatalog([]);
     }
   };
+
+  // ມີການຮັບເຄື່ອງ/ປ່ຽນ stock ຈາກຜູ້ໃຊ້ອື່ນ ຫຼື ໜ້າອື່ນ → ດຶງໃໝ່ທັນທີ ບໍ່ຕ້ອງ reload
+  useRealtimeRefresh(() =>
+    canManage
+      ? Promise.all([fetchRows({ silent: true }), fetchCatalog({ silent: true })])
+      : undefined,
+  );
 
   useEffect(() => {
     if (!canManage) return undefined;
