@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Printer, ScanLine, CheckCircle2, AlertCircle, Package } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -32,6 +32,7 @@ export default function SupplyReceipt() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
+  const tagsRef = useRef([]);
   const [tags, setTags] = useState([]); // asset tag ຫຼື _id ທີ່ສະແກນ/ພິມ
   const [tagInput, setTagInput] = useState('');
   const [confirmConsumables, setConfirmConsumables] = useState(false);
@@ -77,17 +78,40 @@ export default function SupplyReceipt() {
   const isDepartmentRequest = !!receipt?.isDepartmentRequest;
   const receiverName = isDepartmentRequest ? custodianName : requesterName;
 
+  const [tagInfo, setTagInfo] = useState({}); // value(lowercase) -> { loading, asset, error }
+  const [scanNote, setScanNote] = useState('');
+
   const addTag = (raw) => {
     let value = String(raw || '').trim();
     if (!value) return;
     // QR ຂອງຊັບສິນເປັນລິ້ງ …/assets/<_id>?claim=1 → ເອົາ _id
     const m = value.match(/\/assets\/([A-Za-z0-9_-]+)/);
     if (m) value = m[1];
-    setTags((prev) => (prev.some((t) => t.toLowerCase() === value.toLowerCase()) ? prev : [...prev, value]));
+    const key = value.toLowerCase();
     setSubmitError('');
+    if (tagsRef.current.some((t) => t.toLowerCase() === key)) {
+      setScanNote(`${value} ສະແກນແລ້ວ (ຊ້ຳ)`);
+      return;
+    }
+    tagsRef.current = [...tagsRef.current, value];
+    setTags(tagsRef.current);
+    setScanNote(`ເພີ່ມ ${value} ແລ້ວ`);
+    setTagInfo((p) => ({ ...p, [key]: { loading: true } }));
+    axios
+      .get(`/assets/${encodeURIComponent(value)}`)
+      .then((res) => setTagInfo((p) => ({ ...p, [key]: { asset: unwrap(res.data) } })))
+      .catch((err) =>
+        setTagInfo((p) => ({
+          ...p,
+          [key]: { error: err.response?.status === 404 ? 'ບໍ່ພົບໃນທະບຽນ' : 'ກວດລາຍລະອຽດບໍ່ໄດ້ (ລະບົບຈະກວດຕອນຢືນຢັນ)' , hard: err.response?.status === 404 },
+        })),
+      );
   };
 
-  const removeTag = (value) => setTags((prev) => prev.filter((t) => t !== value));
+  const removeTag = (value) => {
+    tagsRef.current = tagsRef.current.filter((t) => t !== value);
+    setTags(tagsRef.current);
+  };
 
   const submit = async () => {
     setSubmitError('');
@@ -114,6 +138,7 @@ export default function SupplyReceipt() {
   const canSubmit =
     receipt?.canConfirm &&
     !submitting &&
+    !tags.some((t) => { const i = tagInfo[t.toLowerCase()] || {}; return i.hard || (i.asset?.status && i.asset.status !== 'AVAILABLE'); }) &&
     (requiredTagCount === 0 || tags.length >= requiredTagCount) &&
     (consumableItems.length === 0 || confirmConsumables);
 
@@ -294,6 +319,7 @@ export default function SupplyReceipt() {
                         <ScanLine size={14} /> ສະແກນ QR / ບາໂຄ໊ດ
                       </button>
                     </div>
+                    {scanNote && <div className="text-xs text-emerald-600">{scanNote}</div>}
                     <ul className="text-xs text-gray-500 list-disc pl-5">
                       {taggedItems.map((it, k) => (
                         <li key={k}>{it.name} × {it.quantity}</li>
@@ -324,12 +350,20 @@ export default function SupplyReceipt() {
                     </div>
                     {tags.length > 0 && (
                       <div className="flex flex-wrap gap-2">
-                        {tags.map((t) => (
-                          <span key={t} className="inline-flex items-center gap-1 text-xs font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2.5 py-1">
-                            {t}
-                            <button type="button" onClick={() => removeTag(t)} className="text-emerald-400 hover:text-red-500" aria-label={`ລຶບ ${t}`}>✕</button>
-                          </span>
-                        ))}
+                        {tags.map((t) => {
+                          const info = tagInfo[t.toLowerCase()] || {};
+                          const a = info.asset;
+                          const bad = info.hard || (a && a.status && a.status !== 'AVAILABLE');
+                          return (
+                            <span key={t} className={`inline-flex items-center gap-2 text-xs border rounded-xl px-2.5 py-1.5 ${bad ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                              <span className="font-mono font-semibold">{a?.assetTag || t}</span>
+                              <span className="text-[11px] opacity-80">
+                                {info.loading ? 'ກຳລັງກວດ...' : a ? `${a.type || ''}${a.serialNumber ? ` · S/N ${a.serialNumber}` : ''}${a.status && a.status !== 'AVAILABLE' ? ` · ${a.status} (ບໍ່ວ່າງ)` : ''}` : info.error || ''}
+                              </span>
+                              <button type="button" onClick={() => removeTag(t)} className="opacity-50 hover:text-red-600" aria-label={`ລຶບ ${t}`}>✕</button>
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

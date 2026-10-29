@@ -87,6 +87,8 @@ export default function AssetRegistry() {
   const [proxyLookup, setProxyLookup] = useState(null); // { ok, user?, msg? }
   const [holderTypeFilter, setHolderTypeFilter] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState(''); // '' | ໝວດໝູ່ | '__NONE__' (ບໍ່ຜູກ Catalog)
+  const [snFilter, setSnFilter] = useState(''); // '' | 'MISSING' | 'HAS'
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState('');
 
@@ -197,7 +199,7 @@ export default function AssetRegistry() {
     fetchBranches();
     fetchUsers();
     fetchDepartments();
-    if (canCreate) fetchCatalog();
+    fetchCatalog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchFilter]);
 
@@ -290,6 +292,15 @@ export default function AssetRegistry() {
     return users.filter((u) => u.isActive !== false && (userDeptId(u) === deptId || managers.includes(u._id)));
   };
 
+  const catalogOf = (a) => catalog.find((c) => c._id === refId(a.catalogItemId));
+  const categoryOf = (a) => catalogOf(a)?.category || '';
+  // ຂາດ S/N = ລາຍການທີ່ຕ້ອງມີ S/N (ASSET ແລະ trackSerial ບໍ່ແມ່ນ false) ແຕ່ຍັງບໍ່ໄດ້ຕື່ມ
+  const missingSerial = (a) => {
+    const c = catalogOf(a);
+    return !!c && c.itemType === 'ASSET' && c.trackSerial !== false && !String(a.serialNumber || '').trim();
+  };
+  const assetCategories = [...new Set(catalog.filter((c) => c.itemType === 'ASSET' && c.category).map((c) => c.category))].sort();
+
   const statusInfo = (status) => {
     switch (status) {
       case 'ASSIGNED': return { label: 'ຖືກມອບໝາຍແລ້ວ', className: 'bg-blue-100 text-blue-700' };
@@ -309,9 +320,14 @@ export default function AssetRegistry() {
     if (holderTypeFilter === 'DEPARTMENT' && !isDeptHeld(a)) return false;
     if (holderTypeFilter === 'PERSON' && isDeptHeld(a)) return false;
     if (deptFilter && refId(a.departmentId) !== deptFilter) return false;
+    if (categoryFilter === '__NONE__' && catalogOf(a)) return false;
+    if (categoryFilter && categoryFilter !== '__NONE__' && categoryOf(a) !== categoryFilter) return false;
+    if (snFilter === 'MISSING' && !missingSerial(a)) return false;
+    if (snFilter === 'HAS' && !String(a.serialNumber || '').trim()) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!a.assetTag.toLowerCase().includes(q)) return false;
+      const hay = `${a.assetTag} ${a.type || ''} ${a.serialNumber || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
     }
     return true;
   });
@@ -320,7 +336,7 @@ export default function AssetRegistry() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedIds(new Set());
-  }, [search, statusFilter, branchFilter, holderTypeFilter, deptFilter]);
+  }, [search, statusFilter, branchFilter, holderTypeFilter, deptFilter, categoryFilter, snFilter]);
 
   const closeCreate = () => {
     setShowCreateModal(false);
@@ -717,7 +733,7 @@ export default function AssetRegistry() {
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="ຄົ້ນຫາ ASSET TAG..."
+                  placeholder="ຄົ້ນຫາ Asset Tag / ຊື່ລາຍການ / S/N..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-9 pr-10 py-2 border border-gray-200 rounded-xl text-sm"
@@ -750,6 +766,16 @@ export default function AssetRegistry() {
               <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
                 <option value="">ທຸກພະແນກ</option>
                 {departments.filter((d) => d.isActive !== false).map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
+              </select>
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
+                <option value="">ທຸກໝວດໝູ່</option>
+                {assetCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+                <option value="__NONE__">ບໍ່ຜູກ Catalog</option>
+              </select>
+              <select value={snFilter} onChange={(e) => setSnFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
+                <option value="">S/N ທັງໝົດ</option>
+                <option value="MISSING">ຍັງບໍ່ມີ S/N</option>
+                <option value="HAS">ມີ S/N ແລ້ວ</option>
               </select>
             </div>
 
@@ -794,6 +820,7 @@ export default function AssetRegistry() {
                       />}
                     </th>
                     <th className="p-3 font-medium">Asset Tag</th>
+                    <th className="p-3 font-medium">ລາຍການ / ປະເພດ</th>
                     <th className="p-3 font-medium">ສາຂາ</th>
                     <th className="p-3 font-medium">ສະຖານະ</th>
                     <th className="p-3 font-medium">ຜູ້ຖືກມອບໝາຍ</th>
@@ -804,12 +831,12 @@ export default function AssetRegistry() {
                 <tbody className="divide-y divide-gray-100">
                   {loadingAssets && (
                     <tr>
-                      <td colSpan={7} className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</td>
+                      <td colSpan={8} className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</td>
                     </tr>
                   )}
                   {!loadingAssets && filteredAssets.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="p-6 text-center text-sm text-gray-500">ບໍ່ພົບຊັບສິນທີ່ຄ້າຍຄື</td>
+                      <td colSpan={8} className="p-6 text-center text-sm text-gray-500">ບໍ່ພົບຊັບສິນທີ່ຄ້າຍຄື</td>
                     </tr>
                   )}
                   {filteredAssets.map((a) => {
@@ -836,6 +863,16 @@ export default function AssetRegistry() {
                           >
                             {a.assetTag}
                           </button>
+                        </td>
+                        <td className="p-3">
+                          <div className="text-gray-800">{a.type || '—'}</div>
+                          <div className="text-xs text-gray-400">
+                            {categoryOf(a) || (catalogOf(a) ? '' : 'ບໍ່ຜູກ Catalog')}
+                            {a.serialNumber ? ` · S/N ${a.serialNumber}` : ''}
+                          </div>
+                          {missingSerial(a) && (
+                            <span className="inline-block mt-0.5 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">ຍັງບໍ່ມີ S/N</span>
+                          )}
                         </td>
                         <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
                         <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
