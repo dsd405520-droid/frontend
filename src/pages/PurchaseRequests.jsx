@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Search, CheckCircle2, PackagePlus } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Plus, Search, CheckCircle2, PackagePlus, XCircle, AlertTriangle } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
@@ -29,6 +29,9 @@ const personName = (u) =>
 
 export default function PurchaseRequests() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openId = searchParams.get('open') || ''; // ເປີດໃບສະເໜີຊື້ໂດຍກົງຈາກລິ້ງ (ເຊັ່ນ ຈາກໜ້າອະນຸມັດຄຳຂໍເບີກ)
+  const [deepDetail, setDeepDetail] = useState(null);
   const currentUser = getCurrentUser();
   const canCreate = hasPermission('supplies', 'create');
   const canApprove = hasPermission('supplies', 'approve');
@@ -47,6 +50,8 @@ export default function PurchaseRequests() {
   const [success, setSuccess] = useState('');
   const [actionError, setActionError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [dialog, setDialog] = useState(null); // { type: 'approve' | 'reject' | 'cancel', r }
+  const [rejectReason, setRejectReason] = useState('');
 
   const approving = tab === 'APPROVING';
 
@@ -59,6 +64,24 @@ export default function PurchaseRequests() {
       if (opts?.silent !== true) setPendingCount(0);
     }
   };
+
+  const loadDeep = async () => {
+    if (!openId) return;
+    try {
+      const res = await api.get(`/purchase-requests/${openId}`);
+      setDeepDetail(unwrap(res.data));
+    } catch {
+      setDeepDetail(null);
+    }
+  };
+
+  useEffect(() => {
+    if (openId) {
+      setDetailId(openId);
+      loadDeep();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
 
   // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner ແລະບໍ່ລ້າງລາຍການຖ້າ error
   const fetchRows = async (opts) => {
@@ -85,6 +108,7 @@ export default function PurchaseRequests() {
       if (!silent) setLoading(false);
     }
     await fetchPendingCount({ silent });
+    if (openId) loadDeep();
   };
 
   useEffect(() => {
@@ -135,35 +159,40 @@ export default function PurchaseRequests() {
   // ຄຳຂໍເບີກທີ່ຜູກກັບໃບນີ້ ແລະຍັງລໍອະນຸມັດ (ການອະນຸມັດ/ປະຕິເສດໃບນີ້ມີຜົນກັບຄຳຂໍນັ້ນ)
   const pendingLink = (r) => (r?.linkedSupplyRequest?.status === 'REQUESTED' ? r.linkedSupplyRequest : null);
 
-  const approve = (r) => {
-    const l = pendingLink(r);
-    if (l) {
-      const unit = r.unit ? ` ${r.unit}` : '';
-      const ok = window.confirm(
-        `ໃບສະເໜີ ${r.prNo} ຜູກກັບຄຳຂໍເບີກ ${l._id} ຂອງ ${personName(l.requestedBy)}\n` +
-          `${l.itemName}: ຂໍ ${l.requestedQty}${unit} = ໃຊ້ສະຕັອກ ${Math.max((l.requestedQty || 0) - (l.purchaseQty || 0), 0)} + ຊື້ເພີ່ມ ${l.purchaseQty}\n\n` +
-          `ການອະນຸມັດໃບສະເໜີນີ້ ຈະອະນຸມັດຄຳຂໍເບີກ ${l._id} ພ້ອມກັນ. ດຳເນີນການຕໍ່?`,
-      );
-      if (!ok) return;
-      act(r._id, 'approve', { confirmLinkedApproval: true }, `ອະນຸມັດໃບສະເໜີ ແລະຄຳຂໍເບີກ ${l._id} ແລ້ວ — ລໍຂອງເຂົ້າຄັງ`);
-      return;
-    }
-    act(r._id, 'approve', {}, 'ອະນຸມັດໃບສະເໜີແລ້ວ');
+  const openDialog = (type, r) => {
+    setRejectReason('');
+    setDialog({ type, r });
   };
+  const closeDialog = () => {
+    setDialog(null);
+    setRejectReason('');
+  };
+  const approve = (r) => openDialog('approve', r);
+  const reject = (r) => openDialog('reject', r);
 
-  const reject = (r) => {
+  const submitDialog = async () => {
+    if (!dialog) return;
+    const { type, r } = dialog;
     const l = pendingLink(r);
-    const reason = window.prompt(
-      `ເຫດຜົນທີ່ປະຕິເສດ (ຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ)${l ? `\n\nໝາຍເຫດ: ຄຳຂໍເບີກ ${l._id} ທີ່ຜູກຢູ່ຈະຍັງຄ້າງ (ບໍ່ຖືກອະນຸມັດ) — ຜູ້ຂໍຈະໄດ້ຮັບແຈ້ງ` : ''}`,
-    );
-    if (reason && reason.trim().length >= 3) {
-      act(
+    if (type === 'approve') {
+      if (l) {
+        await act(r._id, 'approve', { confirmLinkedApproval: true }, `ອະນຸມັດໃບສະເໜີ ແລະຄຳຂໍເບີກ ${l._id} ແລ້ວ — ລໍຂອງເຂົ້າຄັງ`);
+      } else {
+        await act(r._id, 'approve', {}, 'ອະນຸມັດໃບສະເໜີແລ້ວ');
+      }
+    } else if (type === 'reject') {
+      const reason = rejectReason.trim();
+      if (reason.length < 3) return;
+      await act(
         r._id,
         'reject',
-        { reason: reason.trim() },
+        { reason },
         l ? `ປະຕິເສດໃບສະເໜີແລ້ວ — ຄຳຂໍເບີກ ${l._id} ຍັງບໍ່ໄດ້ຮັບການຈັດຫາ (ຄ້າງລໍຖ້າ)` : 'ປະຕິເສດໃບສະເໜີແລ້ວ',
       );
+    } else if (type === 'cancel') {
+      await act(r._id, 'cancel', undefined, 'ຍົກເລີກໃບສະເໜີແລ້ວ');
     }
+    closeDialog();
   };
 
   const isMine = (r) => String(r.requestedBy?._id ?? r.requestedBy) === String(currentUser?._id);
@@ -193,13 +222,7 @@ export default function PurchaseRequests() {
         {r.status === 'PENDING' && isMine(r) && canCreate && (
           <button
             disabled={busy}
-            onClick={() =>
-              window.confirm(
-                pendingLink(r)
-                  ? `ຍົກເລີກໃບສະເໜີນີ້? ຄຳຂໍເບີກ ${pendingLink(r)._id} ທີ່ຜູກຢູ່ຈະຍັງຄ້າງ ບໍ່ໄດ້ຮັບການຈັດຫາສ່ວນທີ່ຂາດ`
-                  : 'ຍົກເລີກໃບສະເໜີນີ້?',
-              ) && act(r._id, 'cancel', undefined, 'ຍົກເລີກໃບສະເໜີແລ້ວ')
-            }
+            onClick={() => openDialog('cancel', r)}
             className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50 disabled:opacity-50"
           >
             ຍົກເລີກ
@@ -217,7 +240,12 @@ export default function PurchaseRequests() {
     );
   };
 
-  const detail = rows.find((r) => r._id === detailId);
+  const detail = rows.find((r) => r._id === detailId) || (deepDetail && deepDetail._id === detailId ? deepDetail : undefined);
+  const closeDetail = () => {
+    setDetailId('');
+    setDeepDetail(null);
+    if (openId) setSearchParams({}, { replace: true });
+  };
 
   return (
     <MainLayout>
@@ -374,9 +402,10 @@ export default function PurchaseRequests() {
       {detail && (
         <PurchaseRequestDetailModal
           request={detail}
+          imageUrl={catalog.find((c) => c._id === detail.catalogItemId)?.imageUrl}
           statusInfo={STATUS[detail.status] || STATUS.PENDING}
           actions={renderActions(detail)}
-          onClose={() => setDetailId('')}
+          onClose={closeDetail}
         />
       )}
 
@@ -391,6 +420,100 @@ export default function PurchaseRequests() {
           }}
         />
       )}
+
+      {dialog && (() => {
+        const { type, r } = dialog;
+        const l = pendingLink(r);
+        const unit = r.unit ? ` ${r.unit}` : '';
+        const busy = busyId === r._id;
+        const cfg = {
+          approve: { title: 'ຢືນຢັນການອະນຸມັດໃບສະເໜີຊື້', icon: <CheckCircle2 size={22} />, ring: 'bg-emerald-100 text-emerald-600', btn: 'bg-emerald-600 hover:bg-emerald-700', ok: 'ຢືນຢັນອະນຸມັດ' },
+          reject: { title: 'ຢືນຢັນການປະຕິເສດໃບສະເໜີຊື້', icon: <XCircle size={22} />, ring: 'bg-red-100 text-red-600', btn: 'bg-red-600 hover:bg-red-700', ok: 'ຢືນຢັນປະຕິເສດ' },
+          cancel: { title: 'ຍົກເລີກໃບສະເໜີຊື້', icon: <AlertTriangle size={22} />, ring: 'bg-amber-100 text-amber-600', btn: 'bg-amber-600 hover:bg-amber-700', ok: 'ຢືນຢັນຍົກເລີກ' },
+        }[type];
+        return (
+          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={() => !busy && closeDialog()}>
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <div className="p-6 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${cfg.ring}`}>{cfg.icon}</div>
+                  <div className="min-w-0">
+                    <h4 className="text-base font-bold text-gray-800">{cfg.title}</h4>
+                    <p className="text-sm text-gray-500 mt-1 break-words">
+                      {r.prNo} — {r.itemName} ({r.quantity}{unit})
+                    </p>
+                  </div>
+                </div>
+
+                {l && (
+                  <div className="text-sm bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-1">
+                    <div className="font-medium text-violet-800">
+                      ຜູກກັບຄຳຂໍເບີກ {l._id} ຂອງ {personName(l.requestedBy)}
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      {l.itemName}: ຂໍ {l.requestedQty}{unit} = ໃຊ້ສະຕັອກ {Math.max((l.requestedQty || 0) - (l.purchaseQty || 0), 0)} + ຊື້ເພີ່ມ {l.purchaseQty}
+                    </div>
+                  </div>
+                )}
+
+                {type === 'approve' && (
+                  <p className="text-sm text-gray-600">
+                    {l
+                      ? `ການອະນຸມັດໃບສະເໜີນີ້ ຈະອະນຸມັດຄຳຂໍເບີກ ${l._id} ພ້ອມກັນ. ດຳເນີນການຕໍ່?`
+                      : 'ອະນຸມັດໃບສະເໜີຊື້ນີ້ແມ່ນບໍ?'}
+                  </p>
+                )}
+
+                {type === 'reject' && (
+                  <div>
+                    {l && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                        ໝາຍເຫດ: ຄຳຂໍເບີກ {l._id} ທີ່ຜູກຢູ່ຈະຍັງຄ້າງ (ບໍ່ຖືກອະນຸມັດ) — ຜູ້ຂໍຈະໄດ້ຮັບແຈ້ງ
+                      </p>
+                    )}
+                    <label className="block text-xs font-medium text-gray-700 mb-1">ເຫດຜົນທີ່ປະຕິເສດ * (ຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ)</label>
+                    <textarea
+                      autoFocus
+                      rows={3}
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      disabled={busy}
+                      className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 disabled:bg-gray-50"
+                    />
+                  </div>
+                )}
+
+                {type === 'cancel' && (
+                  <p className="text-sm text-gray-600">
+                    {l
+                      ? `ຍົກເລີກໃບສະເໜີນີ້? ຄຳຂໍເບີກ ${l._id} ທີ່ຜູກຢູ່ຈະຍັງຄ້າງ ບໍ່ໄດ້ຮັບການຈັດຫາສ່ວນທີ່ຂາດ`
+                      : 'ຍົກເລີກໃບສະເໜີນີ້ແມ່ນບໍ?'}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={closeDialog}
+                  disabled={busy}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                >
+                  ປິດ
+                </button>
+                <button
+                  type="button"
+                  onClick={submitDialog}
+                  disabled={busy || (type === 'reject' && rejectReason.trim().length < 3)}
+                  className={`px-4 py-2 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 ${cfg.btn}`}
+                >
+                  {busy ? 'ກຳລັງດຳເນີນການ...' : cfg.ok}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </MainLayout>
   );
 }

@@ -642,6 +642,17 @@ export default function AssetManagement() {
       const cat = stockOf(it);
       return cat && !it.purchaseRequestId && (it.quantity || 0) > (cat.stockQty ?? 0);
     }).length;
+    const linkedItems = items.filter((it) => it.purchaseRequestId);
+    const linkedPending = linkedItems.filter((it) => !it.purchaseStatus || it.purchaseStatus === 'PENDING');
+    const PR_STATUS = {
+      PENDING: { text: 'ລໍອະນຸມັດ', cls: 'bg-amber-100 text-amber-700' },
+      APPROVED: { text: 'ອະນຸມັດແລ້ວ (ລໍຮັບເຄື່ອງ)', cls: 'bg-blue-100 text-blue-700' },
+      PARTIALLY_RECEIVED: { text: 'ຮັບບາງສ່ວນ', cls: 'bg-violet-100 text-violet-700' },
+      RECEIVED: { text: 'ຮັບຄົບແລ້ວ', cls: 'bg-emerald-100 text-emerald-700' },
+      REJECTED: { text: 'ປະຕິເສດ', cls: 'bg-red-100 text-red-700' },
+      CANCELLED: { text: 'ຍົກເລີກ', cls: 'bg-gray-100 text-gray-500' },
+    };
+    const openPR = (id) => navigate(`/purchase-requests?open=${encodeURIComponent(id)}`);
     const deptName = req.departmentId && typeof req.departmentId === 'object' ? req.departmentId.name : req.departmentId;
     const info = (label, value) => (
       <div>
@@ -702,9 +713,14 @@ export default function AssetManagement() {
                                   <div className="font-medium text-gray-800">{it.name}</div>
                                   {it.catalogItemId && <div className="text-[11px] text-gray-400">{it.catalogItemId}</div>}
                                   {it.purchaseRequestNo && (
-                                    <div className="text-[11px] text-emerald-600">
+                                    <button
+                                      type="button"
+                                      onClick={() => openPR(it.purchaseRequestId)}
+                                      className="text-[11px] text-emerald-600 hover:underline inline-flex items-center gap-1"
+                                    >
                                       ຜູກໃບສະເໜີຊື້ {it.purchaseRequestNo}{it.purchaseQty ? ` (ຊື້ ${it.purchaseQty})` : ''}
-                                    </div>
+                                      <ExternalLink size={10} />
+                                    </button>
                                   )}
                                 </div>
                               </div>
@@ -725,6 +741,46 @@ export default function AssetManagement() {
               {overStock > 0 && (
                 <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   ມີ {overStock} ລາຍການທີ່ຂໍເກີນສະຕັອກປັດຈຸບັນ ແລະ ບໍ່ໄດ້ຜູກກັບໃບສະເໜີຊື້
+                </div>
+              )}
+
+              {linkedItems.length > 0 && (
+                <div className="border border-violet-100 bg-violet-50/40 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-violet-800">
+                    <ShoppingCart size={15} />
+                    ໃບສະເໜີຊື້ທີ່ຜູກກັບຄຳຂໍນີ້ (ສະຕັອກບໍ່ພໍ)
+                  </div>
+                  {linkedItems.map((it, k) => {
+                    const st = PR_STATUS[it.purchaseStatus] || PR_STATUS.PENDING;
+                    const fromStock = Math.max((it.quantity || 0) - (it.purchaseQty || 0), 0);
+                    return (
+                      <div key={`${it.purchaseRequestId}-${k}`} className="bg-white border border-violet-100 rounded-lg p-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs text-gray-500">{it.purchaseRequestNo || it.purchaseRequestId}</span>
+                            <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${st.cls}`}>{st.text}</span>
+                          </div>
+                          <div className="text-sm font-medium text-gray-800">{it.name}</div>
+                          <div className="text-xs text-gray-600">
+                            ຂໍ {it.quantity} = ໃຊ້ສະຕັອກ {fromStock} + ຊື້ເພີ່ມ {it.purchaseQty ?? '—'}
+                            {it.arrivedQty != null && it.purchaseQty ? ` · ຂອງມາແລ້ວ ${it.arrivedQty}/${it.purchaseQty}` : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openPR(it.purchaseRequestId)}
+                          className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-medium transition"
+                        >
+                          ເປີດໃບສະເໜີຊື້ <ExternalLink size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {linkedPending.length > 0 && (
+                    <div className="text-xs text-gray-500">
+                      ຄຳຂໍນີ້ຈະຖືກອະນຸມັດພ້ອມກັນເມື່ອອະນຸມັດໃບສະເໜີຊື້ — ກົດ "ເປີດໃບສະເໜີຊື້" ເພື່ອໄປອະນຸມັດ
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -803,6 +859,27 @@ export default function AssetManagement() {
 
                 {reviewError && (
                   <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{reviewError}</div>
+                )}
+
+                {confirmType === 'approve' && linkedPending.length > 0 && (
+                  <div className="space-y-2">
+                    {linkedPending.map((it, k) => (
+                      <button
+                        key={`${it.purchaseRequestId}-${k}`}
+                        type="button"
+                        onClick={() => openPR(it.purchaseRequestId)}
+                        className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 rounded-lg text-sm font-medium transition"
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <ShoppingCart size={14} />
+                          <span className="truncate">
+                            ໄປອະນຸມັດໃບສະເໜີຊື້ {it.purchaseRequestNo || ''} — {it.name}
+                          </span>
+                        </span>
+                        <ExternalLink size={14} className="shrink-0" />
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 
@@ -1351,6 +1428,21 @@ export default function AssetManagement() {
   useEffect(() => {
     if (searchParams.get('create') === '1') navigate('/goods-receipt?new=1', { replace: true });
   }, [searchParams, navigate]);
+
+  // ເປີດຄຳຂໍເບີກໂດຍກົງຈາກລິ້ງ (?request=SR059) — ເຊັ່ນ ຈາກໜ້າໃບສະເໜີຊື້
+  const deepRequestId = searchParams.get('request');
+  useEffect(() => {
+    if (!deepRequestId || loadingPending) return;
+    if (pendingRequests.some((r) => r._id === deepRequestId)) {
+      setActiveTab('pending');
+      setDetailReqId(deepRequestId);
+      navigate('/assets', { replace: true });
+    } else {
+      // ບໍ່ລໍອະນຸມັດແລ້ວ → ໄປເບິ່ງທີ່ໜ້າຄຳຂໍເບີກ
+      navigate(`/supplies?open=${encodeURIComponent(deepRequestId)}`, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepRequestId, loadingPending, pendingRequests]);
 
   return (
     <MainLayout>

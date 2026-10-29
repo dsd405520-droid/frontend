@@ -50,7 +50,7 @@ function QtyStepper({ value, onMinus, onPlus, onType }) {
 }
 
 export default function InventorySupplies() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canRequest = hasPermission('supplies', 'create');
 
   const [requests, setRequests] = useState([]);
@@ -104,6 +104,15 @@ export default function InventorySupplies() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [detailId, setDetailId] = useState(null);
   const detailRequest = detailId ? requests.find((r) => r._id === detailId) || null : null;
+
+  // ເປີດລາຍລະອຽດຄຳຂໍໂດຍກົງຈາກລິ້ງ (?open=SR059)
+  const openParam = searchParams.get('open');
+  useEffect(() => {
+    if (!openParam || requests.length === 0) return;
+    if (requests.some((r) => r._id === openParam)) setDetailId(openParam);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openParam, requests]);
 
   const [delegatePickerOpen, setDelegatePickerOpen] = useState(false);
   const [candQuery, setCandQuery] = useState('');

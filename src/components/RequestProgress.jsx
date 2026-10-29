@@ -24,8 +24,8 @@ const STALLED_PURCHASE = ['REJECTED', 'CANCELLED'];
 
 export const isRequestFinished = (req) => CLOSED_STATUSES.includes(req?.status);
 
-// Hide the progress bar for finished or cancelled requests
-export const shouldHideProgress = (req) => isRequestFinished(req) || req?.status === 'CANCELLED';
+// Hide the progress bar for finished, cancelled or rejected requests
+export const shouldHideProgress = (req) => isRequestFinished(req) || ['CANCELLED', 'REJECTED'].includes(req?.status);
 
 const circleCls = (state, key) => {
   if (state === 'done') return 'bg-emerald-500 text-white';

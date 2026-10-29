@@ -1,4 +1,7 @@
-import { X } from 'lucide-react';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { X, Link2, ExternalLink } from 'lucide-react';
+import { CatalogThumb, imageSrc } from './CatalogImage';
 
 const TYPE_LABEL = {
   DEVICE_SERIAL: 'ມີ Serial Number',
@@ -31,7 +34,9 @@ function Row({ label, children, full }) {
   );
 }
 
-export default function PurchaseRequestDetailModal({ request: r, statusInfo, actions, onClose }) {
+export default function PurchaseRequestDetailModal({ request: r, statusInfo, actions, onClose, imageUrl }) {
+  const [zoom, setZoom] = useState(false);
+  const navigate = useNavigate();
   const unit = r.unit ? ` ${r.unit}` : '';
   const remaining = Math.max((r.quantity || 0) - (r.receivedQuantity || 0), 0);
   const decided = r.status === 'REJECTED' ? 'ປະຕິເສດໂດຍ' : 'ອະນຸມັດໂດຍ';
@@ -43,10 +48,20 @@ export default function PurchaseRequestDetailModal({ request: r, statusInfo, act
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <div className="font-mono text-xs text-gray-400">{r.prNo}</div>
-            <h3 className="text-lg font-bold text-gray-800">{r.itemName}</h3>
-            <span className={`inline-block mt-1 px-2 py-1 rounded-full text-xs font-medium ${statusInfo.cls}`}>{statusInfo.text}</span>
+          <div className="flex items-start gap-4 min-w-0">
+            <button
+              type="button"
+              onClick={() => imageUrl && setZoom(true)}
+              className={imageUrl ? 'cursor-zoom-in' : 'cursor-default'}
+              title={imageUrl ? 'ກົດເພື່ອຂະຫຍາຍຮູບ' : undefined}
+            >
+              <CatalogThumb url={imageUrl} name={r.itemName} size={88} />
+            </button>
+            <div className="min-w-0">
+              <div className="font-mono text-xs text-gray-400">{r.prNo}</div>
+              <h3 className="text-lg font-bold text-gray-800">{r.itemName}</h3>
+              <span className={`inline-block mt-1 px-2 py-1 rounded-full text-xs font-medium ${statusInfo.cls}`}>{statusInfo.text}</span>
+            </div>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={20} />
@@ -109,23 +124,51 @@ export default function PurchaseRequestDetailModal({ request: r, statusInfo, act
               REJECTED: 'ຄຳຂໍຖືກປະຕິເສດ',
             };
             const stalled = (r.status === 'REJECTED' || r.status === 'CANCELLED') && l.status === 'REQUESTED';
+            const who = personName(l.requestedBy);
+            const unitTxt = r.unit ? ` ${r.unit}` : '';
+            const fromStock = Math.max((l.requestedQty || 0) - (l.purchaseQty || 0), 0);
+            const done = ['CLOSED', 'FULFILLED'].includes(l.status);
+            // ຄຳຂໍທີ່ລໍອະນຸມັດ → ໜ້າອະນຸມັດ, ສະຖານະອື່ນ → ໜ້າຄຳຂໍເບີກ
+            const target = l.status === 'REQUESTED' ? `/assets?request=${encodeURIComponent(l._id)}` : `/supplies?open=${encodeURIComponent(l._id)}`;
             return (
-              <Section title="ຄຳຂໍເບີກທີ່ຜູກ">
-                <Row label="ເລກຄຳຂໍເບີກ">{l._id}</Row>
-                <Row label="ຜູ້ຂໍເບີກ">{personName(l.requestedBy)}</Row>
-                <Row label="ສະຖານະຄຳຂໍເບີກ">{SR_TEXT[l.status] || l.status}</Row>
-                <Row label="ຈຳນວນ">
-                  ຂໍ {l.requestedQty} = ໃຊ້ສະຕັອກ {Math.max((l.requestedQty || 0) - (l.purchaseQty || 0), 0)} + ຊື້ເພີ່ມ {l.purchaseQty}
-                </Row>
-                <Row label="ຂອງມາຮອດຄັງແລ້ວ (ຈອງໃຫ້ຜູ້ຂໍ)">{arrived}/{l.purchaseQty}</Row>
-                {stalled && (
-                  <Row label="ແຈ້ງເຕືອນ" full>
-                    <span className="text-red-600">
-                      ໃບສະເໜີນີ້ຖືກ{r.status === 'REJECTED' ? 'ປະຕິເສດ' : 'ຍົກເລີກ'} — ຄຳຂໍເບີກ {l._id} ຍັງຄ້າງ ແລະສ່ວນທີ່ສະຕັອກບໍ່ພໍຍັງບໍ່ໄດ້ຮັບການຈັດຫາ
-                    </span>
+              <div className="border border-violet-200 bg-violet-50/50 rounded-xl p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <Link2 size={16} className="text-violet-600 mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-violet-800">ໃບສະເໜີຊື້ນີ້ຜູກກັບຄຳຂໍເບີກ {l._id}</div>
+                      <div className="text-xs text-gray-600 mt-0.5">
+                        {done
+                          ? `${who} ຮັບເຄື່ອງຈາກໃບສະເໜີນີ້ແລ້ວ`
+                          : `ເມື່ອຮັບເຄື່ອງເຂົ້າຄັງ ລະບົບຈະຈອງ ${l.purchaseQty ?? ''}${unitTxt} ໃຫ້ ${who} ອັດຕະໂນມັດ ແລະແຈ້ງເຕືອນເມື່ອພ້ອມມາຮັບ`}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate(target)}
+                    className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-xs font-medium transition"
+                  >
+                    ເປີດຄຳຂໍເບີກ <ExternalLink size={12} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                  <Row label="ເລກຄຳຂໍເບີກ">{l._id}</Row>
+                  <Row label="ຜູ້ຂໍເບີກ (ຜູ້ທີ່ຈະໄດ້ຮັບເຄື່ອງ)">{who}</Row>
+                  <Row label="ສະຖານະຄຳຂໍເບີກ">{SR_TEXT[l.status] || l.status}</Row>
+                  <Row label="ຈຳນວນ">
+                    ຂໍ {l.requestedQty} = ໃຊ້ສະຕັອກ {fromStock} + ຊື້ເພີ່ມ {l.purchaseQty}
                   </Row>
-                )}
-              </Section>
+                  <Row label="ຂອງມາຮອດຄັງແລ້ວ (ຈອງໃຫ້ຜູ້ຂໍ)">{arrived}/{l.purchaseQty}</Row>
+                  {stalled && (
+                    <Row label="ແຈ້ງເຕືອນ" full>
+                      <span className="text-red-600">
+                        ໃບສະເໜີນີ້ຖືກ{r.status === 'REJECTED' ? 'ປະຕິເສດ' : 'ຍົກເລີກ'} — ຄຳຂໍເບີກ {l._id} ຍັງຄ້າງ ແລະສ່ວນທີ່ສະຕັອກບໍ່ພໍຍັງບໍ່ໄດ້ຮັບການຈັດຫາ
+                      </span>
+                    </Row>
+                  )}
+                </div>
+              </div>
             );
           })()}
 
@@ -149,6 +192,17 @@ export default function PurchaseRequestDetailModal({ request: r, statusInfo, act
           </button>
         </div>
       </div>
+      {zoom && imageUrl && (
+        <div
+          className="fixed inset-0 bg-black/80 z-[70] flex items-center justify-center p-6 cursor-zoom-out"
+          onClick={(e) => {
+            e.stopPropagation();
+            setZoom(false);
+          }}
+        >
+          <img src={imageSrc(imageUrl)} alt={r.itemName} className="max-w-full max-h-full rounded-xl object-contain bg-white" />
+        </div>
+      )}
     </div>
   );
 }
