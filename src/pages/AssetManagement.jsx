@@ -9,6 +9,7 @@ import CsvExportButton from '../components/CsvExportButton';
 import { API_ORIGIN } from '../config';
 import { ReceiveModal } from './GoodsReceipt';
 import AddAssetModal from '../components/AddAssetModal';
+import CatalogImageUpload, { CatalogThumb, imageSrc } from '../components/CatalogImage';
 import GoodsReceiptPrint from '../components/GoodsReceiptPrint';
 import { AssignAssetModal, AssetBarcodeModal, AssignmentHistoryModal } from '../components/AssetRowModals';
 
@@ -103,6 +104,7 @@ export default function AssetManagement() {
     unit: '',
     trackMode: '',
     lowStockThreshold: 5,
+    imageUrl: '',
   });
   const [editingId, setEditingId] = useState(null);
 
@@ -215,6 +217,7 @@ export default function AssetManagement() {
       unit: item.unit || '',
       trackMode: trackModeOf(item),
       lowStockThreshold: item.lowStockThreshold ?? 5,
+      imageUrl: item.imageUrl || '',
     });
     setIsModalOpen(true);
   };
@@ -685,13 +688,22 @@ export default function AssetManagement() {
           aria-modal="true"
         >
           <div className="flex items-start justify-between px-6 pt-5 pb-3">
-            <div>
+            <div className="flex items-start gap-4 min-w-0">
+              {liveItem.imageUrl ? (
+                <a href={imageSrc(liveItem.imageUrl)} target="_blank" rel="noreferrer" title="ເປີດຮູບເຕັມ">
+                  <CatalogThumb url={liveItem.imageUrl} name={liveItem.name} size={88} />
+                </a>
+              ) : (
+                <CatalogThumb url="" size={88} />
+              )}
+            <div className="min-w-0">
               <h3 className="text-lg font-bold text-gray-800">{historyItem.name}</h3>
               <p className="text-xs text-gray-500 mt-0.5">
                 {historyItem._id}
                 {trackModeOf(historyItem) ? ` · ${TRACK_LABEL[trackModeOf(historyItem)]}` : ''}
                 {` · ສະຕັອກ ${liveItem.stockQty} ${liveItem.unit || ''}`}
               </p>
+            </div>
             </div>
             <button onClick={() => setHistoryItem(null)} className="text-gray-400 hover:text-gray-600" aria-label="ປິດ"><X size={20} /></button>
           </div>
@@ -1382,6 +1394,9 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                     <tr key={item._id} onClick={() => openHistory(item, subTotal > 0 ? { search: searchQuery.trim(), tab: sm.assets > 0 && sm.receipts === 0 ? 'assets' : 'receipts' } : undefined)} title="ກົດເພື່ອເບິ່ງການຮັບເຂົ້າ ແລະ ທະບຽນຊັບສິນ" className="hover:bg-gray-50 cursor-pointer">
                       <td className="p-4 font-semibold text-gray-900">{item._id}</td>
                       <td className="p-4 font-medium text-gray-800">
+                        <div className="flex items-start gap-3">
+                          <CatalogThumb url={item.imageUrl} name={item.name} size={40} />
+                          <div className="min-w-0">
                         {item.name}
                         {subTotal > 0 && (
                           <div className="mt-1 flex flex-wrap gap-1">
@@ -1389,6 +1404,8 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                             {sm.assets > 0 && <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-medium">ພົບໃນຊັບສິນ {sm.assets}</span>}
                           </div>
                         )}
+                          </div>
+                        </div>
                       </td>
                       <td className="p-4">{item.category}</td>
                       <td className="p-4 text-xs">
@@ -1472,7 +1489,7 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
 
       {isModalOpen && editingId && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto animate-in fade-in duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <h3 className="text-lg font-bold text-gray-800">ແກ້ໄຂລາຍການ {editingId}</h3>
               <button
@@ -1528,6 +1545,11 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500"
                 />
               </div>
+
+              <CatalogImageUpload
+                value={formData.imageUrl}
+                onChange={(url) => setFormData((prev) => ({ ...prev, imageUrl: url }))}
+              />
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">ວິທີຕິດຕາມ</label>
@@ -1640,4 +1662,4 @@ const isLowStock = item.stockQty <= item.lowStockThreshold;
       )}
     </MainLayout>
   );
-}
+}

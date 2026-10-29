@@ -11,6 +11,8 @@ import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
 import CameraScanner from '../components/CameraScanner';
 import AssetTagVisual from '../components/AssetTagVisual';
+import AssetTimeline from '../components/AssetTimeline';
+import { CatalogThumb } from '../components/CatalogImage';
 import AssetTagPrintModal from '../components/AssetTagPrintModal';
 import { API_BASE_URL } from '../config';
 
@@ -1074,6 +1076,7 @@ export default function AssetRegistry() {
                             <div className="flex items-center gap-2">
                               {open ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
                               {open ? <FolderOpen size={18} className="text-amber-500" /> : <Folder size={18} className="text-amber-500" />}
+                              <CatalogThumb url={catalog.find((c) => c._id === f.key)?.imageUrl} name={f.name} size={36} />
                               <span className="font-semibold text-gray-900">{f.key === '__none' ? '—' : f.key}</span>
                               <span className="text-gray-600">{f.name}</span>
                             </div>
@@ -1387,12 +1390,15 @@ export default function AssetRegistry() {
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setDetailAssetId(null)}>
               <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[92vh] shadow-xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
                 <div className="flex items-start justify-between px-6 pt-5 pb-3">
+                  <div className="flex items-center gap-3">
+                    <CatalogThumb url={cat?.imageUrl} name={cat?.name || a.type} size={56} />
                   <div>
                     <div className="flex items-center gap-3">
                       <h2 className="text-lg font-bold text-gray-800">{a.assetTag}</h2>
                       <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span>
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">{a.catalogItemId ? `${refId(a.catalogItemId)} · ${cat?.name || a.type || ''}` : a.type || ''}</p>
+                  </div>
                   </div>
                   <button type="button" onClick={() => setDetailAssetId(null)} className="text-gray-400 hover:text-gray-600" aria-label="ປິດ"><X size={20} /></button>
                 </div>
@@ -1440,6 +1446,11 @@ export default function AssetRegistry() {
                       )}
                       <DetailBtn onClick={() => navigate(`/assets/${a._id}`)} Icon={ExternalLink} label="ເປີດໜ້າລາຍລະອຽດເຕັມ" tone="amber" />
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold text-gray-600 mb-2">ໄທມ໌ໄລນ໌ — ເຂົ້າສາງ / ໃຜຮັບ / ໃຜຖື</div>
+                    <AssetTimeline assetId={a._id} />
                   </div>
 
                   <div>

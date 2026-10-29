@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Printer, ScanLine, CheckCircle2, AlertCircle, Package } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -95,6 +95,16 @@ export default function SupplyReceipt() {
     setSubmitError('');
   };
 
+  // ສະແກນຄົບຕາມຈຳນວນທີ່ຂໍ → ປິດກ້ອງອັດຕະໂນມັດ (ໜ່ວງສັ້ນໆ ໃຫ້ເຫັນ ✓ ສະແກນແລ້ວ ກ່ອນ)
+  const prevTagCount = useRef(0);
+  useEffect(() => {
+    const reached = prevTagCount.current < requiredTagCount && tags.length >= requiredTagCount;
+    prevTagCount.current = tags.length;
+    if (!scannerOpen || requiredTagCount <= 0 || !reached) return undefined;
+    const t = setTimeout(() => setScannerOpen(false), 700);
+    return () => clearTimeout(t);
+  }, [tags, requiredTagCount, scannerOpen]);
+
   const removeTag = (value) => setTags((prev) => prev.filter((t) => t !== value));
 
   // ຜູ້ຂໍກຳນົດ/ປ່ຽນ/ລຶບ ຜູ້ຮັບແທນ (1 ຄົນ) — ສົ່ງ null ເພື່ອລຶບ
@@ -135,7 +145,13 @@ export default function SupplyReceipt() {
     }
   };
 
-  const status = STATUS_LABEL[receipt?.status] || { text: receipt?.status, className: 'bg-gray-50 text-gray-600 border-gray-200' };
+  const status =
+    receipt?.status === 'APPROVED' && receipt?.readyToCollect
+      ? { text: 'ພ້ອມມາຮັບ', className: 'bg-teal-50 text-teal-700 border-teal-200' }
+      : STATUS_LABEL[receipt?.status] ||
+        (receipt?.status === 'ORDERED'
+          ? { text: 'ລໍຂອງເຂົ້າຄັງ', className: 'bg-violet-50 text-violet-600 border-violet-200' }
+          : { text: receipt?.status, className: 'bg-gray-50 text-gray-600 border-gray-200' });
   const canSubmit =
     receipt?.canConfirm &&
     !submitting &&
@@ -334,7 +350,30 @@ export default function SupplyReceipt() {
               </div>
             )}
 
-            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && (
+            {receipt.waitingForPurchase && (
+              <div className="no-print bg-violet-50 border border-violet-200 rounded-2xl p-4 text-sm text-violet-800 space-y-2">
+                <div className="font-semibold">ລໍຂອງເຂົ້າຄັງ — ຍັງຮັບບໍ່ໄດ້ຈົນກວ່າຈະ "ພ້ອມມາຮັບ"</div>
+                {receipt.items
+                  .filter((it) => it.purchaseRequestId)
+                  .map((it, k) => (
+                    <div key={`${it.purchaseRequestId}-${k}`} className="text-xs">
+                      {it.name}: ຂໍ {it.quantity} = ໃຊ້ສະຕັອກ {Math.max((it.quantity || 0) - (it.purchaseQty || 0), 0)} + ຊື້ເພີ່ມ {it.purchaseQty}
+                      {' · '}ຂອງມາແລ້ວ <b>{it.arrivedQty || 0}/{it.purchaseQty}</b> ({it.purchaseRequestNo})
+                      {(it.purchaseStatus === 'REJECTED' || it.purchaseStatus === 'CANCELLED') && (
+                        <span className="text-red-600"> — ໃບສະເໜີຊື້ຖືກ{it.purchaseStatus === 'REJECTED' ? 'ປະຕິເສດ' : 'ຍົກເລີກ'} ຍັງບໍ່ໄດ້ຮັບການຈັດຫາ</span>
+                      )}
+                    </div>
+                  ))}
+                <div className="text-xs">ຈະແຈ້ງເຕືອນເມື່ອຂອງມາຄົບ — ຫຼັງຈາກນັ້ນມາສະແກນຮັບຕາມປົກກະຕິ</div>
+              </div>
+            )}
+            {receipt.readyToCollect && receipt.canConfirm && (
+              <div className="no-print bg-teal-50 border border-teal-200 rounded-2xl p-4 text-sm text-teal-800">
+                ຂອງທີ່ຕ້ອງຊື້ເພີ່ມມາຄົບແລ້ວ ແລະຖືກຈອງໄວ້ໃຫ້ຄຳຂໍນີ້ — ສະແກນຮັບໄດ້ເລີຍ
+              </div>
+            )}
+
+            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && !receipt.waitingForPurchase && (
               <div className="no-print bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
                 ມີສະເພາະຜູ້ຂໍ, ຜູ້ຮັບແທນທີ່ຖືກກຳນົດ, ຜູ້ຮັບຜິດຊອບ/ຫົວໜ້າແຜນກ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill ແລະ assets.assign) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
               </div>
