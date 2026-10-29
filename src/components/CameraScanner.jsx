@@ -18,6 +18,39 @@ export default function CameraScanner({
   const [error, setError] = useState('');
   const [lastText, setLastText] = useState('');
   const [count, setCount] = useState(0);
+  const [flash, setFlash] = useState(false);
+  const flashTimerRef = useRef(null);
+  const audioRef = useRef(null);
+
+  const signalScan = () => {
+    setFlash(true);
+    clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => setFlash(false), 450);
+    try {
+      navigator.vibrate?.(80);
+    } catch {
+      return;
+    }
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!audioRef.current) audioRef.current = new Ctx();
+      const ctx = audioRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 1000;
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch {
+      return;
+    }
+  };
 
   const stopScanner = async () => {
     if (stoppedRef.current) return;
@@ -27,12 +60,10 @@ export default function CameraScanner({
     try {
       await scanner.stop();
     } catch {
-      /* already stopped */
     }
     try {
       scanner.clear();
     } catch {
-      /* ignore */
     }
   };
 
@@ -43,7 +74,6 @@ export default function CameraScanner({
 
   useEffect(() => {
     let cancelled = false;
-    // StrictMode (dev) mount→cleanup→mount ໃຊ້ ref ຕົວເກົ່າ — ຕ້ອງ reset ບໍ່ດັ່ງນັ້ນ stopScanner ຈະບໍ່ເຮັດວຽກ ແລະກ້ອງຄ້າງ
     stoppedRef.current = false;
 
     (async () => {
@@ -73,7 +103,14 @@ export default function CameraScanner({
       try {
         await scanner.start(
           { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 260, height: 260 } },
+          {
+            fps: 15,
+            videoConstraints: {
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          },
           (decodedText) => {
             const now = Date.now();
             const prev = lastScanRef.current;
@@ -81,11 +118,11 @@ export default function CameraScanner({
             lastScanRef.current = { text: decodedText, at: now };
             setLastText(decodedText);
             setCount((c) => c + 1);
+            signalScan();
             onScan?.(decodedText);
             if (!continuous) void handleClose();
           },
           () => {
-            /* per-frame decode misses are expected */
           },
         );
         if (!cancelled) setStarting(false);
@@ -105,9 +142,9 @@ export default function CameraScanner({
 
     return () => {
       cancelled = true;
+      clearTimeout(flashTimerRef.current);
       void stopScanner();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -122,11 +159,15 @@ export default function CameraScanner({
           </button>
         </div>
 
-        <div className="relative bg-black aspect-square">
-          <div id={elementId} className="w-full h-full [&_video]:w-full [&_video]:h-full [&_video]:object-cover" />
+        <div className="relative bg-black min-h-[200px]">
+          <div id={elementId} className="w-full" />
           {!error && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="w-56 h-56 border-2 border-amber-400/80 rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+              <div className={`absolute inset-0 bg-emerald-400 transition-opacity duration-300 ${flash ? 'opacity-50' : 'opacity-0'}`} />
+              <div className={`absolute z-10 flex items-center gap-2 bg-emerald-500 text-white text-sm font-bold px-4 py-2 rounded-full shadow-lg transition-all duration-300 ${flash ? 'opacity-100 scale-100' : 'opacity-0 scale-75'}`}>
+                <span>✓</span> ສະແກນແລ້ວ
+              </div>
+              <div className="w-[70%] h-[75%] border-2 border-amber-400/80 rounded-2xl" />
             </div>
           )}
           {starting && !error && (

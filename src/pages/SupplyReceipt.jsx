@@ -17,7 +17,6 @@ const STATUS_LABEL = {
   REJECTED: { text: 'ຖືກປະຕິເສດ', className: 'bg-rose-50 text-rose-600 border-rose-200' },
 };
 
-// ໃບຮັບເຄື່ອງ 1 ໃບ ຕໍ່ 1 ໃບຂໍ — QR ຂອງໜ້ານີ້ = ເລກໃບຂໍ. ຜູ້ຂໍສະແກນ (login ຢູ່ແລ້ວ) ແລ້ວຢືນຢັນຮັບທຸກລາຍການໃນຄັ້ງດຽວ
 export default function SupplyReceipt() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -32,14 +31,25 @@ export default function SupplyReceipt() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
+<<<<<<< HEAD
   const tagsRef = useRef([]);
   const [tags, setTags] = useState([]); // asset tag ຫຼື _id ທີ່ສະແກນ/ພິມ
   const [tagInput, setTagInput] = useState('');
   const [confirmConsumables, setConfirmConsumables] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+=======
+  const [tagsByItem, setTagsByItem] = useState({});
+  const [tagInputs, setTagInputs] = useState({});
+  const [checkedConsumables, setCheckedConsumables] = useState({});
+  const [scanTarget, setScanTarget] = useState(null);
+>>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [done, setDone] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [delegateInput, setDelegateInput] = useState('');
+  const [delegateSaving, setDelegateSaving] = useState(false);
+  const [delegateError, setDelegateError] = useState('');
 
   const load = async () => {
     try {
@@ -62,9 +72,13 @@ export default function SupplyReceipt() {
   }, [id]);
 
   const items = receipt?.items || [];
-  const taggedItems = items.filter((i) => i.requiresAssetTag);
-  const consumableItems = items.filter((i) => !i.requiresAssetTag);
-  const requiredTagCount = taggedItems.reduce((sum, i) => sum + (i.quantity || 0), 0);
+  const entries = items.map((it, k) => ({ it, k }));
+  const taggedEntries = entries.filter((e) => e.it.requiresAssetTag);
+  const consumableEntries = entries.filter((e) => !e.it.requiresAssetTag);
+  const requiredTagCount = taggedEntries.reduce((sum, e) => sum + (e.it.quantity || 0), 0);
+  const tags = Object.values(tagsByItem).flat();
+  const allConsumablesChecked = consumableEntries.every((e) => checkedConsumables[e.k]);
+  const allTagsDone = taggedEntries.every((e) => (tagsByItem[e.k] || []).length >= (e.it.quantity || 0));
 
   const requester = receipt?.requestedBy && typeof receipt.requestedBy === 'object' ? receipt.requestedBy : null;
   const requesterName = requester
@@ -75,19 +89,36 @@ export default function SupplyReceipt() {
   const custodianName = custodian
     ? `${custodian.firstName || ''} ${custodian.lastName || ''}`.trim() || custodian.employeeCode || '—'
     : '—';
+  const delegate = receipt?.delegateId && typeof receipt.delegateId === 'object' ? receipt.delegateId : null;
+  const delegateName = delegate
+    ? `${delegate.firstName || ''} ${delegate.lastName || ''}`.trim() || delegate.employeeCode || '—'
+    : '';
   const isDepartmentRequest = !!receipt?.isDepartmentRequest;
   const receiverName = isDepartmentRequest ? custodianName : requesterName;
 
+<<<<<<< HEAD
   const [tagInfo, setTagInfo] = useState({}); // value(lowercase) -> { loading, asset, error }
   const [scanNote, setScanNote] = useState('');
 
   const addTag = (raw) => {
+=======
+  const addTag = (raw, k) => {
+>>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
     let value = String(raw || '').trim();
-    if (!value) return;
-    // QR ຂອງຊັບສິນເປັນລິ້ງ …/assets/<_id>?claim=1 → ເອົາ _id
+    if (!value || k === null || k === undefined) return;
     const m = value.match(/\/assets\/([A-Za-z0-9_-]+)/);
     if (m) value = m[1];
+<<<<<<< HEAD
     const key = value.toLowerCase();
+=======
+    const quantity = items[k]?.quantity || 0;
+    setTagsByItem((prev) => {
+      const current = prev[k] || [];
+      const exists = Object.values(prev).flat().some((t) => t.toLowerCase() === value.toLowerCase());
+      if (exists || current.length >= quantity) return prev;
+      return { ...prev, [k]: [...current, value] };
+    });
+>>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
     setSubmitError('');
     if (tagsRef.current.some((t) => t.toLowerCase() === key)) {
       setScanNote(`${value} ສະແກນແລ້ວ (ຊ້ຳ)`);
@@ -108,9 +139,41 @@ export default function SupplyReceipt() {
       );
   };
 
+<<<<<<< HEAD
   const removeTag = (value) => {
     tagsRef.current = tagsRef.current.filter((t) => t !== value);
     setTags(tagsRef.current);
+=======
+  const scanCount = scanTarget === null ? 0 : (tagsByItem[scanTarget] || []).length;
+  const scanQuantity = scanTarget === null ? 0 : items[scanTarget]?.quantity || 0;
+  useEffect(() => {
+    if (scanTarget === null || scanQuantity <= 0 || scanCount < scanQuantity) return undefined;
+    const t = setTimeout(() => setScanTarget(null), 700);
+    return () => clearTimeout(t);
+  }, [scanTarget, scanCount, scanQuantity]);
+
+  const removeTag = (k, value) =>
+    setTagsByItem((prev) => ({ ...prev, [k]: (prev[k] || []).filter((t) => t !== value) }));
+
+  const toggleConsumable = (k) => setCheckedConsumables((prev) => ({ ...prev, [k]: !prev[k] }));
+  const toggleAllConsumables = () => {
+    const next = !allConsumablesChecked;
+    setCheckedConsumables(Object.fromEntries(consumableEntries.map((e) => [e.k, next])));
+  };
+
+  const saveDelegate = async (code) => {
+    setDelegateError('');
+    setDelegateSaving(true);
+    try {
+      await axios.patch(`/supply-requests/${id}/delegate`, { delegateCode: code });
+      setDelegateInput('');
+      await load();
+    } catch (err) {
+      setDelegateError(err.response?.data?.msg || err.response?.data?.message || 'ບັນທຶກຜູ້ຮັບແທນບໍ່ສຳເລັດ');
+    } finally {
+      setDelegateSaving(false);
+    }
+>>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
   };
 
   const submit = async () => {
@@ -118,12 +181,11 @@ export default function SupplyReceipt() {
     setSubmitting(true);
     try {
       const payload = { assetTags: tags };
-      if (consumableItems.length > 0) payload.confirmConsumables = confirmConsumables;
-      // ເຈົ້າໜ້າທີ່ສາງຢືນຢັນແທນຜູ້ຂໍ → ລະບຸລະຫັດຜູ້ຂໍເປັນຜູ້ຮັບ
-      // (ໃບຂອງແຜນກ: ບໍ່ສົ່ງ assigneeCode — Backend ຈະມອບໃຫ້ຜູ້ຮັບຜິດຊອບຂອງແຜນກ)
+      if (consumableEntries.length > 0) payload.confirmConsumables = allConsumablesChecked;
       if (!isDepartmentRequest && !receipt.isRequester && requester?.employeeCode) {
         payload.assigneeCode = requester.employeeCode;
       }
+      if (receipt.requiresOverride) payload.overrideReason = overrideReason.trim();
       await axios.patch(`/supply-requests/${id}/receive`, payload);
       setDone(true);
       await load();
@@ -134,13 +196,25 @@ export default function SupplyReceipt() {
     }
   };
 
-  const status = STATUS_LABEL[receipt?.status] || { text: receipt?.status, className: 'bg-gray-50 text-gray-600 border-gray-200' };
+  const status =
+    receipt?.status === 'APPROVED' && receipt?.readyToCollect
+      ? { text: 'ພ້ອມມາຮັບ', className: 'bg-teal-50 text-teal-700 border-teal-200' }
+      : STATUS_LABEL[receipt?.status] ||
+        (receipt?.status === 'ORDERED'
+          ? { text: 'ລໍຂອງເຂົ້າຄັງ', className: 'bg-violet-50 text-violet-600 border-violet-200' }
+          : { text: receipt?.status, className: 'bg-gray-50 text-gray-600 border-gray-200' });
   const canSubmit =
     receipt?.canConfirm &&
     !submitting &&
+<<<<<<< HEAD
     !tags.some((t) => { const i = tagInfo[t.toLowerCase()] || {}; return i.hard || (i.asset?.status && i.asset.status !== 'AVAILABLE'); }) &&
     (requiredTagCount === 0 || tags.length >= requiredTagCount) &&
     (consumableItems.length === 0 || confirmConsumables);
+=======
+    (!receipt.requiresOverride || overrideReason.trim().length >= 5) &&
+    allTagsDone &&
+    allConsumablesChecked;
+>>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
 
   return (
     <MainLayout>
@@ -197,6 +271,12 @@ export default function SupplyReceipt() {
                         {custodian?.employeeCode ? ` (${custodian.employeeCode})` : ''}
                       </div>
                     </>
+                  )}
+                  {delegate && (
+                    <div className="text-sm text-gray-500">
+                      ຜູ້ຮັບແທນ: <span className="font-medium text-gray-800">{delegateName}</span>
+                      {delegate.employeeCode ? ` (${delegate.employeeCode})` : ''}
+                    </div>
                   )}
                   <div className="text-sm text-gray-500">
                     ວັນທີຍື່ນ: {receipt.createdAt ? new Date(receipt.createdAt).toLocaleDateString() : '—'}
@@ -271,9 +351,88 @@ export default function SupplyReceipt() {
               </div>
             )}
 
-            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && (
+            {receipt.receiveOverride && (
               <div className="no-print bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
-                ມີສະເພາະຜູ້ຂໍ, ຜູ້ຮັບຜິດຊອບ/ຫົວໜ້າແຜນກ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
+                ເຈົ້າໜ້າທີ່ສາງຢືນຢັນຮັບເຄື່ອງແທນ (override) — ເຫດຜົນ: {receipt.receiveOverride.reason}
+              </div>
+            )}
+
+            {receipt.canSetDelegate && (
+              <div className="no-print bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
+                <h2 className="text-base font-bold text-gray-800">ຜູ້ຮັບແທນ</h2>
+                <div className="text-xs text-gray-500">
+                  ກຳນົດໄດ້ 1 ຄົນ ແລະປ່ຽນໄດ້ຕະຫຼອດຈົນກວ່າຈະຮັບເຄື່ອງ. ຜູ້ຮັບແທນມາຢືນຢັນຮັບເຄື່ອງຈາກໃບນີ້ໄດ້; ເຄື່ອງຍັງບັນທຶກໃຫ້ຜູ້ຂໍ{isDepartmentRequest ? '/ແຜນກ' : ''}ຄືເກົ່າ.
+                </div>
+                <div className="text-sm text-gray-600">
+                  ປັດຈຸບັນ:{' '}
+                  {delegate ? (
+                    <span className="font-medium text-gray-800">
+                      {delegateName}
+                      {delegate.employeeCode ? ` (${delegate.employeeCode})` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400">ຍັງບໍ່ໄດ້ກຳນົດ</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={delegateInput}
+                    onChange={(e) => setDelegateInput(e.target.value)}
+                    placeholder="ລະຫັດພະນັກງານຂອງຜູ້ຮັບແທນ (ເຊັ່ນ EMP002)"
+                    className="flex-1 border border-gray-200 rounded-lg p-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveDelegate(delegateInput.trim())}
+                    disabled={delegateSaving || !delegateInput.trim()}
+                    className="px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-40"
+                  >
+                    {delegate ? 'ປ່ຽນ' : 'ບັນທຶກ'}
+                  </button>
+                  {delegate && (
+                    <button
+                      type="button"
+                      onClick={() => saveDelegate(null)}
+                      disabled={delegateSaving}
+                      className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-40"
+                    >
+                      ລຶບ
+                    </button>
+                  )}
+                </div>
+                {delegateError && (
+                  <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{delegateError}</div>
+                )}
+              </div>
+            )}
+
+            {receipt.waitingForPurchase && (
+              <div className="no-print bg-violet-50 border border-violet-200 rounded-2xl p-4 text-sm text-violet-800 space-y-2">
+                <div className="font-semibold">ລໍຂອງເຂົ້າຄັງ — ຍັງຮັບບໍ່ໄດ້ຈົນກວ່າຈະ "ພ້ອມມາຮັບ"</div>
+                {receipt.items
+                  .filter((it) => it.purchaseRequestId)
+                  .map((it, k) => (
+                    <div key={`${it.purchaseRequestId}-${k}`} className="text-xs">
+                      {it.name}: ຂໍ {it.quantity} = ໃຊ້ສະຕັອກ {Math.max((it.quantity || 0) - (it.purchaseQty || 0), 0)} + ຊື້ເພີ່ມ {it.purchaseQty}
+                      {' · '}ຂອງມາແລ້ວ <b>{it.arrivedQty || 0}/{it.purchaseQty}</b> ({it.purchaseRequestNo})
+                      {(it.purchaseStatus === 'REJECTED' || it.purchaseStatus === 'CANCELLED') && (
+                        <span className="text-red-600"> — ໃບສະເໜີຊື້ຖືກ{it.purchaseStatus === 'REJECTED' ? 'ປະຕິເສດ' : 'ຍົກເລີກ'} ຍັງບໍ່ໄດ້ຮັບການຈັດຫາ</span>
+                      )}
+                    </div>
+                  ))}
+                <div className="text-xs">ຈະແຈ້ງເຕືອນເມື່ອຂອງມາຄົບ — ຫຼັງຈາກນັ້ນມາສະແກນຮັບຕາມປົກກະຕິ</div>
+              </div>
+            )}
+            {receipt.readyToCollect && receipt.canConfirm && (
+              <div className="no-print bg-teal-50 border border-teal-200 rounded-2xl p-4 text-sm text-teal-800">
+                ຂອງທີ່ຕ້ອງຊື້ເພີ່ມມາຄົບແລ້ວ ແລະຖືກຈອງໄວ້ໃຫ້ຄຳຂໍນີ້ — ສະແກນຮັບໄດ້ເລີຍ
+              </div>
+            )}
+
+            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && !receipt.waitingForPurchase && (
+              <div className="no-print bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
+                ມີສະເພາະຜູ້ຂໍ, ຜູ້ຮັບແທນທີ່ຖືກກຳນົດ, ຜູ້ຮັບຜິດຊອບ/ຫົວໜ້າແຜນກ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill ແລະ assets.assign) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
               </div>
             )}
 
@@ -296,15 +455,25 @@ export default function SupplyReceipt() {
                       {custodian?.employeeCode && isDepartmentRequest ? ` (${custodian.employeeCode})` : ''}
                     </span>
                   </div>
-                  {!receipt.isRequester && (
-                    <div className="text-xs text-amber-600 pt-1">
+                  {receipt.isDelegate && !receipt.isRequester && (
+                    <div className="text-xs text-blue-600 pt-1">
+                      ທ່ານຢືນຢັນໃນນາມຜູ້ຮັບແທນ —{' '}
                       {isDepartmentRequest
-                        ? `ທ່ານກຳລັງຢືນຢັນໃນນາມເຈົ້າໜ້າທີ່ສາງ — ຊັບສິນຈະຖືກບັນທຶກໃນນາມແຜນກ ${department?.name || ''} ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບ`
-                        : 'ທ່ານກຳລັງຢືນຢັນໃນນາມເຈົ້າໜ້າທີ່ສາງ — ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ'}
+                        ? `ຊັບສິນຈະຖືກບັນທຶກໃນນາມແຜນກ ${department?.name || ''} ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບ`
+                        : 'ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ'}
+                    </div>
+                  )}
+                  {receipt.requiresOverride && (
+                    <div className="text-xs text-amber-600 pt-1">
+                      ທ່ານບໍ່ແມ່ນຜູ້ຂໍ ຫຼື ຜູ້ຮັບແທນ — ການຢືນຢັນນີ້ເປັນ override: ຕ້ອງໃສ່ເຫດຜົນ, ຖືກບັນທຶກໃນ audit log ແລະຜູ້ຂໍຈະໄດ້ຮັບການແຈ້ງເຕືອນ.{' '}
+                      {isDepartmentRequest
+                        ? `ຊັບສິນຈະຖືກບັນທຶກໃນນາມແຜນກ ${department?.name || ''} ແລະ ມອບໃຫ້ຜູ້ຮັບຜິດຊອບ`
+                        : 'ເຄື່ອງຈະຖືກບັນທຶກໃຫ້ຜູ້ຂໍ'}
                     </div>
                   )}
                 </div>
 
+<<<<<<< HEAD
                 {taggedItems.length > 0 && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
@@ -366,24 +535,124 @@ export default function SupplyReceipt() {
                         })}
                       </div>
                     )}
+=======
+                {receipt.requiresOverride && (
+                  <div className="space-y-1">
+                    <label className="text-sm font-semibold text-gray-700" htmlFor="override-reason">
+                      ເຫດຜົນທີ່ຮັບແທນ (ຈຳເປັນ)
+                    </label>
+                    <textarea
+                      id="override-reason"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      maxLength={500}
+                      rows={2}
+                      placeholder="ເຊັ່ນ: ຜູ້ຂໍລາພັກ, ຕ້ອງການເຄື່ອງດ່ວນ"
+                      className="w-full border border-gray-200 rounded-lg p-2 text-sm"
+                    />
+>>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
                   </div>
                 )}
 
-                {consumableItems.length > 0 && (
-                  <label className="flex items-start gap-3 text-sm bg-gray-50 border border-gray-200 rounded-xl p-4 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={confirmConsumables}
-                      onChange={(e) => setConfirmConsumables(e.target.checked)}
-                      className="mt-0.5 rounded"
-                    />
-                    <span>
-                      ໄດ້ຮັບຂອງໃຊ້ສິ້ນເປືອງຄົບຕາມຈຳນວນ:
-                      <span className="block text-xs text-gray-500 mt-0.5">
-                        {consumableItems.map((i) => `${i.name} × ${i.quantity}`).join(', ')}
-                      </span>
-                    </span>
-                  </label>
+                {taggedEntries.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="text-sm font-semibold text-gray-700">
+                      ຂອງມີ Asset Tag — ສະແກນ {tags.length}/{requiredTagCount} ຊິ້ນ
+                    </div>
+                    {taggedEntries.map(({ it, k }) => {
+                      const list = tagsByItem[k] || [];
+                      const full = list.length >= (it.quantity || 0);
+                      const input = tagInputs[k] || '';
+                      const submitInput = () => {
+                        addTag(input, k);
+                        setTagInputs((prev) => ({ ...prev, [k]: '' }));
+                      };
+                      return (
+                        <div
+                          key={k}
+                          className={`border rounded-xl p-3 space-y-2 ${full ? 'border-emerald-200 bg-emerald-50/40' : 'border-gray-200'}`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-gray-800 truncate">{it.name}</div>
+                              <div className={`text-xs ${full ? 'text-emerald-600' : 'text-gray-500'}`}>
+                                {full ? '✓ ' : ''}ສະແກນແລ້ວ {list.length}/{it.quantity} ຊິ້ນ
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={full}
+                              onClick={() => setScanTarget(k)}
+                              className="shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg font-medium disabled:opacity-40"
+                            >
+                              <ScanLine size={14} /> ສະແກນ QR / ບາໂຄ໊ດ
+                            </button>
+                          </div>
+                          {!full && (
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={input}
+                                onChange={(e) => setTagInputs((prev) => ({ ...prev, [k]: e.target.value }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    submitInput();
+                                  }
+                                }}
+                                placeholder="ພິມ Asset Tag ແລ້ວກົດ Enter (ຫຼື ສະແກນ)"
+                                className="flex-1 border border-gray-200 rounded-lg p-2 text-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={submitInput}
+                                className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg"
+                              >
+                                ເພີ່ມ
+                              </button>
+                            </div>
+                          )}
+                          {list.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {list.map((t) => (
+                                <span key={t} className="inline-flex items-center gap-1 text-xs font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2.5 py-1">
+                                  {t}
+                                  <button type="button" onClick={() => removeTag(k, t)} className="text-emerald-400 hover:text-red-500" aria-label={`ລຶບ ${t}`}>✕</button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {consumableEntries.length > 0 && (
+                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 bg-gray-50 px-4 py-2.5">
+                      <div className="text-sm font-semibold text-gray-700">
+                        ຂອງໃຊ້ສິ້ນເປືອງ — ຕິກຮັບທີ່ລະລາຍການ ({consumableEntries.filter((e) => checkedConsumables[e.k]).length}/{consumableEntries.length})
+                      </div>
+                      <button type="button" onClick={toggleAllConsumables} className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+                        {allConsumablesChecked ? 'ຍົກເລີກທັງໝົດ' : 'ຕິກທັງໝົດ'}
+                      </button>
+                    </div>
+                    <div className="divide-y divide-gray-100">
+                      {consumableEntries.map(({ it, k }) => (
+                        <label key={k} className="flex items-start gap-3 text-sm px-4 py-3 cursor-pointer hover:bg-gray-50/60">
+                          <input
+                            type="checkbox"
+                            checked={!!checkedConsumables[k]}
+                            onChange={() => toggleConsumable(k)}
+                            className="mt-0.5 rounded"
+                          />
+                          <span className="flex-1 min-w-0 text-gray-800">{it.name}</span>
+                          <span className="shrink-0 font-semibold text-gray-700">× {it.quantity}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {submitError && (
@@ -403,13 +672,13 @@ export default function SupplyReceipt() {
           </>
         )}
 
-        {scannerOpen && (
+        {scanTarget !== null && (
           <CameraScanner
             continuous
-            title="ສະແກນ Asset Tag"
-            hint="ຈ່ອງກ້ອງໃສ່ QR/ບາໂຄ໊ດຂອງເຄື່ອງ — ສະແກນໄດ້ຫຼາຍຊິ້ນຕິດຕໍ່ກັນ"
-            onScan={addTag}
-            onClose={() => setScannerOpen(false)}
+            title={`ສະແກນ Asset Tag — ${items[scanTarget]?.name || ''}`}
+            hint={`ສະແກນແລ້ວ ${scanCount}/${scanQuantity} ຊິ້ນ — ສະແກນໄດ້ຫຼາຍຊິ້ນຕິດຕໍ່ກັນ`}
+            onScan={(v) => addTag(v, scanTarget)}
+            onClose={() => setScanTarget(null)}
           />
         )}
       </div>

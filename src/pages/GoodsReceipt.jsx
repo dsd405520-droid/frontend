@@ -11,6 +11,10 @@ import {
   ChevronRight,
   Printer,
   Paperclip,
+  Folder,
+  FolderOpen,
+  ChevronsDown,
+  ChevronsUp,
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
@@ -18,6 +22,8 @@ import AssetTagPrintModal from '../components/AssetTagPrintModal';
 import CsvExportButton from '../components/CsvExportButton';
 import api from '../services/api';
 import GoodsReceiptPrint from '../components/GoodsReceiptPrint';
+import CatalogImageUpload, { CatalogThumb } from '../components/CatalogImage';
+import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
 
@@ -60,8 +66,7 @@ function Field({ label, required, children }) {
   );
 }
 
-/** ຟອມຮັບເຄື່ອງ — ໃຊ້ຮ່ວມກັນທັງ "ເພີ່ມ" (RESTOCK) ແລະ "ຊື້" (NEW_ITEM) */
-function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose, onSaved }) {
+export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose, onSaved }) {
   const isNew = mode === 'NEW_ITEM';
   const currentUser = getCurrentUser();
   const [catalogItemId, setCatalogItemId] = useState(initialCatalogItemId || '');
@@ -73,22 +78,27 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
   );
   const [exceptionReason, setExceptionReason] = useState('');
   const canException = hasPermission('supplies', 'approve');
-  const [hasSerial, setHasSerial] = useState(false); // legacy item ທີ່ຍັງບໍ່ມີ itemType
+  const [hasSerial, setHasSerial] = useState(false);
   const [quantity, setQuantity] = useState(prRemaining);
   const [expectedQuantity, setExpectedQuantity] = useState('');
   const [countNote, setCountNote] = useState('');
   const [receivedDate, setReceivedDate] = useState(today());
-  const [vendor, setVendor] = useState(pr?.vendor || '');
-  const [unitPrice, setUnitPrice] = useState(pr?.estimatedUnitPrice != null ? String(pr.estimatedUnitPrice) : '');
+  const [vendor, setVendor] = useState('');
+  const [unitPrice, setUnitPrice] = useState('');
   const [storageRoom, setStorageRoom] = useState('');
   const [invoiceNo, setInvoiceNo] = useState('');
-  const [invoiceFile, setInvoiceFile] = useState(null); // { url, name }
+  const [invoiceFile, setInvoiceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [receiptPrintOpen, setReceiptPrintOpen] = useState(false);
-  const [note, setNote] = useState('');
+  const [note, setNote] = useState(
+    pr ? `ຮັບເຄື່ອງຕາມໃບສະເໜີ ${pr.prNo} — ຂໍ ${pr.quantity}, ຮັບແລ້ວ ${pr.receivedQuantity || 0}, ເຫຼືອ ${prRemaining}` : '',
+  );
   const [serials, setSerials] = useState([]);
+  const [warrantyAll, setWarrantyAll] = useState('');
+  const [warrantyPerItem, setWarrantyPerItem] = useState(false);
+  const [warranties, setWarranties] = useState([]);
   const [pasteText, setPasteText] = useState('');
-  const [scan, setScan] = useState(null); // { mode: 'single' | 'continuous', index? }
+  const [scan, setScan] = useState(null);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(currentUser?.branchId || '');
   const [saving, setSaving] = useState(false);
@@ -142,6 +152,13 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
       .then((res) => setBranches(unwrap(res.data) || []))
       .catch(() => setBranches([]));
   }, []);
+
+  const setWarrantyAt = (i, v) =>
+    setWarranties((prev) => {
+      const next = [...prev];
+      next[i] = v;
+      return next;
+    });
 
   const setSerial = (i, v) =>
     setSerials((prev) => {
@@ -219,6 +236,54 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
     }
   };
 
+  const warrantyInput = (i) => (
+    <input
+      type="date"
+      className={`${inputCls} !w-auto`}
+      value={warranties[i] || ''}
+      min={receivedDate || undefined}
+      onChange={(e) => setWarrantyAt(i, e.target.value)}
+    />
+  );
+
+  const warrantyHeader = (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-gray-700">
+        ວັນໝົດປະກັນ <span className="text-gray-400 font-normal">— ທາງເລືອກ</span>
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          type="date"
+          className={`${inputCls} sm:max-w-[220px]`}
+          value={warrantyAll}
+          min={receivedDate || undefined}
+          onChange={(e) => setWarrantyAll(e.target.value)}
+        />
+        <span className="text-xs text-gray-500">ໃຊ້ກັບທຸກ {qty} ຊິ້ນ</span>
+      </div>
+      {qty > 1 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-gray-600">
+            <input type="checkbox" checked={warrantyPerItem} onChange={(e) => setWarrantyPerItem(e.target.checked)} />
+            ກຳນົດວັນໝົດປະກັນແຍກແຕ່ລະຊິ້ນ
+          </label>
+          {warrantyPerItem && warrantyAll && (
+            <button
+              type="button"
+              onClick={() => setWarranties(Array.from({ length: qty }, () => warrantyAll))}
+              className="px-2 py-1 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+            >
+              ໃຊ້ວັນດຽວກັນທຸກຊິ້ນ
+            </button>
+          )}
+        </div>
+      )}
+      {warrantyPerItem && qty > 1 && (
+        <p className="text-xs text-gray-400">ຊິ້ນທີ່ເວັ້ນວ່າງ ຈະໃຊ້ວັນໝົດປະກັນລວມ</p>
+      )}
+    </div>
+  );
+
   const submit = async (e) => {
     e.preventDefault();
     setError('');
@@ -245,7 +310,15 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
     if (!pr && canException && exceptionReason.trim().length < 5)
       return setError('ຮັບເຄື່ອງໂດຍບໍ່ມີໃບສະເໜີ ຕ້ອງໃສ່ເຫດຜົນ (ຢ່າງໜ້ອຍ 5 ຕົວອັກສອນ)');
 
+    const hasWarranty = tracking === 'SERIAL' || tracking === 'TAG';
+    const warrantyExpiries =
+      hasWarranty && warrantyPerItem
+        ? Array.from({ length: qty }, (_, i) => warranties[i] || '')
+        : undefined;
+
     const common = {
+      warrantyExpiry: hasWarranty ? warrantyAll || undefined : undefined,
+      warrantyExpiries: warrantyExpiries?.some(Boolean) ? warrantyExpiries : undefined,
       purchaseRequestId: pr?._id,
       exceptionReason: !pr ? exceptionReason.trim() || undefined : undefined,
       quantity: qty,
@@ -306,6 +379,21 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
             <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm rounded-xl">
               <CheckCircle2 size={16} /> ບັນທຶກການຮັບເຄື່ອງເຂົ້າສະຕັອກສຳເລັດ
             </div>
+            {result.handover && (
+              <div className="p-3 bg-violet-50 border border-violet-200 text-violet-800 text-sm rounded-xl space-y-1">
+                <div>
+                  ຈອງໃຫ້ຄຳຂໍເບີກ <b>{result.handover.requestId}</b> ({result.handover.itemName}) — ມາແລ້ວ{' '}
+                  <b>{result.handover.arrivedQty}/{result.handover.purchaseQty}</b>
+                </div>
+                <div className="text-xs">
+                  {result.handover.readyToCollect
+                    ? 'ຂອງມາຄົບ — ສະຖານະ "ພ້ອມມາຮັບ" ແລະແຈ້ງຜູ້ຂໍແລ້ວ. ຜູ້ຂໍ (ຫຼືຜູ້ຮັບແທນ) ຍັງຕ້ອງສະແກນຮັບຕາມປົກກະຕິ.'
+                    : result.handover.awaitingApproval
+                      ? 'ຄຳຂໍເບີກຍັງລໍອະນຸມັດ — ຈະ "ພ້ອມມາຮັບ" ເມື່ອອະນຸມັດ'
+                      : 'ຍັງລໍສ່ວນທີ່ເຫຼືອ — ແຈ້ງຜູ້ຂໍແລ້ວວ່າມາບາງສ່ວນ.'}
+                </div>
+              </div>
+            )}
             {result.receiptNo && (
               <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 text-sm">
                 <span className="text-gray-500">ເລກທີໃບຮັບເຄື່ອງ</span>
@@ -465,6 +553,12 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
           {pr ? (
             <div className="p-3 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl">
               ຮັບເຄື່ອງຕາມໃບສະເໜີ <b>{pr.prNo}</b> — ຂໍ {pr.quantity}, ຮັບແລ້ວ {pr.receivedQuantity || 0}, ເຫຼືອ {prRemaining}
+              {pr.linkedSupplyRequest && ['REQUESTED', 'ORDERED', 'APPROVED'].includes(pr.linkedSupplyRequest.status) && (
+                <div className="mt-1 text-violet-700">
+                  ຜູກກັບຄຳຂໍເບີກ <b>{pr.linkedSupplyRequest._id}</b> ຂອງ {[pr.linkedSupplyRequest.requestedBy?.firstName, pr.linkedSupplyRequest.requestedBy?.lastName].filter(Boolean).join(' ') || pr.linkedSupplyRequest.requestedBy?.employeeCode || '—'} —
+                  ເຄື່ອງທີ່ຮັບຈະຖືກ<b>ຈອງໄວ້ໃຫ້ຜູ້ຂໍ</b> ແລະແຈ້ງໃຫ້ມາສະແກນຮັບ (ບໍ່ມອບອັດຕະໂນມັດ). ມາແລ້ວ {pr.linkedSupplyRequest.arrivedQty || 0}/{pr.linkedSupplyRequest.purchaseQty}
+                </div>
+              )}
             </div>
           ) : canException ? (
             <div className="space-y-2 p-3 bg-amber-50 border border-amber-200 rounded-xl">
@@ -483,6 +577,10 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
             <div className="p-3 bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-xl">
               ການຮັບເຄື່ອງຕ້ອງອ້າງອີງໃບສະເໜີຊື້ທີ່ອະນຸມັດແລ້ວ — ໃຫ້ກົດ "ຮັບເຄື່ອງ" ຈາກໜ້າໃບສະເໜີຊື້
             </div>
+          )}
+
+          {isNew && (
+            <CatalogImageUpload value={item.imageUrl || ''} onChange={(url) => setItem({ ...item, imageUrl: url })} />
           )}
 
           {isNew ? (
@@ -534,6 +632,15 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
                   ))}
                 </select>
               </Field>
+              {selected?.imageUrl && (
+                <div className="flex items-center gap-3 p-2 border border-gray-100 rounded-xl bg-gray-50/60">
+                  <CatalogThumb url={selected.imageUrl} name={selected.name} size={72} />
+                  <div className="text-sm text-gray-700 min-w-0">
+                    <div className="font-medium truncate">{selected.name}</div>
+                    <div className="text-xs text-gray-400">{selected.category}</div>
+                  </div>
+                </div>
+              )}
               {selected && !selected.itemType && (
                 <label className="flex items-center gap-2 text-sm text-gray-700">
                   <input type="checkbox" checked={hasSerial} onChange={(e) => setHasSerial(e.target.checked)} />
@@ -608,6 +715,26 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
                   ))}
                 </datalist>
               </Field>
+            </div>
+          )}
+          {pr && (pr.vendor || pr.estimatedUnitPrice != null) && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <p className="text-xs text-emerald-700">
+                ຂໍ້ມູນຈາກໃບສະເໜີ <b>{pr.prNo}</b>
+                {pr.vendor ? ` · ຜູ້ຂາຍ: ${pr.vendor}` : ''}
+                {pr.estimatedUnitPrice != null ? ` · ລາຄາ/ໜ່ວຍ: ${Number(pr.estimatedUnitPrice).toLocaleString()}` : ''}
+                {pr.estimatedUnitPrice != null && qty > 0 ? ` · ລວມ: ${(Number(pr.estimatedUnitPrice) * qty).toLocaleString()}` : ''}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setVendor(pr.vendor || '');
+                  setUnitPrice(pr.estimatedUnitPrice != null ? String(pr.estimatedUnitPrice) : '');
+                }}
+                className="shrink-0 px-3 py-1 rounded-lg text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                ໃຊ້ຂໍ້ມູນນີ້
+              </button>
             </div>
           )}
           <Field label="ຜູ້ຂາຍ / ຜູ້ສະໜອງ">
@@ -689,11 +816,13 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
               {hasDuplicate && (
                 <p className="text-xs text-red-600">ມີ Serial Number ຊ້ຳກັນ — ກະລຸນາແກ້ໄຂກ່ອນບັນທຶກ</p>
               )}
+              {warrantyHeader}
               {Array.from({ length: qty }, (_, i) => {
                 const value = serials[i] || '';
                 const isDup = value.trim() && dupSet.has(value.trim().toLowerCase());
                 return (
-                  <div key={i} className="flex items-center gap-2">
+                  <div key={i} className="space-y-1">
+                  <div className="flex items-center gap-2">
                     <span className="w-8 text-xs text-gray-400 text-right">{i + 1}.</span>
                     <input
                       className={`${inputCls} ${isDup ? 'border-red-400 bg-red-50 text-red-700' : ''}`}
@@ -703,7 +832,7 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          const next = e.target.closest('div')?.nextElementSibling?.querySelector('input');
+                          const next = e.target.closest('div')?.parentElement?.nextElementSibling?.querySelector('input');
                           next?.focus();
                         }
                       }}
@@ -717,9 +846,30 @@ function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, onClose,
                       <ScanLine size={16} />
                     </button>
                   </div>
+                  {warrantyPerItem && qty > 1 && (
+                    <div className="flex items-center gap-2 pl-10">
+                      <span className="text-xs text-gray-500">ວັນໝົດປະກັນ</span>
+                      {warrantyInput(i)}
+                    </div>
+                  )}
+                  </div>
                 );
               })}
               <p className="text-xs text-gray-400">ຖ້າບໍ່ໃສ່ S/N ລະບົບກໍຈະສ້າງຊັບສິນ + Asset Tag ໃຫ້ຄືກັນ; ຕື່ມ S/N ພາຍຫຼັງໄດ້</p>
+            </div>
+          )}
+
+          {tracking === 'TAG' && qty > 0 && (
+            <div className="space-y-2">
+              {warrantyHeader}
+              {warrantyPerItem && qty > 1 &&
+                Array.from({ length: qty }, (_, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="w-8 text-xs text-gray-400 text-right">{i + 1}.</span>
+                    <span className="flex-1 text-xs text-gray-500">ຊິ້ນທີ {i + 1}</span>
+                    {warrantyInput(i)}
+                  </div>
+                ))}
             </div>
           )}
 
@@ -767,44 +917,59 @@ export default function GoodsReceipt() {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') || '');
   const [modeFilter, setModeFilter] = useState('');
-  const [modal, setModal] = useState(null); // { mode, initialCatalogItemId }
+  const [modal, setModal] = useState(null);
   const [success, setSuccess] = useState('');
   const [expandedId, setExpandedId] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState(() => new Set());
   const [printId, setPrintId] = useState('');
 
-  const fetchRows = async () => {
+  // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner ແລະບໍ່ລ້າງລາຍການຖ້າ error
+  const fetchRows = async (opts) => {
+    const silent = opts?.silent === true;
     try {
-      setLoading(true);
-      setLoadError('');
+      if (!silent) {
+        setLoading(true);
+        setLoadError('');
+      }
       const params = {};
       if (search.trim()) params.q = search.trim();
       if (modeFilter) params.mode = modeFilter;
       const res = await api.get('/goods-receipt', { params });
       const list = unwrap(res.data);
       setRows(Array.isArray(list) ? list : []);
+      setLoadError('');
     } catch (err) {
-      setLoadError(errText(err, 'ບໍ່ສາມາດໂຫຼດປະຫວັດການຮັບເຄື່ອງໄດ້'));
-      setRows([]);
+      if (!silent) {
+        setLoadError(errText(err, 'ບໍ່ສາມາດໂຫຼດປະຫວັດການຮັບເຄື່ອງໄດ້'));
+        setRows([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
-  const fetchCatalog = async () => {
+  const fetchCatalog = async (opts) => {
     try {
       const res = await api.get('/supply-catalog');
       const list = unwrap(res.data);
       setCatalog(Array.isArray(list) ? list : []);
     } catch {
-      setCatalog([]);
+      if (opts?.silent !== true) setCatalog([]);
     }
   };
 
+  // ມີການຮັບເຄື່ອງ/ປ່ຽນ stock ຈາກຜູ້ໃຊ້ອື່ນ ຫຼື ໜ້າອື່ນ → ດຶງໃໝ່ທັນທີ ບໍ່ຕ້ອງ reload
+  useRealtimeRefresh(() =>
+    canManage
+      ? Promise.all([fetchRows({ silent: true }), fetchCatalog({ silent: true })])
+      : undefined,
+  );
+
   useEffect(() => {
     if (!canManage) return undefined;
-    const t = setTimeout(fetchRows, 250); // debounce ການຄົ້ນຫາ
+    const t = setTimeout(fetchRows, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, modeFilter, canManage]);
@@ -859,6 +1024,42 @@ export default function GoodsReceipt() {
 
   const total = useMemo(() => rows.reduce((s, r) => s + (r.quantity || 0), 0), [rows]);
 
+  const searchActive = !!search.trim();
+  const folders = useMemo(() => {
+    const map = new Map();
+    rows.forEach((r) => {
+      const key = r.catalogItemId || '__none';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(r);
+    });
+    return [...map.entries()]
+      .map(([key, list]) => ({
+        key,
+        name: list[0]?.itemName || 'ບໍ່ລະບຸ Catalog',
+        unit: list[0]?.unit || '',
+        qty: list.reduce((s, r) => s + (r.quantity || 0), 0),
+        price: list.reduce((s, r) => s + (Number(r.totalPrice) || 0), 0),
+        modes: list.reduce((m, r) => ({ ...m, [r.mode]: (m[r.mode] || 0) + 1 }), {}),
+        list: [...list].sort((x, y) => String(y.receiptNo || '').localeCompare(String(x.receiptNo || ''))),
+      }))
+      .sort((x, y) => x.key.localeCompare(y.key));
+  }, [rows]);
+  // ເມື່ອຄົ້ນຫາ ໂຟນເດີຈະເປີດອັດຕະໂນມັດ (expandedFolders ໃຊ້ເປັນຕົວກົງກັນຂ້າມ)
+  const isFolderOpen = (key) => (searchActive ? !expandedFolders.has(key) : expandedFolders.has(key));
+  const toggleFolder = (key) =>
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const allFoldersOpen = folders.length > 0 && folders.every((f) => isFolderOpen(f.key));
+  const toggleAllFolders = () => {
+    const allKeys = new Set(folders.map((f) => f.key));
+    if (allFoldersOpen) setExpandedFolders(searchActive ? allKeys : new Set());
+    else setExpandedFolders(searchActive ? new Set() : allKeys);
+  };
+
   if (!canManage) {
     return (
       <MainLayout>
@@ -897,7 +1098,7 @@ export default function GoodsReceipt() {
           </div>
         )}
 
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full self-start">
               {rows.length} ຄັ້ງ · ລວມ {total} ຊິ້ນ
@@ -907,15 +1108,15 @@ export default function GoodsReceipt() {
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => { setSearch(e.target.value); setExpandedFolders(new Set()); }}
                   placeholder="ຄົ້ນຫາ ລາຍການ / ຜູ້ຂາຍ / S/N..."
-                  className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-500 w-full sm:w-64"
+                  className="pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 w-full sm:w-64"
                 />
               </div>
               <select
                 value={modeFilter}
                 onChange={(e) => setModeFilter(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm"
               >
                 <option value="">ທັງໝົດ</option>
                 <option value="RESTOCK">ເພີ່ມ</option>
@@ -945,47 +1146,84 @@ export default function GoodsReceipt() {
                   { key: 'assetTags', label: 'assetTags' },
                 ]}
               />
+              <button
+                type="button"
+                onClick={toggleAllFolders}
+                disabled={folders.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+              >
+                {allFoldersOpen ? <ChevronsUp size={16} /> : <ChevronsDown size={16} />}
+                {allFoldersOpen ? 'ຫຍໍ້ທັງໝົດ' : 'ຂະຫຍາຍທັງໝົດ'}
+              </button>
             </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
-                  <th className="p-4 font-medium">ວັນທີ</th>
-                  <th className="p-4 font-medium">ລາຍການ</th>
-                  <th className="p-4 font-medium">ຈຳນວນ</th>
-                  <th className="p-4 font-medium">ປະເພດ</th>
-                  <th className="p-4 font-medium">ລາຄາລວມ</th>
-                  <th className="p-4 font-medium">ບັນທຶກໂດຍ</th>
-                  <th className="p-4 font-medium" />
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="p-3 font-medium">ເລກທີ / ວັນທີ</th>
+                  <th className="p-3 font-medium">ລາຍການ</th>
+                  <th className="p-3 font-medium">ຈຳນວນ</th>
+                  <th className="p-3 font-medium">ປະເພດ</th>
+                  <th className="p-3 font-medium">ລາຄາລວມ</th>
+                  <th className="p-3 font-medium">ບັນທຶກໂດຍ</th>
+                  <th className="p-3 font-medium" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-600">
                 {loading ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
+                  <tr><td colSpan="7" className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
                 ) : loadError ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-red-500 px-4">⚠️ {loadError}</td></tr>
+                  <tr><td colSpan="7" className="p-6 text-center text-sm text-red-500">⚠️ {loadError}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ຍັງບໍ່ມີປະຫວັດການຮັບເຄື່ອງ</td></tr>
+                  <tr><td colSpan="7" className="p-6 text-center text-sm text-gray-500">ຍັງບໍ່ມີປະຫວັດການຮັບເຄື່ອງ</td></tr>
                 ) : (
-                  rows.map((r) => {
+                  folders.map((f) => {
+                    const folderOpen = isFolderOpen(f.key);
+                    return (
+                      <Fragment key={f.key}>
+                        <tr onClick={() => toggleFolder(f.key)} className="bg-gray-50/80 hover:bg-amber-50/50 cursor-pointer">
+                          <td className="p-3" colSpan={2}>
+                            <div className="flex items-center gap-2">
+                              {folderOpen ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronRight size={16} className="text-gray-400" />}
+                              {folderOpen ? <FolderOpen size={18} className="text-amber-500" /> : <Folder size={18} className="text-amber-500" />}
+                              <CatalogThumb url={catalog.find((c) => c._id === f.key)?.imageUrl} name={f.name} size={36} />
+                              <span className="font-semibold text-gray-900">{f.key === '__none' ? '—' : f.key}</span>
+                              <span className="text-gray-600">{f.name}</span>
+                            </div>
+                          </td>
+                          <td className="p-3 text-xs font-medium text-gray-700">{f.qty}{f.unit ? ` ${f.unit}` : ''}</td>
+                          <td className="p-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(f.modes).map(([md, n]) => {
+                                const mm = MODE_LABEL[md] || MODE_LABEL.RESTOCK;
+                                return <span key={md} className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${mm.cls}`}>{mm.text} {n}</span>;
+                              })}
+                            </div>
+                          </td>
+                          <td className="p-3 text-xs font-medium text-gray-700">{f.price > 0 ? f.price.toLocaleString() : '—'}</td>
+                          <td className="p-3 text-xs font-medium text-gray-500" colSpan={2}>{f.list.length} ຄັ້ງ</td>
+                        </tr>
+                        {folderOpen && f.list.map((r, idx) => {
                     const m = MODE_LABEL[r.mode] || MODE_LABEL.RESTOCK;
                     const open = expandedId === r._id;
+                    const last = idx === f.list.length - 1;
                     return (
                       <Fragment key={r._id}>
                         <tr
                           onClick={() => setExpandedId(open ? '' : r._id)}
-                          className="hover:bg-gray-50 cursor-pointer"
+                          className="hover:bg-amber-50/40 cursor-pointer"
                         >
-                          <td className="p-4">
-                            <span className="inline-flex items-center gap-1">
+                          <td className="p-3">
+                            <span className="inline-flex items-center gap-2 pl-7">
+                              <span className="font-mono text-gray-300 select-none">{last ? '└─' : '├─'}</span>
                               {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                              {r.receiptNo && <span className="font-mono text-xs text-gray-500 mr-1">{r.receiptNo}</span>}
-                              {r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}
+                              {r.receiptNo && <span className="font-semibold text-gray-800 mr-1">{r.receiptNo}</span>}
+                              <span className="text-xs text-gray-400">{r.receivedDate ? new Date(r.receivedDate).toLocaleDateString() : '—'}</span>
                             </span>
                           </td>
-                          <td className="p-4">
+                          <td className="p-3">
                             <div className="font-medium text-gray-800">{r.itemName}</div>
                             <div className="text-xs text-gray-400">
                               {r.catalogItemId}
@@ -994,13 +1232,13 @@ export default function GoodsReceipt() {
                               {r.serialNumbers?.length ? ` · S/N: ${r.serialNumbers.slice(0, 3).join(', ')}${r.serialNumbers.length > 3 ? '…' : ''}` : ''}
                             </div>
                           </td>
-                          <td className="p-4">{r.quantity}{r.unit ? ` ${r.unit}` : ''}</td>
-                          <td className="p-4">
+                          <td className="p-3">{r.quantity}{r.unit ? ` ${r.unit}` : ''}</td>
+                          <td className="p-3">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.cls}`}>{m.text}</span>
                           </td>
-                          <td className="p-4">{r.totalPrice != null ? Number(r.totalPrice).toLocaleString() : '—'}</td>
-                          <td className="p-4">{personName(r.createdBy)}</td>
-                          <td className="p-4">
+                          <td className="p-3">{r.totalPrice != null ? Number(r.totalPrice).toLocaleString() : '—'}</td>
+                          <td className="p-3">{personName(r.createdBy)}</td>
+                          <td className="p-3">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1052,6 +1290,9 @@ export default function GoodsReceipt() {
                             </td>
                           </tr>
                         )}
+                      </Fragment>
+                    );
+                        })}
                       </Fragment>
                     );
                   })

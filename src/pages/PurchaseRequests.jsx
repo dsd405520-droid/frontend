@@ -1,14 +1,14 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Search, X, CheckCircle2, ChevronDown, ChevronRight, PackagePlus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Plus, Search, CheckCircle2, PackagePlus, XCircle, AlertTriangle } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
+import PurchaseRequestModal from '../components/PurchaseRequestModal';
+import PurchaseRequestDetailModal from '../components/PurchaseRequestDetailModal';
+import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 
 const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
-const inputCls =
-  'w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-amber-500 bg-white';
-
 const STATUS = {
   PENDING: { text: 'ລໍອະນຸມັດ', cls: 'bg-amber-100 text-amber-700' },
   APPROVED: { text: 'ອະນຸມັດແລ້ວ (ລໍຮັບເຄື່ອງ)', cls: 'bg-blue-100 text-blue-700' },
@@ -27,223 +27,94 @@ const errText = (err, fallback) => {
 const personName = (u) =>
   u && typeof u === 'object' ? [u.firstName, u.lastName].filter(Boolean).join(' ') || u.employeeCode || '—' : '—';
 
-function Field({ label, required, children }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-gray-700 mb-1">
-        {label}
-        {required && <span className="text-red-500"> *</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-function RequestModal({ catalog, onClose, onSaved }) {
-  const [mode, setMode] = useState('RESTOCK');
-  const [catalogItemId, setCatalogItemId] = useState('');
-  const [item, setItem] = useState({ name: '', category: '', unit: '', type: 'DEVICE_SERIAL' });
-  const [quantity, setQuantity] = useState(1);
-  const [unitPrice, setUnitPrice] = useState('');
-  const [vendor, setVendor] = useState('');
-  const [neededBy, setNeededBy] = useState('');
-  const [reason, setReason] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  const qty = parseInt(quantity, 10) || 0;
-  const price = unitPrice === '' ? null : Number(unitPrice);
-  const total = price !== null && Number.isFinite(price) ? price * qty : null;
-  const activeCatalog = useMemo(() => catalog.filter((c) => c.isActive !== false), [catalog]);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (mode === 'RESTOCK' && !catalogItemId) return setError('ກະລຸນາເລືອກລາຍການ');
-    if (mode === 'NEW_ITEM' && (!item.name.trim() || !item.category.trim() || !item.unit.trim()))
-      return setError('ກະລຸນາໃສ່ຊື່, ໝວດໝູ່ ແລະ ໜ່ວຍນັບ');
-    if (qty < 1) return setError('ຈຳນວນຕ້ອງຢ່າງໜ້ອຍ 1');
-    if (reason.trim().length < 3) return setError('ກະລຸນາໃສ່ເຫດຜົນ / ຄວາມຈຳເປັນ');
-    try {
-      setSaving(true);
-      await api.post('/purchase-requests', {
-        mode,
-        catalogItemId: mode === 'RESTOCK' ? catalogItemId : undefined,
-        item:
-          mode === 'NEW_ITEM'
-            ? { ...item, name: item.name.trim(), category: item.category.trim(), unit: item.unit.trim() }
-            : undefined,
-        quantity: qty,
-        estimatedUnitPrice: price !== null && Number.isFinite(price) ? price : undefined,
-        vendor: vendor.trim() || undefined,
-        neededBy: neededBy || undefined,
-        reason: reason.trim(),
-      });
-      onSaved();
-    } catch (err) {
-      setError(errText(err, 'ສົ່ງໃບສະເໜີບໍ່ສຳເລັດ'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <form onSubmit={submit} className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden max-h-[92vh] flex flex-col">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h3 className="text-lg font-bold text-gray-800">ສ້າງໃບສະເໜີຊື້</h3>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="p-6 overflow-y-auto space-y-4">
-          {error && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">{error}</div>}
-
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              ['RESTOCK', 'ເພີ່ມລາຍການທີ່ມີແລ້ວ'],
-              ['NEW_ITEM', 'ລາຍການໃໝ່'],
-            ].map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setMode(k)}
-                className={`px-3 py-2 rounded-xl text-sm border ${
-                  mode === k ? 'bg-amber-500 text-white border-amber-500' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {mode === 'RESTOCK' ? (
-            <Field label="ລາຍການ" required>
-              <select className={inputCls} value={catalogItemId} onChange={(e) => setCatalogItemId(e.target.value)}>
-                <option value="">— ເລືອກລາຍການ —</option>
-                {activeCatalog.map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c._id} — {c.name} (ສະຕັອກ {c.stockQty ?? 0})
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : (
-            <>
-              <Field label="ຊື່ລາຍການ" required>
-                <input className={inputCls} value={item.name} onChange={(e) => setItem({ ...item, name: e.target.value })} />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="ໝວດໝູ່" required>
-                  <input
-                    className={inputCls}
-                    list="pr-categories"
-                    value={item.category}
-                    onChange={(e) => setItem({ ...item, category: e.target.value })}
-                  />
-                  <datalist id="pr-categories">
-                    {[...new Set(catalog.map((c) => c.category).filter(Boolean))].map((c) => (
-                      <option key={c} value={c} />
-                    ))}
-                  </datalist>
-                </Field>
-                <Field label="ໜ່ວຍນັບ" required>
-                  <input
-                    className={inputCls}
-                    placeholder="ເຊັ່ນ ອັນ, ກ່ອງ"
-                    value={item.unit}
-                    onChange={(e) => setItem({ ...item, unit: e.target.value })}
-                  />
-                </Field>
-              </div>
-              <Field label="ວິທີຕິດຕາມ" required>
-                <select className={inputCls} value={item.type} onChange={(e) => setItem({ ...item, type: e.target.value })}>
-                  <option value="DEVICE_SERIAL">ມີ Serial Number</option>
-                  <option value="DEVICE_TAG">ຕິດ Asset Tag (ບໍ່ມີ S/N)</option>
-                  <option value="CONSUMABLE">ນັບຈຳນວນ (ສິ້ນເປືອງ)</option>
-                </select>
-              </Field>
-            </>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="ຈຳນວນທີ່ຂໍ" required>
-              <input type="number" min="1" max="1000" className={inputCls} value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-            </Field>
-            <Field label="ລາຄາຕໍ່ໜ່ວຍ (ປະມານ)">
-              <input type="number" min="0" step="any" className={inputCls} value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
-            </Field>
-          </div>
-          {total !== null && (
-            <div className="text-xs text-gray-500">ລາຄາລວມປະມານ: <b>{total.toLocaleString()}</b></div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="ຮ້ານ / ຜູ້ຂາຍທີ່ແນະນຳ">
-              <input className={inputCls} value={vendor} onChange={(e) => setVendor(e.target.value)} />
-            </Field>
-            <Field label="ຕ້ອງການພາຍໃນວັນທີ">
-              <input type="date" className={inputCls} value={neededBy} onChange={(e) => setNeededBy(e.target.value)} />
-            </Field>
-          </div>
-          <Field label="ເຫດຜົນ / ຄວາມຈຳເປັນ" required>
-            <textarea rows={3} className={inputCls} value={reason} onChange={(e) => setReason(e.target.value)} />
-          </Field>
-        </div>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
-          <button type="button" onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">
-            ຍົກເລີກ
-          </button>
-          <button type="submit" disabled={saving} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-medium disabled:opacity-50">
-            {saving ? 'ກຳລັງສົ່ງ...' : 'ສົ່ງໃບສະເໜີ'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export default function PurchaseRequests() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openId = searchParams.get('open') || ''; // ເປີດໃບສະເໜີຊື້ໂດຍກົງຈາກລິ້ງ (ເຊັ່ນ ຈາກໜ້າອະນຸມັດຄຳຂໍເບີກ)
+  const [deepDetail, setDeepDetail] = useState(null);
   const currentUser = getCurrentUser();
   const canCreate = hasPermission('supplies', 'create');
   const canApprove = hasPermission('supplies', 'approve');
   const canReceive = hasPermission('supplies', 'manage');
 
+  const [tab, setTab] = useState(canApprove ? 'APPROVING' : 'ALL');
+  const [pendingCount, setPendingCount] = useState(0);
   const [rows, setRows] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
-  const [expandedId, setExpandedId] = useState('');
+  const [detailId, setDetailId] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [success, setSuccess] = useState('');
   const [actionError, setActionError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [dialog, setDialog] = useState(null); // { type: 'approve' | 'reject' | 'cancel', r }
+  const [rejectReason, setRejectReason] = useState('');
 
-  const fetchRows = async () => {
+  const approving = tab === 'APPROVING';
+
+  const fetchPendingCount = async (opts) => {
     try {
-      setLoading(true);
-      setLoadError('');
+      const res = await api.get('/purchase-requests', { params: { status: 'PENDING' } });
+      const list = unwrap(res.data);
+      setPendingCount(Array.isArray(list) ? list.length : 0);
+    } catch {
+      if (opts?.silent !== true) setPendingCount(0);
+    }
+  };
+
+  const loadDeep = async () => {
+    if (!openId) return;
+    try {
+      const res = await api.get(`/purchase-requests/${openId}`);
+      setDeepDetail(unwrap(res.data));
+    } catch {
+      setDeepDetail(null);
+    }
+  };
+
+  useEffect(() => {
+    if (openId) {
+      setDetailId(openId);
+      loadDeep();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
+
+  // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner ແລະບໍ່ລ້າງລາຍການຖ້າ error
+  const fetchRows = async (opts) => {
+    const silent = opts?.silent === true;
+    try {
+      if (!silent) {
+        setLoading(true);
+        setLoadError('');
+      }
       const params = {};
-      if (status) params.status = status;
+      if (approving) params.status = 'PENDING';
+      else if (status) params.status = status;
       if (search.trim()) params.q = search.trim();
       const res = await api.get('/purchase-requests', { params });
       const list = unwrap(res.data);
       setRows(Array.isArray(list) ? list : []);
+      setLoadError('');
     } catch (err) {
-      setLoadError(errText(err, 'ໂຫຼດໃບສະເໜີບໍ່ສຳເລັດ'));
-      setRows([]);
+      if (!silent) {
+        setLoadError(errText(err, 'ໂຫຼດໃບສະເໜີບໍ່ສຳເລັດ'));
+        setRows([]);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
+    await fetchPendingCount({ silent });
+    if (openId) loadDeep();
   };
 
   useEffect(() => {
     const t = setTimeout(fetchRows, 250);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, search]);
+  }, [tab, status, search]);
 
   useEffect(() => {
     api
@@ -251,6 +122,20 @@ export default function PurchaseRequests() {
       .then((res) => setCatalog(Array.isArray(unwrap(res.data)) ? unwrap(res.data) : []))
       .catch(() => setCatalog([]));
   }, []);
+
+  // ໃບສະເໜີຊື້/ການຮັບເຄື່ອງ/catalog ປ່ຽນຈາກຜູ້ໃຊ້ອື່ນ ຫຼື ໜ້າອື່ນ → ດຶງໃໝ່ທັນທີ ບໍ່ຕ້ອງ reload
+  useRealtimeRefresh(() =>
+    Promise.all([
+      fetchRows({ silent: true }),
+      api
+        .get('/supply-catalog')
+        .then((res) => {
+          const list = unwrap(res.data);
+          if (Array.isArray(list)) setCatalog(list);
+        })
+        .catch(() => {}),
+    ]),
+  );
 
   const flash = (msg) => {
     setSuccess(msg);
@@ -271,12 +156,96 @@ export default function PurchaseRequests() {
     }
   };
 
-  const reject = (id) => {
-    const reason = window.prompt('ເຫດຜົນທີ່ປະຕິເສດ (ຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ)');
-    if (reason && reason.trim().length >= 3) act(id, 'reject', { reason: reason.trim() }, 'ປະຕິເສດໃບສະເໜີແລ້ວ');
+  // ຄຳຂໍເບີກທີ່ຜູກກັບໃບນີ້ ແລະຍັງລໍອະນຸມັດ (ການອະນຸມັດ/ປະຕິເສດໃບນີ້ມີຜົນກັບຄຳຂໍນັ້ນ)
+  const pendingLink = (r) => (r?.linkedSupplyRequest?.status === 'REQUESTED' ? r.linkedSupplyRequest : null);
+
+  const openDialog = (type, r) => {
+    setRejectReason('');
+    setDialog({ type, r });
+  };
+  const closeDialog = () => {
+    setDialog(null);
+    setRejectReason('');
+  };
+  const approve = (r) => openDialog('approve', r);
+  const reject = (r) => openDialog('reject', r);
+
+  const submitDialog = async () => {
+    if (!dialog) return;
+    const { type, r } = dialog;
+    const l = pendingLink(r);
+    if (type === 'approve') {
+      if (l) {
+        await act(r._id, 'approve', { confirmLinkedApproval: true }, `ອະນຸມັດໃບສະເໜີ ແລະຄຳຂໍເບີກ ${l._id} ແລ້ວ — ລໍຂອງເຂົ້າຄັງ`);
+      } else {
+        await act(r._id, 'approve', {}, 'ອະນຸມັດໃບສະເໜີແລ້ວ');
+      }
+    } else if (type === 'reject') {
+      const reason = rejectReason.trim();
+      if (reason.length < 3) return;
+      await act(
+        r._id,
+        'reject',
+        { reason },
+        l ? `ປະຕິເສດໃບສະເໜີແລ້ວ — ຄຳຂໍເບີກ ${l._id} ຍັງບໍ່ໄດ້ຮັບການຈັດຫາ (ຄ້າງລໍຖ້າ)` : 'ປະຕິເສດໃບສະເໜີແລ້ວ',
+      );
+    } else if (type === 'cancel') {
+      await act(r._id, 'cancel', undefined, 'ຍົກເລີກໃບສະເໜີແລ້ວ');
+    }
+    closeDialog();
   };
 
   const isMine = (r) => String(r.requestedBy?._id ?? r.requestedBy) === String(currentUser?._id);
+
+  const renderActions = (r) => {
+    const busy = busyId === r._id;
+    return (
+      <div className="flex flex-wrap gap-2 justify-end">
+        {approving && r.status === 'PENDING' && canApprove && (
+          <>
+            <button
+              disabled={busy}
+              onClick={() => approve(r)}
+              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs disabled:opacity-50"
+            >
+              ອະນຸມັດ
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => reject(r)}
+              className="px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs hover:bg-red-50 disabled:opacity-50"
+            >
+              ປະຕິເສດ
+            </button>
+          </>
+        )}
+        {r.status === 'PENDING' && isMine(r) && canCreate && (
+          <button
+            disabled={busy}
+            onClick={() => openDialog('cancel', r)}
+            className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50 disabled:opacity-50"
+          >
+            ຍົກເລີກ
+          </button>
+        )}
+        {(r.status === 'APPROVED' || r.status === 'PARTIALLY_RECEIVED') && canReceive && (
+          <button
+            onClick={() => navigate(`/goods-receipt?pr=${r._id}`)}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs flex items-center gap-1"
+          >
+            <PackagePlus size={14} /> ຮັບເຄື່ອງ
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const detail = rows.find((r) => r._id === detailId) || (deepDetail && deepDetail._id === detailId ? deepDetail : undefined);
+  const closeDetail = () => {
+    setDetailId('');
+    setDeepDetail(null);
+    if (openId) setSearchParams({}, { replace: true });
+  };
 
   return (
     <MainLayout>
@@ -304,6 +273,29 @@ export default function PurchaseRequests() {
         {actionError && <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">{actionError}</div>}
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="flex gap-1 px-4 pt-3 border-b border-gray-100">
+            {[
+              ['APPROVING', 'ລໍອະນຸມັດ'],
+              ['ALL', 'ຂໍ້ມູນທັງໝົດ'],
+            ].map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => {
+                  setTab(k);
+                  setDetailId('');
+                }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px flex items-center gap-2 ${
+                  tab === k ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {label}
+                {k === 'APPROVING' && pendingCount > 0 && (
+                  <span className="bg-amber-500 text-white text-[10px] rounded-full px-1.5 py-0.5">{pendingCount}</span>
+                )}
+              </button>
+            ))}
+          </div>
           <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full self-start">{rows.length} ໃບ</span>
             <div className="flex items-center gap-2">
@@ -316,14 +308,16 @@ export default function PurchaseRequests() {
                   className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-500 w-full sm:w-64"
                 />
               </div>
-              <select value={status} onChange={(e) => setStatus(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                <option value="">ທຸກສະຖານະ</option>
-                {Object.entries(STATUS).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v.text}
-                  </option>
-                ))}
-              </select>
+              {!approving && (
+                <select value={status} onChange={(e) => setStatus(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="">ທຸກສະຖານະ</option>
+                  {Object.entries(STATUS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.text}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 
@@ -333,33 +327,34 @@ export default function PurchaseRequests() {
                 <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
                   <th className="p-4 font-medium">ເລກທີ</th>
                   <th className="p-4 font-medium">ລາຍການ</th>
-                  <th className="p-4 font-medium">ຈຳນວນ (ຮັບແລ້ວ/ຂໍ)</th>
+                  <th className="p-4 font-medium">{approving ? 'ຈຳນວນທີ່ຂໍ' : 'ຈຳນວນ (ຮັບແລ້ວ/ຂໍ)'}</th>
                   <th className="p-4 font-medium">ລາຄາປະມານ</th>
                   <th className="p-4 font-medium">ຜູ້ສະເໜີ</th>
-                  <th className="p-4 font-medium">ສະຖານະ</th>
+                  {approving ? (
+                    <>
+                      <th className="p-4 font-medium">ເຫດຜົນ</th>
+                      <th className="p-4 font-medium">ຕ້ອງການພາຍໃນ</th>
+                    </>
+                  ) : (
+                    <th className="p-4 font-medium">ສະຖານະ</th>
+                  )}
                   <th className="p-4 font-medium" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-600">
                 {loading ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
+                  <tr><td colSpan={approving ? 8 : 7} className="py-12 text-center text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</td></tr>
                 ) : loadError ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-red-500 px-4">⚠️ {loadError}</td></tr>
+                  <tr><td colSpan={approving ? 8 : 7} className="py-12 text-center text-red-500 px-4">⚠️ {loadError}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan="7" className="py-12 text-center text-gray-400">ຍັງບໍ່ມີໃບສະເໜີ</td></tr>
+                  <tr><td colSpan={approving ? 8 : 7} className="py-12 text-center text-gray-400">{approving ? 'ບໍ່ມີໃບທີ່ລໍອະນຸມັດ' : 'ຍັງບໍ່ມີໃບສະເໜີ'}</td></tr>
                 ) : (
                   rows.map((r) => {
                     const st = STATUS[r.status] || STATUS.PENDING;
-                    const open = expandedId === r._id;
-                    const busy = busyId === r._id;
                     return (
-                      <Fragment key={r._id}>
-                        <tr onClick={() => setExpandedId(open ? '' : r._id)} className="hover:bg-gray-50 cursor-pointer">
+                        <tr key={r._id} onClick={() => setDetailId(r._id)} className="hover:bg-gray-50 cursor-pointer">
                           <td className="p-4 font-mono text-xs">
-                            <span className="inline-flex items-center gap-1">
-                              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                              {r.prNo}
-                            </span>
+                            {r.prNo}
                           </td>
                           <td className="p-4">
                             <div className="font-medium text-gray-800">{r.itemName}</div>
@@ -367,76 +362,34 @@ export default function PurchaseRequests() {
                               {r.mode === 'NEW_ITEM' && !r.catalogItemId ? 'ລາຍການໃໝ່' : r.catalogItemId}
                               {r.vendor ? ` · ${r.vendor}` : ''}
                             </div>
+                            {r.linkedSupplyRequest && (
+                              <div className="text-[11px] text-violet-600 mt-0.5">
+                                ຜູກກັບຄຳຂໍເບີກ {r.linkedSupplyRequest._id} · {personName(r.linkedSupplyRequest.requestedBy)}
+                              </div>
+                            )}
                           </td>
                           <td className="p-4">
-                            {r.receivedQuantity}/{r.quantity}
+                            {approving ? r.quantity : `${r.receivedQuantity}/${r.quantity}`}
                             {r.unit ? ` ${r.unit}` : ''}
                           </td>
                           <td className="p-4">{r.estimatedTotal != null ? Number(r.estimatedTotal).toLocaleString() : '—'}</td>
                           <td className="p-4">{personName(r.requestedBy)}</td>
-                          <td className="p-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${st.cls}`}>{st.text}</span>
-                          </td>
+                          {approving ? (
+                            <>
+                              <td className="p-4 max-w-xs">
+                                <div className="line-clamp-2">{r.reason}</div>
+                              </td>
+                              <td className="p-4">{r.neededBy ? new Date(r.neededBy).toLocaleDateString() : '—'}</td>
+                            </>
+                          ) : (
+                            <td className="p-4">
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${st.cls}`}>{st.text}</span>
+                            </td>
+                          )}
                           <td className="p-4" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex flex-wrap gap-2 justify-end">
-                              {r.status === 'PENDING' && canApprove && (
-                                <>
-                                  <button
-                                    disabled={busy}
-                                    onClick={() => act(r._id, 'approve', undefined, 'ອະນຸມັດໃບສະເໜີແລ້ວ')}
-                                    className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs disabled:opacity-50"
-                                  >
-                                    ອະນຸມັດ
-                                  </button>
-                                  <button
-                                    disabled={busy}
-                                    onClick={() => reject(r._id)}
-                                    className="px-3 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs hover:bg-red-50 disabled:opacity-50"
-                                  >
-                                    ປະຕິເສດ
-                                  </button>
-                                </>
-                              )}
-                              {r.status === 'PENDING' && isMine(r) && canCreate && (
-                                <button
-                                  disabled={busy}
-                                  onClick={() => window.confirm('ຍົກເລີກໃບສະເໜີນີ້?') && act(r._id, 'cancel', undefined, 'ຍົກເລີກໃບສະເໜີແລ້ວ')}
-                                  className="px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50 disabled:opacity-50"
-                                >
-                                  ຍົກເລີກ
-                                </button>
-                              )}
-                              {(r.status === 'APPROVED' || r.status === 'PARTIALLY_RECEIVED') && canReceive && (
-                                <button
-                                  onClick={() => navigate(`/goods-receipt?pr=${r._id}`)}
-                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs flex items-center gap-1"
-                                >
-                                  <PackagePlus size={14} /> ຮັບເຄື່ອງ
-                                </button>
-                              )}
-                            </div>
+                            {renderActions(r)}
                           </td>
                         </tr>
-                        {open && (
-                          <tr className="bg-gray-50/60">
-                            <td colSpan="7" className="px-6 py-4">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                                <div className="sm:col-span-2">ເຫດຜົນ: <b>{r.reason}</b></div>
-                                <div>ລາຄາ/ໜ່ວຍ (ປະມານ): <b>{r.estimatedUnitPrice != null ? Number(r.estimatedUnitPrice).toLocaleString() : '—'}</b></div>
-                                <div>ຕ້ອງການພາຍໃນ: <b>{r.neededBy ? new Date(r.neededBy).toLocaleDateString() : '—'}</b></div>
-                                <div>ວັນທີສະເໜີ: <b>{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—'}</b></div>
-                                {r.approvedBy && (
-                                  <div>
-                                    {r.status === 'REJECTED' ? 'ປະຕິເສດໂດຍ' : 'ອະນຸມັດໂດຍ'}: <b>{personName(r.approvedBy)}</b>
-                                  </div>
-                                )}
-                                {r.rejectReason && <div className="sm:col-span-2 text-red-600">ເຫດຜົນທີ່ປະຕິເສດ: <b>{r.rejectReason}</b></div>}
-                                {r.receiptIds?.length > 0 && <div className="sm:col-span-2">ຮັບເຄື່ອງແລ້ວ {r.receiptIds.length} ຄັ້ງ (ເບິ່ງໃນໜ້າ "ຮັບເຄື່ອງເຂົ້າຄັງ")</div>}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
                     );
                   })
                 )}
@@ -446,8 +399,18 @@ export default function PurchaseRequests() {
         </div>
       </div>
 
+      {detail && (
+        <PurchaseRequestDetailModal
+          request={detail}
+          imageUrl={catalog.find((c) => c._id === detail.catalogItemId)?.imageUrl}
+          statusInfo={STATUS[detail.status] || STATUS.PENDING}
+          actions={renderActions(detail)}
+          onClose={closeDetail}
+        />
+      )}
+
       {showCreate && (
-        <RequestModal
+        <PurchaseRequestModal
           catalog={catalog}
           onClose={() => setShowCreate(false)}
           onSaved={() => {
@@ -457,6 +420,100 @@ export default function PurchaseRequests() {
           }}
         />
       )}
+
+      {dialog && (() => {
+        const { type, r } = dialog;
+        const l = pendingLink(r);
+        const unit = r.unit ? ` ${r.unit}` : '';
+        const busy = busyId === r._id;
+        const cfg = {
+          approve: { title: 'ຢືນຢັນການອະນຸມັດໃບສະເໜີຊື້', icon: <CheckCircle2 size={22} />, ring: 'bg-emerald-100 text-emerald-600', btn: 'bg-emerald-600 hover:bg-emerald-700', ok: 'ຢືນຢັນອະນຸມັດ' },
+          reject: { title: 'ຢືນຢັນການປະຕິເສດໃບສະເໜີຊື້', icon: <XCircle size={22} />, ring: 'bg-red-100 text-red-600', btn: 'bg-red-600 hover:bg-red-700', ok: 'ຢືນຢັນປະຕິເສດ' },
+          cancel: { title: 'ຍົກເລີກໃບສະເໜີຊື້', icon: <AlertTriangle size={22} />, ring: 'bg-amber-100 text-amber-600', btn: 'bg-amber-600 hover:bg-amber-700', ok: 'ຢືນຢັນຍົກເລີກ' },
+        }[type];
+        return (
+          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={() => !busy && closeDialog()}>
+            <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <div className="p-6 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${cfg.ring}`}>{cfg.icon}</div>
+                  <div className="min-w-0">
+                    <h4 className="text-base font-bold text-gray-800">{cfg.title}</h4>
+                    <p className="text-sm text-gray-500 mt-1 break-words">
+                      {r.prNo} — {r.itemName} ({r.quantity}{unit})
+                    </p>
+                  </div>
+                </div>
+
+                {l && (
+                  <div className="text-sm bg-violet-50 border border-violet-200 rounded-lg p-3 space-y-1">
+                    <div className="font-medium text-violet-800">
+                      ຜູກກັບຄຳຂໍເບີກ {l._id} ຂອງ {personName(l.requestedBy)}
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      {l.itemName}: ຂໍ {l.requestedQty}{unit} = ໃຊ້ສະຕັອກ {Math.max((l.requestedQty || 0) - (l.purchaseQty || 0), 0)} + ຊື້ເພີ່ມ {l.purchaseQty}
+                    </div>
+                  </div>
+                )}
+
+                {type === 'approve' && (
+                  <p className="text-sm text-gray-600">
+                    {l
+                      ? `ການອະນຸມັດໃບສະເໜີນີ້ ຈະອະນຸມັດຄຳຂໍເບີກ ${l._id} ພ້ອມກັນ. ດຳເນີນການຕໍ່?`
+                      : 'ອະນຸມັດໃບສະເໜີຊື້ນີ້ແມ່ນບໍ?'}
+                  </p>
+                )}
+
+                {type === 'reject' && (
+                  <div>
+                    {l && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                        ໝາຍເຫດ: ຄຳຂໍເບີກ {l._id} ທີ່ຜູກຢູ່ຈະຍັງຄ້າງ (ບໍ່ຖືກອະນຸມັດ) — ຜູ້ຂໍຈະໄດ້ຮັບແຈ້ງ
+                      </p>
+                    )}
+                    <label className="block text-xs font-medium text-gray-700 mb-1">ເຫດຜົນທີ່ປະຕິເສດ * (ຢ່າງໜ້ອຍ 3 ຕົວອັກສອນ)</label>
+                    <textarea
+                      autoFocus
+                      rows={3}
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      disabled={busy}
+                      className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 disabled:bg-gray-50"
+                    />
+                  </div>
+                )}
+
+                {type === 'cancel' && (
+                  <p className="text-sm text-gray-600">
+                    {l
+                      ? `ຍົກເລີກໃບສະເໜີນີ້? ຄຳຂໍເບີກ ${l._id} ທີ່ຜູກຢູ່ຈະຍັງຄ້າງ ບໍ່ໄດ້ຮັບການຈັດຫາສ່ວນທີ່ຂາດ`
+                      : 'ຍົກເລີກໃບສະເໜີນີ້ແມ່ນບໍ?'}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={closeDialog}
+                  disabled={busy}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg text-sm font-medium transition disabled:opacity-50"
+                >
+                  ປິດ
+                </button>
+                <button
+                  type="button"
+                  onClick={submitDialog}
+                  disabled={busy || (type === 'reject' && rejectReason.trim().length < 3)}
+                  className={`px-4 py-2 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 ${cfg.btn}`}
+                >
+                  {busy ? 'ກຳລັງດຳເນີນການ...' : cfg.ok}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </MainLayout>
   );
 }
