@@ -21,7 +21,8 @@ const OPEN_STATUSES = ['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'];
 const STATUS_FILTERS = [
   { value: 'ALL', label: 'ທຸກສະຖານະ' },
   { value: 'OPEN', label: 'ລໍຖ້າຮັບເຄື່ອງ' },
-  { value: 'REQUESTED', label: 'ລໍຖ້າອະນຸມັດ' },
+  { value: 'PENDING_MANAGER', label: 'ລໍຖ້າຫົວໜ້າພະແນກ' },
+  { value: 'REQUESTED', label: 'ລໍຖ້າອະນຸມັດ (ຝ່າຍສາງ)' },
   { value: 'CLOSED', label: 'ຮັບເຄື່ອງແລ້ວ' },
   { value: 'REJECTED', label: 'ຖືກປະຕິເສດ' },
 ];
@@ -662,10 +663,16 @@ useEffect(() => {
             <Clock size={12} /> ລໍຂອງເຂົ້າຄັງ
           </span>
         );
+      case 'PENDING_MANAGER':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-600 border border-indigo-200">
+            <Clock size={12} /> ລໍຖ້າຫົວໜ້າພະແນກ
+          </span>
+        );
       case 'REQUESTED':
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-600 border border-amber-200">
-            <Clock size={12} /> ລໍຖ້າອະນຸມັດ
+            <Clock size={12} /> {req?.managerApprovedBy ? 'ຫົວໜ້າອະນຸມັດແລ້ວ · ລໍຖ້າຝ່າຍສາງ' : 'ລໍຖ້າອະນຸມັດ'}
           </span>
         );
       case 'APPROVED':
@@ -1054,6 +1061,7 @@ useEffect(() => {
                     )}
                   </Row>
                   <Row label="ວັນທີຍື່ນ">{formatDateTime(d.createdAt)}</Row>
+                  {d.managerApprovedBy && <Row label="ຫົວໜ້າພະແນກອະນຸມັດ">{person(d.managerApprovedBy)} · {formatDateTime(d.managerApprovedAt)}</Row>}
                   {d.approvedAt && <Row label="ອະນຸມັດ">{person(d.approvedBy)} · {formatDateTime(d.approvedAt)}</Row>}
                   {d.rejectionReason && <Row label="ເຫດຜົນທີ່ປະຕິເສດ"><span className="text-rose-600">{d.rejectionReason}</span></Row>}
                   {d.fulfilledAt && <Row label="ຢືນຢັນຮັບເຄື່ອງໂດຍ">{person(d.fulfilledBy)} · {formatDateTime(d.fulfilledAt)}</Row>}
@@ -1087,6 +1095,9 @@ useEffect(() => {
                         </div>
                       );
                     })}
+                    {d.status === 'PENDING_MANAGER' && (
+                      <div className="text-xs text-indigo-700">ລໍຖ້າຫົວໜ້າພະແນກອະນຸມັດກ່ອນ — ຫຼັງຈາກນັ້ນຈຶ່ງສົ່ງຕໍ່ໃຫ້ຝ່າຍສາງ</div>
+                    )}
                     {d.status === 'REQUESTED' && (
                       <div className="text-xs text-gray-500">ຜູ້ອະນຸມັດຈະອະນຸມັດຄຳຂໍນີ້ພ້ອມໃບສະເໜີຊື້</div>
                     )}

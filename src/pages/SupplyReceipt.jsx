@@ -10,6 +10,7 @@ import { getCurrentUser } from '../utils/permissions';
 const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
 
 const STATUS_LABEL = {
+  PENDING_MANAGER: { text: 'ລໍຖ້າຫົວໜ້າພະແນກອະນຸມັດ', className: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
   REQUESTED: { text: 'ລໍຖ້າອະນຸມັດ', className: 'bg-amber-50 text-amber-600 border-amber-200' },
   APPROVED: { text: 'ອະນຸມັດແລ້ວ — ລໍຖ້າຮັບເຄື່ອງ', className: 'bg-blue-50 text-blue-600 border-blue-200' },
   FULFILLED: { text: 'ຮັບເຄື່ອງແລ້ວ', className: 'bg-emerald-50 text-emerald-600 border-emerald-200' },

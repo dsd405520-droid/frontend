@@ -1,7 +1,8 @@
-import { Send, ShieldCheck, ShoppingCart, PackageCheck, Check, X } from 'lucide-react';
+import { Send, ShieldCheck, ShoppingCart, PackageCheck, Check, X, UserCheck } from 'lucide-react';
 
 const ICONS = {
   request: Send,
+  manager: UserCheck,
   approve: ShieldCheck,
   purchase: ShoppingCart,
   receive: PackageCheck,
@@ -9,6 +10,7 @@ const ICONS = {
 
 const LABELS = {
   request: { pending: 'ຍື່ນຄຳຂໍ', active: 'ຍື່ນຄຳຂໍ', done: 'ຍື່ນຄຳຂໍ' },
+  manager: { pending: 'ຫົວໜ້າພະແນກອະນຸມັດ', active: 'ລໍຖ້າຫົວໜ້າພະແນກ', done: 'ຫົວໜ້າອະນຸມັດແລ້ວ', failed: 'ຫົວໜ້າປະຕິເສດ' },
   approve: { pending: 'ອະນຸມັດ', active: 'ລໍຖ້າອະນຸມັດ', done: 'ອະນຸມັດແລ້ວ', failed: 'ຖືກປະຕິເສດ', cancelled: 'ຍົກເລີກແລ້ວ' },
   purchase: {
     pending: 'ສັ່ງຊື້ / ລໍສະຕ໊ອກ',
@@ -31,7 +33,7 @@ const circleCls = (state, key) => {
   if (state === 'done') return 'bg-emerald-500 text-white';
   if (state === 'failed') return 'bg-rose-500 text-white';
   if (state === 'cancelled') return 'bg-gray-400 text-white';
-  if (state === 'active') return key === 'purchase' ? 'bg-violet-500 text-white' : 'bg-amber-500 text-white';
+  if (state === 'active') return key === 'purchase' ? 'bg-violet-500 text-white' : key === 'manager' ? 'bg-indigo-500 text-white' : 'bg-amber-500 text-white';
   return 'bg-gray-100 text-gray-400';
 };
 
@@ -41,6 +43,7 @@ const labelCls = (state, key, ready) => {
   if (state === 'cancelled') return 'text-gray-500 font-semibold';
   if (state === 'active') {
     if (key === 'purchase') return 'text-violet-600 font-semibold';
+    if (key === 'manager') return 'text-indigo-600 font-semibold';
     return ready ? 'text-teal-600 font-semibold' : 'text-amber-600 font-semibold';
   }
   return 'text-gray-400';
@@ -50,20 +53,26 @@ const buildSteps = (req) => {
   const items = Array.isArray(req?.items) ? req.items : [];
   const purchaseItems = items.filter((it) => it.purchaseRequestId);
   const hasPurchase = purchaseItems.length > 0;
-  const keys = hasPurchase ? ['request', 'approve', 'purchase', 'receive'] : ['request', 'approve', 'receive'];
+  // ຄຳຂໍສ່ວນບຸກຄົນຜ່ານຫົວໜ້າພະແນກກ່ອນ — ສະແດງຂັ້ນນີ້ສະເພາະໃບທີ່ຜ່ານ/ຢູ່ໃນຂັ້ນນີ້ (ໃບເກົ່າບໍ່ມີ)
+  const hasManager = req?.status === 'PENDING_MANAGER' || !!req?.managerApprovedBy;
+  const baseKeys = hasPurchase ? ['request', 'approve', 'purchase', 'receive'] : ['request', 'approve', 'receive'];
+  const keys = hasManager ? ['request', 'manager', ...baseKeys.slice(1)] : baseKeys;
   const waitKey = hasPurchase ? 'purchase' : 'receive';
   const purchaseStalled = purchaseItems.some((it) => STALLED_PURCHASE.includes(it.purchaseStatus));
   const arrived = purchaseItems.reduce((sum, it) => sum + (it.arrivedQty || 0), 0);
   const toBuy = purchaseItems.reduce((sum, it) => sum + (it.purchaseQty || 0), 0);
   const ready = !!req?.readyToCollectAt;
 
-  let done = 1;
+  let done = keys.indexOf('approve');
   let active = 'approve';
   let stopped = null;
   let stoppedState = 'failed';
   const override = {};
 
-  if (isRequestFinished(req)) {
+  if (req?.status === 'PENDING_MANAGER') {
+    done = 1;
+    active = 'manager';
+  } else if (isRequestFinished(req)) {
     done = keys.length;
     active = null;
   } else if (req?.status === 'REJECTED') {

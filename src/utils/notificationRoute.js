@@ -21,6 +21,18 @@ export function getNotificationPath(n) {
       return `/meeting-rooms?tab=my-bookings`;
 
     case 'SupplyRequest':
+      // ພະນັກງານໃນແຜນກຂໍເບີກ → ແຈ້ງສະເພາະຫົວໜ້າແຜນກ ໃຫ້ເປີດແຖບ "ລໍຖ້າຫົວໜ້າພະແນກ" ຂອງໜ້າ /assets
+      if (n.type === 'SUPPLY_REQUEST_MANAGER_REVIEW') {
+        return `/assets?managerReview=${id}`;
+      }
+      // ຄຳຂໍເຂົ້າຄິວຝ່າຍສາງ (ຜູ້ອະນຸມັດ supplies:approve) → ເປີດ popup ໃນໜ້າ /assets
+      if (n.type === 'SUPPLY_REQUEST_AWAITING_APPROVAL') {
+        return `/assets?request=${id}`;
+      }
+      // ຫົວໜ້າອະນຸມັດ/ປະຕິເສດແລ້ວ → ຜູ້ຂໍເບິ່ງສະຖານະໃນໜ້າ /supplies
+      if (n.type === 'SUPPLY_REQUEST_MANAGER_APPROVED' || n.type === 'SUPPLY_REQUEST_MANAGER_REJECTED') {
+        return `/supplies?open=${id}`;
+      }
       // ມີຄຳຂໍໃນນາມແຜນກ (ແຈ້ງຫົວໜ້າແຜນກ/ຜູ້ຮັບຜິດຊອບ) → ເປີດບັດລາຍລະອຽດໃບຂໍໃນໜ້າ /supplies
       if (n.type === 'SUPPLY_REQUEST_DEPARTMENT_CREATED') {
         return `/supplies?open=${id}`;

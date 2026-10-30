@@ -30,6 +30,35 @@ const requesterNameOf = (req) =>
   req?.requestedBy?.name || req?.requestedBy?.email ||
   req?.userId?.name || req?.userId?.email ||
   req?.createdBy?.name || 'ບໍ່ລະບຸຜູ້ຂໍ';
+const isDeptSource = (req) => {
+  if (req?.source) return req.source === 'DEPARTMENT';
+  const d = req?.departmentId;
+  return !!(d && (typeof d === 'object' ? d._id : d));
+};
+
+// ປ້າຍແຫຼ່ງທີ່ມາຂອງຄຳຂໍ: ຈາກພະແນກ (ໂດຍກົງ) ຫຼື ຈາກພະນັກງານ (ຜ່ານຫົວໜ້າພະແນກ)
+function SourceBadge({ req }) {
+  if (isDeptSource(req)) {
+    return (
+      <span className="text-[11px] bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full font-medium">
+        ຈາກພະແນກ
+      </span>
+    );
+  }
+  return (
+    <>
+      <span className="text-[11px] bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded-full font-medium">
+        ຈາກພະນັກງານ
+      </span>
+      {req?.managerApprovedBy && (
+        <span className="text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-medium">
+          ຫົວໜ້າອະນຸມັດແລ້ວ
+        </span>
+      )}
+    </>
+  );
+}
+
 const fmtDateTime = (d) => (d ? new Date(d).toLocaleString() : '—');
 
 const holderOf = (a, lk) => {
@@ -450,6 +479,12 @@ export default function AssetManagement() {
   const [rejectReason, setRejectReason] = useState('');
   const [reviewError, setReviewError] = useState('');
 
+  // ຄິວຂັ້ນທີ 1: ຄຳຂໍສ່ວນບຸກຄົນທີ່ລໍຖ້າຫົວໜ້າພະແນກ (ເຫັນສະເພາະຫົວໜ້າພະແນກ)
+  const [managerRequests, setManagerRequests] = useState([]);
+  const [loadingManager, setLoadingManager] = useState(true);
+  const [managerError, setManagerError] = useState('');
+  const [managerAvailable, setManagerAvailable] = useState(false);
+
   // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner
   const fetchCatalog = async (opts) => {
     const silent = opts?.silent === true;
@@ -522,6 +557,34 @@ export default function AssetManagement() {
     }
   };
 
+  const fetchManagerRequests = async (opts) => {
+    const silent = opts?.silent === true;
+    try {
+      if (!silent) {
+        setLoadingManager(true);
+        setManagerError('');
+      }
+      const response = await api.get('/supply-requests/manager-queue');
+      const body = response.data;
+      const list = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [];
+      setManagerRequests(list);
+      setManagerAvailable(true);
+      setManagerError('');
+    } catch (error) {
+      const status = error.response?.status;
+      // 403/404 = ບໍ່ແມ່ນຫົວໜ້າພະແນກ (ຫຼື Backend ຍັງບໍ່ມີ endpoint) → ຊ່ອນແຖບນີ້
+      if (status === 403 || status === 404) {
+        setManagerAvailable(false);
+        setManagerRequests([]);
+        return;
+      }
+      if (silent) return;
+      setManagerError(error.response?.data?.msg || error.response?.data?.message || 'ບໍ່ສາມາດດຶງຄຳຂໍທີ່ລໍຖ້າຫົວໜ້າພະແນກໄດ້');
+    } finally {
+      if (!silent) setLoadingManager(false);
+    }
+  };
+
   // ໂຫຼດປະຫວັດການຮັບເຂົ້າ + ທະບຽນຊັບສິນຂອງລາຍການທີ່ເປີດ popup ຢູ່ ໃໝ່ແບບງຽບໆ (ບໍ່ລ້າງໜ້າຈໍ)
   const reloadOpenItemSilently = async (item) => {
     const itemId = item._id;
@@ -550,6 +613,7 @@ export default function AssetManagement() {
     Promise.all([
       fetchCatalog({ silent: true }),
       fetchPendingRequests({ silent: true }),
+      fetchManagerRequests({ silent: true }),
       historyItem ? reloadOpenItemSilently(historyItem) : null,
     ]),
   );
@@ -563,9 +627,14 @@ export default function AssetManagement() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPendingRequests();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchManagerRequests();
   }, []);
 
-  const detailReq = detailReqId ? pendingRequests.find((r) => r._id === detailReqId) || null : null;
+  const detailReq = detailReqId
+    ? pendingRequests.find((r) => r._id === detailReqId) || managerRequests.find((r) => r._id === detailReqId) || null
+    : null;
+  const isManagerStage = detailReq?.status === 'PENDING_MANAGER';
 
   const closeConfirm = () => {
     if (reviewingId) return;
@@ -610,17 +679,18 @@ export default function AssetManagement() {
     try {
       setReviewingId(id);
       setReviewError('');
+      const stage = isManagerStage ? 'manager-' : '';
       if (confirmType === 'approve') {
-        await api.patch(`/supply-requests/${id}/approve`);
+        await api.patch(`/supply-requests/${id}/${stage}approve`);
       } else {
-        await api.patch(`/supply-requests/${id}/reject`, { reason: rejectReason.trim() });
+        await api.patch(`/supply-requests/${id}/${stage}reject`, { reason: rejectReason.trim() });
       }
       const wasApprove = confirmType === 'approve';
       setConfirmType(null);
       setDetailReqId(null);
       setRejectReason('');
-      await fetchPendingRequests();
-      if (wasApprove) fetchCatalog();
+      await Promise.all([fetchPendingRequests(), fetchManagerRequests()]);
+      if (wasApprove && !isManagerStage) fetchCatalog();
     } catch (error) {
       setReviewError(
         error.response?.data?.msg || error.response?.data?.message ||
@@ -671,7 +741,12 @@ export default function AssetManagement() {
             <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
               <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <h3 className="text-lg font-bold text-gray-800">{req._id}</h3>
-                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">ລໍຖ້າອະນຸມັດ</span>
+                {isManagerStage ? (
+                  <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">ລໍຖ້າຫົວໜ້າພະແນກ</span>
+                ) : (
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">ລໍຖ້າອະນຸມັດ</span>
+                )}
+                <SourceBadge req={req} />
                 <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">{totalQty} ຊິ້ນ</span>
               </div>
               <button type="button" onClick={closeDetail} className="text-gray-400 hover:text-gray-600 transition" aria-label="ປິດ">
@@ -683,7 +758,8 @@ export default function AssetManagement() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                 {info('ຜູ້ຂໍ', `${requesterNameOf(req)}${req.requestedBy?.employeeCode ? ` (${req.requestedBy.employeeCode})` : ''}`)}
                 {info('ວັນທີ-ເວລາຍື່ນ', fmtDateTime(req.createdAt))}
-                {info('ຂໍໃນນາມ', deptName ? `ແຜນກ ${deptName}` : 'ສ່ວນຕົວ')}
+                {info('ຂໍໃນນາມ', deptName ? `ແຜນກ ${deptName}` : `ສ່ວນຕົວ${req.managerDepartmentId?.name ? ` (ພະແນກ ${req.managerDepartmentId.name})` : ''}`)}
+                {req.managerApprovedBy && info('ຫົວໜ້າພະແນກອະນຸມັດ', `${personOf(req.managerApprovedBy)} · ${fmtDateTime(req.managerApprovedAt)}`)}
                 {req.custodianId && info('ຜູ້ຮັບຜິດຊອບ', `${personOf(req.custodianId)}${req.custodianId.employeeCode ? ` (${req.custodianId.employeeCode})` : ''}`)}
                 {req.delegateId && info('ຜູ້ຮັບແທນ', `${personOf(req.delegateId)}${req.delegateId.employeeCode ? ` (${req.delegateId.employeeCode})` : ''}`)}
               </div>
@@ -786,7 +862,7 @@ export default function AssetManagement() {
             </div>
 
             <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-gray-100">
-              {canApproveRequests ? (
+              {isManagerStage || canApproveRequests ? (
                 <>
                   <button
                     type="button"
@@ -804,7 +880,7 @@ export default function AssetManagement() {
                     className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-1.5"
                   >
                     <CheckCircle size={16} />
-                    <span>ອະນຸມັດ</span>
+                    <span>{isManagerStage ? 'ອະນຸມັດ (ຫົວໜ້າພະແນກ)' : 'ອະນຸມັດ'}</span>
                   </button>
                 </>
               ) : (
@@ -832,7 +908,9 @@ export default function AssetManagement() {
                     </h4>
                     <p className="text-sm text-gray-500 mt-1">
                       {confirmType === 'approve'
-                        ? `ອະນຸມັດຄຳຂໍ ${req._id} (${totalQty} ຊິ້ນ) ຂອງ ${requesterNameOf(req)} ແມ່ນບໍ?`
+                        ? isManagerStage
+                          ? `ອະນຸມັດຄຳຂໍ ${req._id} (${totalQty} ຊິ້ນ) ຂອງ ${requesterNameOf(req)} — ຫຼັງອະນຸມັດ ຄຳຂໍຈະຖືກສົ່ງຕໍ່ໃຫ້ຝ່າຍສາງ/ຜູ້ອະນຸມັດແມ່ນບໍ?`
+                          : `ອະນຸມັດຄຳຂໍ ${req._id} (${totalQty} ຊິ້ນ) ຂອງ ${requesterNameOf(req)} ແມ່ນບໍ?`
                         : `ປະຕິເສດຄຳຂໍ ${req._id} ຂອງ ${requesterNameOf(req)} — ກະລຸນາບອກເຫດຜົນ`}
                     </p>
                   </div>
@@ -909,6 +987,49 @@ export default function AssetManagement() {
       </>
     );
   };
+
+  const renderRequestRows = (list) => (
+      <div className="divide-y divide-gray-100">
+        {list.map((req) => {
+          const requesterName = requesterNameOf(req);
+          const totalQty = Array.isArray(req.items) ? req.items.reduce((sum, i) => sum + (i.quantity || 0), 0) : 0;
+
+          return (
+            <div
+              key={req._id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setDetailReqId(req._id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setDetailReqId(req._id);
+                }
+              }}
+              title="ກົດເພື່ອເບິ່ງລາຍລະອຽດ"
+              className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-amber-50/40 focus:outline-none focus-visible:bg-amber-50/60 transition"
+            >
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-bold text-gray-800">{req._id}</span>
+                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">{totalQty} ຊິ້ນ</span>
+                  <SourceBadge req={req} />
+                </div>
+                <div className="text-xs text-gray-600">
+                  {Array.isArray(req.items) && req.items.map((i, idx) => (
+                    <div key={idx}>• {i.name} (x{i.quantity}){i.reason ? ` — ${i.reason}` : ''}</div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-500">
+                  ຜູ້ຂໍ: {requesterName}{req.managerDepartmentId?.name ? ` (ພະແນກ ${req.managerDepartmentId.name})` : ''} · ວັນທີຍື່ນ: {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : '-'}
+                </p>
+              </div>
+              <ChevronRight size={18} className="shrink-0 text-gray-300" />
+            </div>
+          );
+        })}
+      </div>
+  );
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1444,6 +1565,20 @@ export default function AssetManagement() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepRequestId, loadingPending, pendingRequests]);
 
+  // ເປີດຈາກກະດິ່ງແຈ້ງເຕືອນຂອງຫົວໜ້າພະແນກ (?managerReview=SR060)
+  const managerReviewId = searchParams.get('managerReview');
+  useEffect(() => {
+    if (!managerReviewId || loadingManager) return;
+    if (managerRequests.some((r) => r._id === managerReviewId)) {
+      setActiveTab('manager');
+      setDetailReqId(managerReviewId);
+    } else if (managerAvailable) {
+      setActiveTab('manager');
+    }
+    navigate('/assets', { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [managerReviewId, loadingManager, managerRequests]);
+
   return (
     <MainLayout>
       <div className="space-y-6">
@@ -1560,6 +1695,19 @@ export default function AssetManagement() {
           >
             ລາຍການອຸປະກອນ (Catalog)
           </button>
+          {(managerAvailable || managerRequests.length > 0) && (
+            <button
+              onClick={() => setActiveTab('manager')}
+              className={`pb-3 text-sm font-medium transition border-b-2 flex items-center gap-2 ${activeTab === 'manager' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            >
+              <span>ຄຳຂໍລໍຖ້າຫົວໜ້າພະແນກ</span>
+              {managerRequests.length > 0 && (
+                <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                  {managerRequests.length}
+                </span>
+              )}
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('pending')}
             className={`pb-3 text-sm font-medium transition border-b-2 flex items-center gap-2 ${activeTab === 'pending' ? 'border-amber-500 text-amber-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -1572,6 +1720,34 @@ export default function AssetManagement() {
             )}
           </button>
         </div>
+
+        {activeTab === 'manager' && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Clock size={18} className="text-indigo-500" />
+                <h2 className="font-bold text-gray-800">ຄຳຂໍຈາກພະນັກງານໃນພະແນກຂອງທ່ານ</h2>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">ອະນຸມັດແລ້ວ ຄຳຂໍຈະຖືກສົ່ງຕໍ່ໄປແຖບ "ຄຳຂໍອຸປະກອນຈາກພະແນກ" ເພື່ອໃຫ້ຝ່າຍສາງດຳເນີນການຕໍ່</p>
+            </div>
+            {managerRequests.length > 0 && (
+              <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
+                {managerRequests.length} ລາຍການ
+              </span>
+            )}
+          </div>
+          {loadingManager ? (
+            <div className="py-10 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</div>
+          ) : managerError ? (
+            <div className="py-10 text-center text-sm text-red-500 px-4">⚠️ {managerError}</div>
+          ) : managerRequests.length > 0 ? (
+            renderRequestRows(managerRequests)
+          ) : (
+            <div className="py-10 text-center text-sm text-gray-400">ບໍ່ມີຄຳຂໍທີ່ລໍຖ້າທ່ານອະນຸມັດ</div>
+          )}
+        </div>
+        )}
 
         {activeTab === 'pending' && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -1592,45 +1768,7 @@ export default function AssetManagement() {
           ) : pendingError ? (
             <div className="py-10 text-center text-sm text-red-500 px-4">⚠️ {pendingError}</div>
           ) : pendingRequests.length > 0 ? (
-            <div className="divide-y divide-gray-100">
-              {pendingRequests.map((req) => {
-                const requesterName = requesterNameOf(req);
-                const totalQty = Array.isArray(req.items) ? req.items.reduce((sum, i) => sum + (i.quantity || 0), 0) : 0;
-
-                return (
-                  <div
-                    key={req._id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDetailReqId(req._id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setDetailReqId(req._id);
-                      }
-                    }}
-                    title="ກົດເພື່ອເບິ່ງລາຍລະອຽດ"
-                    className="p-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-amber-50/40 focus:outline-none focus-visible:bg-amber-50/60 transition"
-                  >
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-gray-800">{req._id}</span>
-                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">{totalQty} ຊິ້ນ</span>
-                      </div>
-                      <div className="text-xs text-gray-600">
-                        {Array.isArray(req.items) && req.items.map((i, idx) => (
-                          <div key={idx}>• {i.name} (x{i.quantity}){i.reason ? ` — ${i.reason}` : ''}</div>
-                        ))}
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        ຜູ້ຂໍ: {requesterName} · ວັນທີຍື່ນ: {req.createdAt ? new Date(req.createdAt).toLocaleDateString() : '-'}
-                      </p>
-                    </div>
-                    <ChevronRight size={18} className="shrink-0 text-gray-300" />
-                  </div>
-                );
-              })}
-            </div>
+            renderRequestRows(pendingRequests)
           ) : (
             <div className="py-10 text-center text-sm text-gray-400">ບໍ່ມີຄຳຂໍລໍຖ້າອະນຸມັດ</div>
           )}
