@@ -21,6 +21,10 @@ export function getNotificationPath(n) {
       return `/meeting-rooms?tab=my-bookings`;
 
     case 'SupplyRequest':
+      // ມີຄຳຂໍໃນນາມແຜນກ (ແຈ້ງຫົວໜ້າແຜນກ/ຜູ້ຮັບຜິດຊອບ) → ເປີດບັດລາຍລະອຽດໃບຂໍໃນໜ້າ /supplies
+      if (n.type === 'SUPPLY_REQUEST_DEPARTMENT_CREATED') {
+        return `/supplies?open=${id}`;
+      }
       // ຖືກກຳນົດໃຫ້ໄປຮັບເຄື່ອງແທນ / ມີຄົນຮັບແທນ → ເປີດໃບຮັບເຄື່ອງຂອງໃບຂໍນັ້ນ
       return `/supplies/receipt/${id}`;
 

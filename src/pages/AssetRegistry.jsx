@@ -123,8 +123,6 @@ export default function AssetRegistry() {
   const [proxyLookup, setProxyLookup] = useState(null);
   const [holderTypeFilter, setHolderTypeFilter] = useState('');
   const [deptFilter, setDeptFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState(''); // '' | ໝວດໝູ່ | '__NONE__' (ບໍ່ຜູກ Catalog)
-  const [snFilter, setSnFilter] = useState(''); // '' | 'MISSING' | 'HAS'
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignError, setAssignError] = useState('');
 
@@ -282,13 +280,8 @@ export default function AssetRegistry() {
     fetchBranches();
     fetchUsers();
     fetchDepartments();
-<<<<<<< HEAD
-    fetchCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-=======
     fetchReceipts();
     if (canCreate) fetchCatalog();
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
   }, [branchFilter]);
 
   useEffect(() => {
@@ -370,15 +363,6 @@ export default function AssetRegistry() {
     return users.filter((u) => u.isActive !== false && (userDeptId(u) === deptId || managers.includes(u._id)));
   };
 
-  const catalogOf = (a) => catalog.find((c) => c._id === refId(a.catalogItemId));
-  const categoryOf = (a) => catalogOf(a)?.category || '';
-  // ຂາດ S/N = ລາຍການທີ່ຕ້ອງມີ S/N (ASSET ແລະ trackSerial ບໍ່ແມ່ນ false) ແຕ່ຍັງບໍ່ໄດ້ຕື່ມ
-  const missingSerial = (a) => {
-    const c = catalogOf(a);
-    return !!c && c.itemType === 'ASSET' && c.trackSerial !== false && !String(a.serialNumber || '').trim();
-  };
-  const assetCategories = [...new Set(catalog.filter((c) => c.itemType === 'ASSET' && c.category).map((c) => c.category))].sort();
-
   const statusInfo = (status) => {
     switch (status) {
       case 'ASSIGNED': return { label: 'ຖືກມອບໝາຍແລ້ວ', className: 'bg-blue-100 text-blue-700' };
@@ -442,18 +426,10 @@ export default function AssetRegistry() {
     if (holderTypeFilter === 'DEPARTMENT' && !isDeptHeld(a)) return false;
     if (holderTypeFilter === 'PERSON' && isDeptHeld(a)) return false;
     if (deptFilter && refId(a.departmentId) !== deptFilter) return false;
-    if (categoryFilter === '__NONE__' && catalogOf(a)) return false;
-    if (categoryFilter && categoryFilter !== '__NONE__' && categoryOf(a) !== categoryFilter) return false;
-    if (snFilter === 'MISSING' && !missingSerial(a)) return false;
-    if (snFilter === 'HAS' && !String(a.serialNumber || '').trim()) return false;
     if (search) {
       const q = search.toLowerCase();
-<<<<<<< HEAD
-      const hay = `${a.assetTag} ${a.type || ''} ${a.serialNumber || ''}`.toLowerCase();
-=======
       const catName = catalog.find((c) => c._id === refId(a.catalogItemId))?.name || '';
       const hay = `${a.assetTag} ${a.serialNumber || ''} ${catName}`.toLowerCase();
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -527,7 +503,7 @@ export default function AssetRegistry() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [search, statusFilter, branchFilter, holderTypeFilter, deptFilter, categoryFilter, snFilter]);
+  }, [search, statusFilter, branchFilter, holderTypeFilter, deptFilter]);
 
   const closeCreate = () => {
     setShowCreateModal(false);
@@ -1036,11 +1012,7 @@ export default function AssetRegistry() {
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-<<<<<<< HEAD
-                  placeholder="ຄົ້ນຫາ Asset Tag / ຊື່ລາຍການ / S/N..."
-=======
                   placeholder="ຄົ້ນຫາ Asset Tag, S/N, ຊື່ລາຍການ..."
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
                   value={search}
                   onChange={(e) => { setSearch(e.target.value); setExpandedFolders(new Set()); }}
                   className="w-full pl-9 pr-10 py-2 border border-gray-200 rounded-xl text-sm"
@@ -1074,18 +1046,6 @@ export default function AssetRegistry() {
                 <option value="">ທຸກພະແນກ</option>
                 {departments.filter((d) => d.isActive !== false).map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
               </select>
-<<<<<<< HEAD
-              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
-                <option value="">ທຸກໝວດໝູ່</option>
-                {assetCategories.map((c) => <option key={c} value={c}>{c}</option>)}
-                <option value="__NONE__">ບໍ່ຜູກ Catalog</option>
-              </select>
-              <select value={snFilter} onChange={(e) => setSnFilter(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2 text-sm">
-                <option value="">S/N ທັງໝົດ</option>
-                <option value="MISSING">ຍັງບໍ່ມີ S/N</option>
-                <option value="HAS">ມີ S/N ແລ້ວ</option>
-              </select>
-=======
               <button
                 type="button"
                 onClick={toggleAllFolders}
@@ -1095,7 +1055,6 @@ export default function AssetRegistry() {
                 {allFoldersOpen ? <ChevronsUp size={16} /> : <ChevronsDown size={16} />}
                 {allFoldersOpen ? 'ຫຍໍ້ທັງໝົດ' : 'ຂະຫຍາຍທັງໝົດ'}
               </button>
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
             </div>
 
             {selectedIds.size > 0 && (
@@ -1156,7 +1115,6 @@ export default function AssetRegistry() {
                       />}
                     </th>
                     <th className="p-3 font-medium">Asset Tag</th>
-                    <th className="p-3 font-medium">ລາຍການ / ປະເພດ</th>
                     <th className="p-3 font-medium">ສາຂາ</th>
                     <th className="p-3 font-medium">ສະຖານະ</th>
                     <th className="p-3 font-medium">ຜູ້ຖືກມອບໝາຍ</th>
@@ -1167,12 +1125,12 @@ export default function AssetRegistry() {
                 <tbody className="divide-y divide-gray-100">
                   {loadingAssets && (
                     <tr>
-                      <td colSpan={8} className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</td>
+                      <td colSpan={7} className="p-6 text-center text-sm text-gray-500">ກຳລັງໂຫຼດ...</td>
                     </tr>
                   )}
                   {!loadingAssets && filteredAssets.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="p-6 text-center text-sm text-gray-500">ບໍ່ພົບຊັບສິນທີ່ຄ້າຍຄື</td>
+                      <td colSpan={7} className="p-6 text-center text-sm text-gray-500">ບໍ່ພົບຊັບສິນທີ່ຄ້າຍຄື</td>
                     </tr>
                   )}
                   {folders.map((f) => {
@@ -1181,48 +1139,6 @@ export default function AssetRegistry() {
                     const allSel = availIds.length > 0 && availIds.every((id) => selectedIds.has(id));
                     const counts = f.list.reduce((m, a) => ({ ...m, [a.status]: (m[a.status] || 0) + 1 }), {});
                     return (
-<<<<<<< HEAD
-                      <tr key={a._id} className="hover:bg-gray-50">
-                        <td className="p-3">
-                          {canAssign && a.status === 'AVAILABLE' && (
-                            <input
-                              type="checkbox"
-                              aria-label={`ເລືອກ ${a.assetTag}`}
-                              checked={selectedIds.has(a._id)}
-                              onChange={() => toggleSelect(a._id)}
-                              className="rounded"
-                            />
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <button
-                            type="button"
-                            onClick={() => navigate(`/assets/${a._id}`)}
-                            className="font-semibold text-gray-800 hover:text-amber-600 hover:underline"
-                            title="ເປີດໜ້າລາຍລະອຽດຊັບສິນ"
-                          >
-                            {a.assetTag}
-                          </button>
-                        </td>
-                        <td className="p-3">
-                          <div className="text-gray-800">{a.type || '—'}</div>
-                          <div className="text-xs text-gray-400">
-                            {categoryOf(a) || (catalogOf(a) ? '' : 'ບໍ່ຜູກ Catalog')}
-                            {a.serialNumber ? ` · S/N ${a.serialNumber}` : ''}
-                          </div>
-                          {missingSerial(a) && (
-                            <span className="inline-block mt-0.5 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">ຍັງບໍ່ມີ S/N</span>
-                          )}
-                        </td>
-                        <td className="p-3 text-gray-500">{branchName(a.branchId)}</td>
-                        <td className="p-3"><span className={`text-xs px-2.5 py-1 rounded-full font-medium ${info.className}`}>{info.label}</span></td>
-                        <td className="p-3 text-gray-500">
-                          {isDeptHeld(a) && a.currentAssigneeId ? (
-                            <div>
-                              <span className="inline-block text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 font-medium">ພະແນກ</span>{' '}
-                              <span className="font-medium text-gray-700">{deptName(a.departmentId)}</span>
-                              <div className="text-xs text-gray-400">ຜູ້ຮັບຜິດຊອບ: {userName(a.currentAssigneeId)}</div>
-=======
                       <Fragment key={f.key}>
                         <tr onClick={() => toggleFolder(f.key)} className="bg-gray-50/80 hover:bg-amber-50/50 cursor-pointer">
                           <td className="p-3" onClick={(e) => e.stopPropagation()}>
@@ -1243,7 +1159,6 @@ export default function AssetRegistry() {
                               <CatalogThumb url={catalog.find((c) => c._id === f.key)?.imageUrl} name={f.name} size={36} />
                               <span className="font-semibold text-gray-900">{f.key === '__none' ? '—' : f.key}</span>
                               <span className="text-gray-600">{f.name}</span>
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
                             </div>
                           </td>
                           <td className="p-3" colSpan={3}>

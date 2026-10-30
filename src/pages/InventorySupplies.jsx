@@ -64,10 +64,6 @@ export default function InventorySupplies() {
   const [items, setItems] = useState([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
   const [submitError, setSubmitError] = useState('');
   const [requestFor, setRequestFor] = useState('PERSON');
-<<<<<<< HEAD
-  const [custodianCode, setCustodianCode] = useState('');
-  const [custodianInfo, setCustodianInfo] = useState(null); // { found, name, eligible, reason } | { loading: true }
-=======
   const [custodian, setCustodian] = useState(null);
   const custodianCode = custodian?.employeeCode || '';
   const [custPickerOpen, setCustPickerOpen] = useState(false);
@@ -75,7 +71,6 @@ export default function InventorySupplies() {
   const [custResults, setCustResults] = useState([]);
   const [custLoading, setCustLoading] = useState(false);
   const [custError, setCustError] = useState('');
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
   const [requestableDepartments, setRequestableDepartments] = useState([]);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
 
@@ -85,46 +80,10 @@ export default function InventorySupplies() {
   const myDepartmentId = selectedDepartmentId;
   const myDepartmentName = selectedDepartment?.name || myDepartmentId;
 
-<<<<<<< HEAD
-  const typeBadge = (catalogItemId) => {
-    const cat = Array.isArray(catalog) ? catalog.find((c) => String(c._id) === String(catalogItemId)) : null;
-    if (cat?.itemType === 'ASSET') return { text: 'ຊັບສິນ (ມີ Asset Tag)', short: 'ຊັບສິນ', cls: 'bg-blue-100 text-blue-700' };
-    if (cat?.itemType === 'CONSUMABLE') return { text: 'ສິ້ນເປືອງ (ຫັກສະຕັອກ)', short: 'ສິ້ນເປືອງ', cls: 'bg-gray-100 text-gray-600' };
-    return null;
-  };
-
-  // ກວດຊື່ຜູ້ຮັບຜິດຊອບຈາກລະຫັດ (debounce) — ສະເພາະໂໝດຂໍໃນນາມພະແນກ
-  useEffect(() => {
-    const code = custodianCode.trim();
-    if (requestFor !== 'DEPARTMENT' || !code) {
-      setCustodianInfo(null);
-      return undefined;
-    }
-    setCustodianInfo({ loading: true });
-    const t = setTimeout(() => {
-      axios
-        .get(`/supply-requests/custodian-lookup/${encodeURIComponent(code)}`, {
-          params: selectedDepartmentId ? { departmentId: selectedDepartmentId } : {},
-        })
-        .then((res) => {
-          const body = res.data;
-          setCustodianInfo(body?.data !== undefined ? body.data : body);
-        })
-        .catch(() => setCustodianInfo(null));
-    }, 400);
-    return () => clearTimeout(t);
-  }, [custodianCode, requestFor, selectedDepartmentId]);
-
-  // ຕົວເລືອກຫຼາຍລາຍການຈາກ Catalog — ຕິກຫຼາຍອັນ + ໃສ່ຈຳນວນ ແລ້ວເພີ່ມເຂົ້າໃບຂໍພ້ອມກັນ
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState('');
-  const [pickerSelected, setPickerSelected] = useState({}); // { [catalogId]: quantity }
-=======
   const [reqStep, setReqStep] = useState(1);
   const [shopSearch, setShopSearch] = useState('');
   const [shopCategory, setShopCategory] = useState('');
   const [customName, setCustomName] = useState('');
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
 
   const [receiveRequest, setReceiveRequest] = useState(null);
   const [scanTags, setScanTags] = useState('');
@@ -412,14 +371,6 @@ useEffect(() => {
       if (requestFor === 'DEPARTMENT') {
         if (!myDepartmentId || !requestableDepartments.some((department) => department._id === myDepartmentId)) {
           setSubmitError('ກະລຸນາເລືອກພະແນກທີ່ທ່ານມີສິດຂໍເຄື່ອງ');
-          return;
-        }
-        if (custodianInfo && custodianInfo.found === false) {
-          setSubmitError('ບໍ່ພົບລະຫັດພະນັກງານຜູ້ຮັບຜິດຊອບ');
-          return;
-        }
-        if (custodianInfo?.found && !custodianInfo.eligible) {
-          setSubmitError(custodianInfo.reason || 'ຜູ້ຮັບຜິດຊອບບໍ່ຖືກຕ້ອງ');
           return;
         }
         if (!custodianCode.trim()) {
@@ -954,12 +905,7 @@ useEffect(() => {
                             </span>
                           </div>
                           {req.custodianId && (
-                            <div>
-                              ຜູ້ຮັບຜິດຊອບ (ກຳນົດໄວ້): {refName(req.custodianId)}
-                              {['FULFILLED', 'CLOSED'].includes(req.status)
-                                ? <span className="ml-1 text-emerald-600">· ຮັບເຄື່ອງແລ້ວ</span>
-                                : <span className="ml-1 text-amber-600">· ຍັງບໍ່ໄດ້ຮັບເຄື່ອງ</span>}
-                            </div>
+                            <div>ຜູ້ຮັບຜິດຊອບ: {refName(req.custodianId)}</div>
                           )}
                         </div>
                       )}
@@ -967,12 +913,7 @@ useEffect(() => {
                     <td className="p-4">
                       {Array.isArray(req.items) && req.items.map((i, idx) => (
                         <div key={idx} className="text-xs flex items-center gap-2">
-                          <span>
-                            • {i.name} (x{i.quantity})
-                            {typeBadge(i.catalogItemId) && (
-                              <span className="ml-1 text-[10px] text-gray-400">[{typeBadge(i.catalogItemId).short}]</span>
-                            )}
-                          </span>
+                          <span>• {i.name} (x{i.quantity})</span>
                         </div>
                       ))}
                     </td>
@@ -1251,35 +1192,6 @@ useEffect(() => {
                           ເລືອກໄດ້ 1 ຄົນ ແລະປ່ຽນໄດ້ຈົນກວ່າຈະຮັບເຄື່ອງ — ເຄື່ອງຍັງບັນທຶກໃຫ້ຜູ້ຂໍ{isDeptRequest(d) ? '/ແຜນກ' : ''}ຄືເກົ່າ
                         </div>
                       </div>
-<<<<<<< HEAD
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">ລະຫັດພະນັກງານຜູ້ຮັບຜິດຊອບ *</label>
-                        <input
-                          type="text"
-                          required
-                          value={custodianCode}
-                          onChange={(e) => setCustodianCode(e.target.value)}
-                          placeholder="ລະຫັດພະນັກງານ..."
-                          className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white tracking-widest"
-                        />
-                        {custodianInfo?.loading && <p className="text-[11px] text-gray-400 mt-1">ກຳລັງກວດ...</p>}
-                        {custodianInfo?.found === false && (
-                          <p className="text-[11px] text-red-600 mt-1">ບໍ່ພົບລະຫັດພະນັກງານນີ້</p>
-                        )}
-                        {custodianInfo?.found && (
-                          <p className={`text-[11px] mt-1 ${custodianInfo.eligible ? 'text-green-600' : 'text-red-600'}`}>
-                            {custodianInfo.eligible
-                              ? `✓ ຜູ້ຮັບຜິດຊອບ: ${custodianInfo.name}`
-                              : `✗ ${custodianInfo.name} — ${custodianInfo.reason}`}
-                          </p>
-                        )}
-                        <p className="text-[11px] text-gray-400 mt-1">
-                          ຕ້ອງເປັນສະມາຊິກ ຫຼື ຫົວໜ້າຂອງແຜນກນີ້ — ຄ່າເລີ່ມຕົ້ນແມ່ນລະຫັດຂອງທ່ານ
-                        </p>
-                      </div>
-                    </>
-                  )}
-=======
                     )}
                   </div>
                 )}
@@ -1324,7 +1236,6 @@ useEffect(() => {
                       </tr>
                     </tfoot>
                   </table>
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
                 </div>
 
                 <div className="flex justify-end gap-2 pt-1">
@@ -1415,16 +1326,6 @@ useEffect(() => {
                             const inCart = items.find((it) => it.catalogItemId === c._id);
                             const qtyInCart = inCart ? parseInt(inCart.quantity, 10) || 0 : 0;
                             return (
-<<<<<<< HEAD
-                              <div key={c._id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                                <input type="checkbox" checked={checked} onChange={() => togglePicked(c._id)} className="rounded" />
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-gray-800 truncate">
-                                    {c.name}
-                                    {typeBadge(c._id) && <span className="ml-2 text-[10px] text-gray-400">[{typeBadge(c._id).short}]</span>}
-                                  </div>
-                                  <div className="text-[11px] text-gray-500">{c.category || '—'} · ຄົງເຫຼືອ {stock} {c.unit || ''}</div>
-=======
                               <div
                                 key={c._id}
                                 className={`flex flex-col bg-white rounded-xl border overflow-hidden transition ${
@@ -1475,7 +1376,6 @@ useEffect(() => {
                                       </button>
                                     )}
                                   </div>
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
                                 </div>
                               </div>
                             );
@@ -1615,38 +1515,6 @@ useEffect(() => {
                         })}
                       </div>
 
-<<<<<<< HEAD
-                  {items.map((item, index) => (
-                    <div key={index} className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3 relative">
-                      {items.length > 1 && (
-                        <button type="button" onClick={() => handleRemoveItem(index)} className="absolute top-3 right-3 text-rose-500 text-xs font-bold hover:underline">ລຶບ</button>
-                      )}
-                      
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">ຄົ້ນຫາ ແລະ ເລືອກຈາກ Catalog (ທາງເລືອກ)</label>
-                        <input
-                          type="text"
-                          list={`catalog-options-${index}`}
-                          value={item.catalogSearch ?? ''}
-                          onChange={(e) => handleCatalogSearchChange(index, e.target.value)}
-                          placeholder="ພິມຄົ້ນຫາຊື່ອຸປະກອນ... ຫຼື ພິມຊື່ເອງຂ້າງລຸ່ມ"
-                          className="w-full border border-gray-200 rounded-lg p-2 text-sm bg-white"
-                        />
-                        <datalist id={`catalog-options-${index}`}>
-                          {Array.isArray(catalog) && catalog.map(cat => (
-                            <option key={cat._id} value={cat.name}>{`ຄົງເຫຼືອ: ${cat.stockQty ?? 0}`}</option>
-                          ))}
-                        </datalist>
-                        {item.catalogItemId && (
-                          <p className="text-xs text-green-600 mt-1">
-                            ✓ ເລືອກແລ້ວ: {item.name} (ລະຫັດ {item.catalogItemId})
-                            {typeBadge(item.catalogItemId) && (
-                              <span className={`ml-2 px-2 py-0.5 rounded-full text-[11px] ${typeBadge(item.catalogItemId).cls}`}>
-                                {typeBadge(item.catalogItemId).text}
-                              </span>
-                            )}
-                          </p>
-=======
                       <div className="rounded-xl border border-gray-200 p-3 space-y-3">
                         <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ຂໍໃນນາມ</div>
                         <div className="flex gap-2">
@@ -1781,7 +1649,6 @@ useEffect(() => {
                               </p>
                             </div>
                           </>
->>>>>>> 2ac6ec28dcc64cfdfac651af5ed4dd382f880725
                         )}
                       </div>
 

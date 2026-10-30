@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Printer,
   Paperclip,
+  Image as ImageIcon,
+  Camera,
   Folder,
   FolderOpen,
   ChevronsDown,
@@ -23,6 +25,8 @@ import CsvExportButton from '../components/CsvExportButton';
 import api from '../services/api';
 import GoodsReceiptPrint from '../components/GoodsReceiptPrint';
 import CatalogImageUpload, { CatalogThumb } from '../components/CatalogImage';
+import CatalogPickerModal from '../components/CatalogPickerModal';
+import PhotoCaptureModal from '../components/PhotoCaptureModal';
 import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 import { API_BASE_URL, API_ORIGIN } from '../config';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
@@ -70,6 +74,9 @@ export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, o
   const isNew = mode === 'NEW_ITEM';
   const currentUser = getCurrentUser();
   const [catalogItemId, setCatalogItemId] = useState(initialCatalogItemId || '');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const cameraInputRef = useRef(null);
   const prRemaining = pr ? Math.max(1, (pr.quantity || 0) - (pr.receivedQuantity || 0)) : 1;
   const [item, setItem] = useState(
     pr?.newItem
@@ -210,9 +217,20 @@ export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, o
     });
   };
 
-  const handleInvoiceFile = async (e) => {
+  // ມືຖື/ແທັບເລັດ → ໃຊ້ກ້ອງຂອງເຄື່ອງ (capture); ຄອມ → ເປີດກ້ອງໃນໜ້າເວັບ; ຖ້າເປີດກ້ອງບໍ່ໄດ້ → ເລືອກໄຟລ໌ຮູບ
+  const openCamera = () => {
+    const isTouch = window.matchMedia?.('(pointer: coarse)').matches;
+    if (!isTouch && navigator.mediaDevices?.getUserMedia) setPhotoOpen(true);
+    else cameraInputRef.current?.click();
+  };
+
+  const handleInvoiceFile = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
+    return uploadInvoice(file);
+  };
+
+  const uploadInvoice = async (file) => {
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) return setError('ໄຟລ໌ໃຫຍ່ເກີນໄປ (ຈຳກັດ 10MB)');
     try {
@@ -546,10 +564,6 @@ export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, o
         </div>
 
         <div className="p-6 overflow-y-auto space-y-4">
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">{error}</div>
-          )}
-
           {pr ? (
             <div className="p-3 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl">
               ຮັບເຄື່ອງຕາມໃບສະເໜີ <b>{pr.prNo}</b> — ຂໍ {pr.quantity}, ຮັບແລ້ວ {pr.receivedQuantity || 0}, ເຫຼືອ {prRemaining}
@@ -622,15 +636,17 @@ export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, o
           ) : (
             <>
               <Field label="ລາຍການ" required>
-                <select className={inputCls} value={catalogItemId} disabled={!!pr} onChange={(e) => setCatalogItemId(e.target.value)}>
-                  <option value="">— ເລືອກລາຍການ —</option>
-                  {sortedCatalog.map((c) => (
-                    <option key={c._id} value={c._id}>
-                      {c._id} — {c.name} (ສະຕັອກ {c.stockQty ?? 0})
-                      {c.stockQty <= c.lowStockThreshold ? ' · ໃກ້ໝົດ' : ''}
-                    </option>
-                  ))}
-                </select>
+                <button
+                  type="button"
+                  disabled={!!pr}
+                  onClick={() => setPickerOpen(true)}
+                  className={`${inputCls} flex items-center justify-between gap-2 text-left ${pr ? 'bg-gray-50 cursor-not-allowed' : 'cursor-pointer hover:border-amber-400'}`}
+                >
+                  <span className={`truncate ${selected ? 'text-gray-800' : 'text-gray-400'}`}>
+                    {selected ? `${selected._id} — ${selected.name}` : '— ເລືອກລາຍການ —'}
+                  </span>
+                  <ChevronDown size={16} className="shrink-0 text-gray-400" />
+                </button>
               </Field>
               {selected?.imageUrl && (
                 <div className="flex items-center gap-3 p-2 border border-gray-100 rounded-xl bg-gray-50/60">
@@ -768,10 +784,29 @@ export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, o
                   </button>
                 </div>
               ) : (
-                <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-xl text-xs text-gray-500 cursor-pointer hover:bg-gray-50">
-                  <Paperclip size={14} /> {uploading ? 'ກຳລັງອັບໂຫຼດ...' : 'ເລືອກໄຟລ໌'}
-                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx" className="hidden" onChange={handleInvoiceFile} disabled={uploading} />
-                </label>
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-xl text-xs text-gray-500 cursor-pointer hover:bg-gray-50">
+                    <Paperclip size={14} /> {uploading ? 'ກຳລັງອັບໂຫຼດ...' : 'ເລືອກໄຟລ໌'}
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.docx" className="hidden" onChange={handleInvoiceFile} disabled={uploading} />
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {/* ຄັງຮູບ (camera roll) — ມືຖືຈະເປີດຄັງຮູບ/ເລືອກຖ່າຍຮູບ */}
+                    <label className="flex items-center justify-center gap-1.5 px-2 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 cursor-pointer hover:bg-gray-50">
+                      <ImageIcon size={14} /> ຄັງຮູບ
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleInvoiceFile} disabled={uploading} />
+                    </label>
+                    {/* ຖ່າຍຮູບດ້ວຍກ້ອງໂດຍກົງ */}
+                    <button
+                      type="button"
+                      onClick={openCamera}
+                      disabled={uploading}
+                      className="flex items-center justify-center gap-1.5 px-2 py-2 border border-gray-200 rounded-xl text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      <Camera size={14} /> ຖ່າຍຮູບ
+                    </button>
+                    <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleInvoiceFile} />
+                  </div>
+                </div>
               )}
             </Field>
           </div>
@@ -880,6 +915,12 @@ export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, o
           )}
         </div>
 
+        {error && (
+          <div role="alert" className="mx-6 mt-3 mb-3 p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl">
+            {error}
+          </div>
+        )}
+
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button type="button" onClick={onClose} className="px-4 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">
             ຍົກເລີກ
@@ -895,6 +936,18 @@ export function ReceiveModal({ mode, catalog, rooms, initialCatalogItemId, pr, o
           </button>
         </div>
       </form>
+
+      {photoOpen && <PhotoCaptureModal onCapture={uploadInvoice} onClose={() => setPhotoOpen(false)} />}
+
+      {pickerOpen && (
+        <CatalogPickerModal
+          catalog={sortedCatalog}
+          selectedId={catalogItemId}
+          onSelect={(c) => setCatalogItemId(c._id)}
+          onClose={() => setPickerOpen(false)}
+          title="ເລືອກລາຍການ"
+        />
+      )}
 
       {scan && (
         <CameraScanner
