@@ -16,6 +16,16 @@ const STATUS_LABEL = {
   FULFILLED: { text: 'ຮັບເຄື່ອງແລ້ວ', className: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
   CLOSED: { text: 'ຮັບເຄື່ອງແລ້ວ', className: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
   REJECTED: { text: 'ຖືກປະຕິເສດ', className: 'bg-rose-50 text-rose-600 border-rose-200' },
+  PARTIALLY_RECEIVED: { text: 'ຮັບເຄື່ອງແລ້ວບາງສ່ວນ', className: 'bg-sky-50 text-sky-700 border-sky-200' },
+};
+
+// ສະຖານະແຕ່ລະລາຍການ (ໃບຂໍທີ່ຝ່າຍສາງກວດເປັນລາຍການແລ້ວ)
+const LINE_LABEL = {
+  WAITING: { text: 'ລໍຖ້າຝ່າຍສາງກວດ', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  READY: { text: 'ພ້ອມມາຮັບ', className: 'bg-teal-50 text-teal-700 border-teal-200' },
+  ON_ORDER: { text: 'ກຳລັງສັ່ງຊື້ — ຍັງບໍ່ພ້ອມ', className: 'bg-violet-50 text-violet-700 border-violet-200' },
+  REJECTED: { text: 'ຖືກປະຕິເສດ', className: 'bg-rose-50 text-rose-600 border-rose-200' },
+  COLLECTED: { text: 'ຮັບແລ້ວ', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
 };
 
 export default function SupplyReceipt() {
@@ -65,9 +75,13 @@ export default function SupplyReceipt() {
   }, [id]);
 
   const items = receipt?.items || [];
+  const lineMode = !!receipt?.lineMode;
   const entries = items.map((it, k) => ({ it, k }));
-  const taggedEntries = entries.filter((e) => e.it.requiresAssetTag);
-  const consumableEntries = entries.filter((e) => !e.it.requiresAssetTag);
+  // ໂໝດລາຍການ: ສະແກນ/ຕິກຮັບສະເພາະລາຍການ READY (collectable); ໃບເກົ່າ: ທຸກລາຍການ
+  const collectEntries = entries.filter((e) => e.it.collectable !== false);
+  const notYetEntries = lineMode ? entries.filter((e) => e.it.lineStatus === 'ON_ORDER' || e.it.lineStatus === 'WAITING') : [];
+  const taggedEntries = collectEntries.filter((e) => e.it.requiresAssetTag);
+  const consumableEntries = collectEntries.filter((e) => !e.it.requiresAssetTag);
   const requiredTagCount = taggedEntries.reduce((sum, e) => sum + (e.it.quantity || 0), 0);
   const tags = Object.values(tagsByItem).flat();
   const allConsumablesChecked = consumableEntries.every((e) => checkedConsumables[e.k]);
@@ -140,6 +154,7 @@ export default function SupplyReceipt() {
     setSubmitting(true);
     try {
       const payload = { assetTags: tags };
+      if (lineMode) payload.lineIndexes = collectEntries.map((e) => e.k);
       if (consumableEntries.length > 0) payload.confirmConsumables = allConsumablesChecked;
       if (!isDepartmentRequest && !receipt.isRequester && requester?.employeeCode) {
         payload.assigneeCode = requester.employeeCode;
@@ -147,6 +162,10 @@ export default function SupplyReceipt() {
       if (receipt.requiresOverride) payload.overrideReason = overrideReason.trim();
       await axios.patch(`/supply-requests/${id}/receive`, payload);
       setDone(true);
+      setTagsByItem({});
+      setTagInputs({});
+      setCheckedConsumables({});
+      setOverrideReason('');
       await load();
     } catch (err) {
       setSubmitError(err.response?.data?.msg || err.response?.data?.message || 'ຢືນຢັນຮັບເຄື່ອງບໍ່ສຳເລັດ');
@@ -156,7 +175,7 @@ export default function SupplyReceipt() {
   };
 
   const status =
-    receipt?.status === 'APPROVED' && receipt?.readyToCollect
+    (lineMode ? receipt?.readyToCollect : receipt?.status === 'APPROVED' && receipt?.readyToCollect)
       ? { text: 'ພ້ອມມາຮັບ', className: 'bg-teal-50 text-teal-700 border-teal-200' }
       : STATUS_LABEL[receipt?.status] ||
         (receipt?.status === 'ORDERED'
@@ -258,6 +277,7 @@ export default function SupplyReceipt() {
                       <th className="p-3">ລາຍການ</th>
                       <th className="p-3 text-center">ຈຳນວນ</th>
                       <th className="p-3">ປະເພດ</th>
+                      {lineMode && <th className="p-3">ສະຖານະ</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -276,6 +296,17 @@ export default function SupplyReceipt() {
                             <span className="px-2 py-0.5 rounded-full bg-gray-50 text-gray-600 border border-gray-200">ຂອງໃຊ້ສິ້ນເປືອງ</span>
                           )}
                         </td>
+                        {lineMode && (
+                          <td className="p-3 text-xs">
+                            {(() => {
+                              const ls = LINE_LABEL[it.lineStatus] || LINE_LABEL.WAITING;
+                              return (
+                                <span className={`inline-flex px-2 py-0.5 rounded-full border ${ls.className}`}>{ls.text}</span>
+                              );
+                            })()}
+                            {it.lineNote && <div className="text-gray-400 mt-1">{it.lineNote}</div>}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -290,6 +321,15 @@ export default function SupplyReceipt() {
               </div>
             </div>
 
+            {done && receipt.status === 'PARTIALLY_RECEIVED' && (
+              <div className="no-print bg-sky-50 border border-sky-200 rounded-2xl p-5 flex items-center gap-3 text-sky-700">
+                <CheckCircle2 size={28} />
+                <div>
+                  <div className="font-semibold">ຢືນຢັນຮັບເຄື່ອງບາງສ່ວນສຳເລັດ</div>
+                  <div className="text-xs">ລາຍການທີ່ຍັງບໍ່ພ້ອມ ຈະແຈ້ງເຕືອນເມື່ອມາຮັບໄດ້ — ກັບມາເປີດໃບນີ້ອີກເພື່ອຮັບສ່ວນທີ່ເຫຼືອ</div>
+                </div>
+              </div>
+            )}
             {done && ['FULFILLED', 'CLOSED'].includes(receipt.status) && (
               <div className="no-print bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-center gap-3 text-emerald-700">
                 <CheckCircle2 size={28} />
@@ -377,13 +417,28 @@ export default function SupplyReceipt() {
                 <div className="text-xs">ຈະແຈ້ງເຕືອນເມື່ອຂອງມາຄົບ — ຫຼັງຈາກນັ້ນມາສະແກນຮັບຕາມປົກກະຕິ</div>
               </div>
             )}
-            {receipt.readyToCollect && receipt.canConfirm && (
+            {lineMode && receipt.readyToCollect && (
+              <div className="no-print bg-teal-50 border border-teal-200 rounded-2xl p-4 text-sm text-teal-800 space-y-1">
+                <div className="font-semibold">ມີ {receipt.readyLineCount} ລາຍການພ້ອມມາຮັບ</div>
+                {notYetEntries.length > 0 && (
+                  <div className="text-xs text-teal-700">
+                    ຍັງບໍ່ພ້ອມ (ຮັບບໍ່ໄດ້ເທື່ອ): {notYetEntries.map((e) => e.it.name).join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
+            {lineMode && !receipt.readyToCollect && ['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && (
+              <div className="no-print bg-violet-50 border border-violet-200 rounded-2xl p-4 text-sm text-violet-800">
+                ຍັງບໍ່ມີລາຍການພ້ອມມາຮັບ — ຈະແຈ້ງເຕືອນເມື່ອຂອງມາຮອດ
+              </div>
+            )}
+            {!lineMode && receipt.readyToCollect && receipt.canConfirm && (
               <div className="no-print bg-teal-50 border border-teal-200 rounded-2xl p-4 text-sm text-teal-800">
                 ຂອງທີ່ຕ້ອງຊື້ເພີ່ມມາຄົບແລ້ວ ແລະຖືກຈອງໄວ້ໃຫ້ຄຳຂໍນີ້ — ສະແກນຮັບໄດ້ເລີຍ
               </div>
             )}
 
-            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && !receipt.waitingForPurchase && (
+            {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && !receipt.canConfirm && !receipt.waitingForPurchase && !(lineMode && !receipt.readyToCollect) && (
               <div className="no-print bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-700">
                 ມີສະເພາະຜູ້ຂໍ, ຜູ້ຮັບແທນທີ່ຖືກກຳນົດ, ຜູ້ຮັບຜິດຊອບ/ຫົວໜ້າແຜນກ ຫຼື ເຈົ້າໜ້າທີ່ສາງ (ສິດ supplies.fulfill ແລະ assets.assign) ທີ່ຢືນຢັນຮັບເຄື່ອງໄດ້
               </div>
@@ -391,7 +446,9 @@ export default function SupplyReceipt() {
 
             {['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(receipt.status) && receipt.canConfirm && (
               <div className="no-print bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5">
-                <h2 className="text-base font-bold text-gray-800">ຢືນຢັນຮັບເຄື່ອງທັງໃບ</h2>
+                <h2 className="text-base font-bold text-gray-800">
+                  {lineMode ? `ຢືນຢັນຮັບ ${collectEntries.length} ລາຍການທີ່ພ້ອມ` : 'ຢືນຢັນຮັບເຄື່ອງທັງໃບ'}
+                </h2>
 
                 <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1">
                   <div className="flex justify-between">

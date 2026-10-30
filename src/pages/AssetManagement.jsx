@@ -13,6 +13,7 @@ import CatalogImageUpload, { CatalogThumb, imageSrc } from '../components/Catalo
 import GoodsReceiptPrint from '../components/GoodsReceiptPrint';
 import { AssignAssetModal, AssetBarcodeModal, AssignmentHistoryModal } from '../components/AssetRowModals';
 import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
+import WarehouseLineReview from '../components/WarehouseLineReview';
 
 const ASSET_STATUS = {
   AVAILABLE: { text: 'ວ່າງ', cls: 'bg-green-100 text-green-700' },
@@ -30,7 +31,6 @@ const requesterNameOf = (req) =>
   req?.requestedBy?.name || req?.requestedBy?.email ||
   req?.userId?.name || req?.userId?.email ||
   req?.createdBy?.name || 'ບໍ່ລະບຸຜູ້ຂໍ';
-// ປ້າຍສະຖານະໃນກ່ອງປະຫວັດຄຳຂໍ
 const HISTORY_STATUS = {
   REQUESTED: { text: 'ລໍຖ້າອະນຸມັດ', cls: 'bg-amber-100 text-amber-700' },
   APPROVED: { text: 'ອະນຸມັດແລ້ວ', cls: 'bg-blue-100 text-blue-700' },
@@ -40,13 +40,23 @@ const HISTORY_STATUS = {
   FULFILLED: { text: 'ຮັບຄົບ · ປິດແລ້ວ', cls: 'bg-emerald-100 text-emerald-700' },
   REJECTED: { text: 'ປະຕິເສດ', cls: 'bg-red-100 text-red-700' },
 };
+const LINE_STATUS = {
+  READY: { text: 'ພ້ອມມາຮັບ', cls: 'bg-teal-100 text-teal-700' },
+  ON_ORDER: { text: 'ສັ່ງຊື້ຢູ່ — ຍັງບໍ່ພ້ອມ', cls: 'bg-violet-100 text-violet-700' },
+  REJECTED: { text: 'ປະຕິເສດ', cls: 'bg-red-100 text-red-700' },
+  COLLECTED: { text: 'ຮັບແລ້ວ', cls: 'bg-emerald-100 text-emerald-700' },
+};
+const LineBadge = ({ item }) => {
+  const b = LINE_STATUS[item?.lineStatus];
+  if (!b) return null;
+  return <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${b.cls}`}>{b.text}</span>;
+};
 const isDeptSource = (req) => {
   if (req?.source) return req.source === 'DEPARTMENT';
   const d = req?.departmentId;
   return !!(d && (typeof d === 'object' ? d._id : d));
 };
 
-// ປ້າຍແຫຼ່ງທີ່ມາຂອງຄຳຂໍ: ຈາກພະແນກ (ໂດຍກົງ) ຫຼື ຈາກພະນັກງານ (ຜ່ານຫົວໜ້າພະແນກ)
 function SourceBadge({ req }) {
   if (isDeptSource(req)) {
     return (
@@ -484,25 +494,22 @@ export default function AssetManagement() {
   const [loadingPending, setLoadingPending] = useState(true);
   const [pendingError, setPendingError] = useState('');
   const [reviewingId, setReviewingId] = useState(null);
-  const [detailReqId, setDetailReqId] = useState(null); // ໃບຂໍທີ່ເປີດເບິ່ງລາຍລະອຽດ
-  const [confirmType, setConfirmType] = useState(null); // 'approve' | 'reject' | null
+  const [detailReqId, setDetailReqId] = useState(null);
+  const [confirmType, setConfirmType] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [reviewError, setReviewError] = useState('');
 
-  // ຄິວຂັ້ນທີ 1: ຄຳຂໍສ່ວນບຸກຄົນທີ່ລໍຖ້າຫົວໜ້າພະແນກ (ເຫັນສະເພາະຫົວໜ້າພະແນກ)
   const [managerRequests, setManagerRequests] = useState([]);
   const [loadingManager, setLoadingManager] = useState(true);
   const [managerError, setManagerError] = useState('');
   const [managerAvailable, setManagerAvailable] = useState(false);
 
-  // ປະຫວັດຄຳຂໍ (ກ່ອງລຸ່ມຂອງແຖບ): ຂັ້ນຫົວໜ້າ + ຂັ້ນຝ່າຍສາງ
   const [managerHistory, setManagerHistory] = useState([]);
   const [warehouseHistory, setWarehouseHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [historyShown, setHistoryShown] = useState({ manager: 10, pending: 10 });
   const [expandedHistoryId, setExpandedHistoryId] = useState(null);
 
-  // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner
   const fetchCatalog = async (opts) => {
     const silent = opts?.silent === true;
     try {
@@ -559,7 +566,7 @@ export default function AssetManagement() {
       setPendingError('');
     } catch (error) {
       console.error('Failed to fetch supply requests:', error);
-      if (silent) return; // ດຶງງຽບໆລົ້ມ — ຄົງລາຍການເດີມໄວ້
+      if (silent) return;
       const status = error.response?.status;
       if (status === 403) {
         setPendingError('ບັນຊີນີ້ບໍ່ມີສິດອະນຸມັດຄຳຂໍອຸປະກອນ (supplies:approve)');
@@ -589,7 +596,6 @@ export default function AssetManagement() {
       setManagerError('');
     } catch (error) {
       const status = error.response?.status;
-      // 403/404 = ບໍ່ແມ່ນຫົວໜ້າພະແນກ (ຫຼື Backend ຍັງບໍ່ມີ endpoint) → ຊ່ອນແຖບນີ້
       if (status === 403 || status === 404) {
         setManagerAvailable(false);
         setManagerRequests([]);
@@ -602,7 +608,6 @@ export default function AssetManagement() {
     }
   };
 
-  // ປະຫວັດຄຳຂໍ: ລົ້ມ/ບໍ່ມີສິດ (403) = ປະໄວ້ວ່າງ ບໍ່ກະທົບສ່ວນເທິງ
   const fetchHistories = async () => {
     const toList = (res) => {
       const body = res.data;
@@ -617,7 +622,6 @@ export default function AssetManagement() {
     setLoadingHistory(false);
   };
 
-  // ໂຫຼດປະຫວັດການຮັບເຂົ້າ + ທະບຽນຊັບສິນຂອງລາຍການທີ່ເປີດ popup ຢູ່ ໃໝ່ແບບງຽບໆ (ບໍ່ລ້າງໜ້າຈໍ)
   const reloadOpenItemSilently = async (item) => {
     const itemId = item._id;
     const canReadAssets = item.itemType !== 'CONSUMABLE' && hasPermission('assets', 'read');
@@ -636,11 +640,9 @@ export default function AssetManagement() {
         setAssetRows(list);
       }
     } catch {
-      // ຮັກສາຂໍ້ມູນທີ່ສະແດງຢູ່ — ຮອບຕໍ່ໄປຈະລອງໃໝ່
     }
   };
 
-  // catalog/stock/ຄຳຂໍ/ຊັບສິນປ່ຽນຈາກຜູ້ໃຊ້ອື່ນ ຫຼື ໜ້າອື່ນ → ດຶງໃໝ່ທັນທີ ບໍ່ຕ້ອງ reload
   useRealtimeRefresh(() =>
     Promise.all([
       fetchCatalog({ silent: true }),
@@ -652,17 +654,12 @@ export default function AssetManagement() {
   );
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lowStockOnly]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPendingRequests();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchManagerRequests();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchHistories();
   }, []);
 
@@ -690,7 +687,6 @@ export default function AssetManagement() {
     setConfirmType(type);
   };
 
-  // Esc ປິດ popup ຊັ້ນເທິງສຸດ
   useEffect(() => {
     if (!detailReqId) return undefined;
     const onKey = (e) => {
@@ -700,15 +696,13 @@ export default function AssetManagement() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailReqId, confirmType, reviewingId]);
 
-  // ຢືນຢັນໃນ popup → ອະນຸມັດ ຫຼື ປະຕິເສດ (ປະຕິເສດຕ້ອງມີເຫດຜົນ)
   const submitReview = async () => {
     if (!detailReq || !confirmType) return;
     const id = detailReq._id;
-    if (confirmType === 'reject' && !rejectReason.trim()) {
-      setReviewError('ຕ້ອງລະບຸເຫດຜົນຈຶ່ງຈະປະຕິເສດໄດ້');
+    if ((confirmType === 'reject' || confirmType === 'changes') && !rejectReason.trim()) {
+      setReviewError(confirmType === 'changes' ? 'ຕ້ອງລະບຸຂໍ້ຄວາມເພື່ອໃຫ້ຜູ້ຂໍແກ້ໄຂ' : 'ຕ້ອງລະບຸເຫດຜົນຈຶ່ງຈະປະຕິເສດໄດ້');
       return;
     }
     try {
@@ -717,6 +711,8 @@ export default function AssetManagement() {
       const stage = isManagerStage ? 'manager-' : '';
       if (confirmType === 'approve') {
         await api.patch(`/supply-requests/${id}/${stage}approve`);
+      } else if (confirmType === 'changes') {
+        await api.patch(`/supply-requests/${id}/manager-request-changes`, { note: rejectReason.trim() });
       } else {
         await api.patch(`/supply-requests/${id}/${stage}reject`, { reason: rejectReason.trim() });
       }
@@ -729,7 +725,7 @@ export default function AssetManagement() {
     } catch (error) {
       setReviewError(
         error.response?.data?.msg || error.response?.data?.message ||
-          (confirmType === 'approve' ? 'ອະນຸມັດບໍ່ສຳເລັດ' : 'ປະຕິເສດບໍ່ສຳເລັດ'),
+          (confirmType === 'approve' ? 'ອະນຸມັດບໍ່ສຳເລັດ' : confirmType === 'changes' ? 'ສົ່ງຄືນໃຫ້ແກ້ໄຂບໍ່ສຳເລັດ' : 'ປະຕິເສດບໍ່ສຳເລັດ'),
       );
     } finally {
       setReviewingId(null);
@@ -849,6 +845,18 @@ export default function AssetManagement() {
                 </div>
               </div>
 
+              {!isManagerStage && canApproveRequests && req.status === 'REQUESTED' && (
+                <WarehouseLineReview
+                  key={req._id}
+                  req={req}
+                  catalog={assets}
+                  onDone={async () => {
+                    setDetailReqId(null);
+                    await Promise.all([fetchPendingRequests(), fetchManagerRequests(), fetchHistories(), fetchCatalog()]);
+                  }}
+                />
+              )}
+
               {overStock > 0 && (
                 <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   ມີ {overStock} ລາຍການທີ່ຂໍເກີນສະຕັອກປັດຈຸບັນ ແລະ ບໍ່ໄດ້ຜູກກັບໃບສະເໜີຊື້
@@ -908,15 +916,27 @@ export default function AssetManagement() {
                     <XCircle size={16} />
                     <span>ປະຕິເສດ</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => openConfirm('approve')}
-                    disabled={busy}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    <CheckCircle size={16} />
-                    <span>{isManagerStage ? 'ອະນຸມັດ (ຫົວໜ້າພະແນກ)' : 'ອະນຸມັດ'}</span>
-                  </button>
+                  {isManagerStage && (
+                    <button
+                      type="button"
+                      onClick={() => openConfirm('changes')}
+                      disabled={busy}
+                      className="px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      <span>↩ ຂໍໃຫ້ແກ້ໄຂ</span>
+                    </button>
+                  )}
+                  {(isManagerStage || req.status !== 'REQUESTED') && (
+                    <button
+                      type="button"
+                      onClick={() => openConfirm('approve')}
+                      disabled={busy}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      <CheckCircle size={16} />
+                      <span>{isManagerStage ? 'ອະນຸມັດ (ຫົວໜ້າພະແນກ)' : 'ອະນຸມັດ'}</span>
+                    </button>
+                  )}
                 </>
               ) : (
                 <span className="text-xs text-gray-400">ບໍ່ມີສິດອະນຸມັດ</span>
@@ -932,28 +952,30 @@ export default function AssetManagement() {
                 <div className="flex items-start gap-3">
                   <div
                     className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
-                      confirmType === 'approve' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                      confirmType === 'approve' ? 'bg-green-100 text-green-600' : confirmType === 'changes' ? 'bg-orange-100 text-orange-600' : 'bg-red-100 text-red-600'
                     }`}
                   >
-                    {confirmType === 'approve' ? <CheckCircle size={22} /> : <XCircle size={22} />}
+                    {confirmType === 'approve' ? <CheckCircle size={22} /> : confirmType === 'changes' ? <span className="text-lg">↩</span> : <XCircle size={22} />}
                   </div>
                   <div>
                     <h4 className="text-base font-bold text-gray-800">
-                      {confirmType === 'approve' ? 'ຢືນຢັນການອະນຸມັດ' : 'ຢືນຢັນການປະຕິເສດ'}
+                      {confirmType === 'approve' ? 'ຢືນຢັນການອະນຸມັດ' : confirmType === 'changes' ? 'ຂໍໃຫ້ຜູ້ຂໍແກ້ໄຂລາຍການ' : 'ຢືນຢັນການປະຕິເສດ'}
                     </h4>
                     <p className="text-sm text-gray-500 mt-1">
                       {confirmType === 'approve'
                         ? isManagerStage
                           ? `ອະນຸມັດຄຳຂໍ ${req._id} (${totalQty} ຊິ້ນ) ຂອງ ${requesterNameOf(req)} — ຫຼັງອະນຸມັດ ຄຳຂໍຈະຖືກສົ່ງຕໍ່ໃຫ້ຝ່າຍສາງ/ຜູ້ອະນຸມັດແມ່ນບໍ?`
                           : `ອະນຸມັດຄຳຂໍ ${req._id} (${totalQty} ຊິ້ນ) ຂອງ ${requesterNameOf(req)} ແມ່ນບໍ?`
-                        : `ປະຕິເສດຄຳຂໍ ${req._id} ຂອງ ${requesterNameOf(req)} — ກະລຸນາບອກເຫດຜົນ`}
+                        : confirmType === 'changes'
+                          ? `ສົ່ງຄຳຂໍ ${req._id} ຄືນໃຫ້ ${requesterNameOf(req)} ແກ້ໄຂ — ເມື່ອແກ້ແລ້ວ ຈະສົ່ງກັບມາໃຫ້ທ່ານອະນຸມັດອີກຄັ້ງ`
+                          : `ປະຕິເສດຄຳຂໍ ${req._id} ຂອງ ${requesterNameOf(req)} — ກະລຸນາບອກເຫດຜົນ`}
                     </p>
                   </div>
                 </div>
 
-                {confirmType === 'reject' && (
+                {(confirmType === 'reject' || confirmType === 'changes') && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">ເຫດຜົນທີ່ປະຕິເສດ *</label>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">{confirmType === 'changes' ? 'ຕ້ອງການໃຫ້ແກ້ໄຂຫຍັງ *' : 'ເຫດຜົນທີ່ປະຕິເສດ *'}</label>
                     <textarea
                       autoFocus
                       rows={3}
@@ -963,10 +985,10 @@ export default function AssetManagement() {
                         if (reviewError) setReviewError('');
                       }}
                       disabled={busy}
-                      placeholder="ເຊັ່ນ: ເກີນງົບປະມານ, ຂໍຊ້ຳ, ຍັງມີສະຕັອກພໍ..."
+                      placeholder={confirmType === 'changes' ? 'ເຊັ່ນ: ກະລຸນາລະບຸສະເປັກຄອມພິວເຕີໃຫ້ຊັດເຈນ...' : 'ເຊັ່ນ: ເກີນງົບປະມານ, ຂໍຊ້ຳ, ຍັງມີສະຕັອກພໍ...'}
                       className="w-full border border-gray-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 disabled:bg-gray-50"
                     />
-                    <p className="text-[11px] text-gray-400 mt-1">ຜູ້ຂໍຈະເຫັນເຫດຜົນນີ້</p>
+                    <p className="text-[11px] text-gray-400 mt-1">{confirmType === 'changes' ? 'ຜູ້ຂໍຈະເຫັນຂໍ້ຄວາມນີ້' : 'ຜູ້ຂໍຈະເຫັນເຫດຜົນນີ້'}</p>
                   </div>
                 )}
 
@@ -1008,12 +1030,12 @@ export default function AssetManagement() {
                 <button
                   type="button"
                   onClick={submitReview}
-                  disabled={busy || (confirmType === 'reject' && !rejectReason.trim())}
+                  disabled={busy || ((confirmType === 'reject' || confirmType === 'changes') && !rejectReason.trim())}
                   className={`px-4 py-2 text-white rounded-lg text-sm font-medium transition disabled:opacity-50 ${
-                    confirmType === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                    confirmType === 'approve' ? 'bg-green-600 hover:bg-green-700' : confirmType === 'changes' ? 'bg-orange-500 hover:bg-orange-600' : 'bg-red-600 hover:bg-red-700'
                   }`}
                 >
-                  {busy ? 'ກຳລັງດຳເນີນການ...' : confirmType === 'approve' ? 'ຢືນຢັນອະນຸມັດ' : 'ຢືນຢັນປະຕິເສດ'}
+                  {busy ? 'ກຳລັງດຳເນີນການ...' : confirmType === 'approve' ? 'ຢືນຢັນອະນຸມັດ' : confirmType === 'changes' ? 'ສົ່ງຄືນໃຫ້ແກ້ໄຂ' : 'ຢືນຢັນປະຕິເສດ'}
                 </button>
               </div>
             </div>
@@ -1066,7 +1088,6 @@ export default function AssetManagement() {
       </div>
   );
 
-  // ກ່ອງປະຫວັດຄຳຂໍ (ລຸ່ມສຸດຂອງແຖບ) — kind: 'manager' = ຂັ້ນຫົວໜ້າ · 'pending' = ຂັ້ນຝ່າຍສາງ
   const renderHistoryBox = (kind, list) => {
     const shown = historyShown[kind] ?? 10;
     const rows = list.slice(0, shown);
@@ -1129,7 +1150,10 @@ export default function AssetManagement() {
             {rows.map((req) => {
               const items = Array.isArray(req.items) ? req.items : [];
               const totalQty = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
-              const badge = HISTORY_STATUS[req.status] || { text: req.status, cls: 'bg-gray-100 text-gray-600' };
+              const readyLines = items.filter((i) => i.lineStatus === 'READY').length;
+              const badge = readyLines > 0 && ['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'].includes(req.status)
+                ? { text: `ພ້ອມມາຮັບ ${readyLines} ລາຍການ`, cls: 'bg-teal-100 text-teal-700' }
+                : HISTORY_STATUS[req.status] || { text: req.status, cls: 'bg-gray-100 text-gray-600' };
               const lines = decisionLines(req);
               const expanded = expandedHistoryId === req._id;
               const lastLine = lines[lines.length - 1];
@@ -1151,7 +1175,7 @@ export default function AssetManagement() {
                       </div>
                       <div className="text-xs text-gray-600">
                         {items.slice(0, 2).map((i, idx) => (
-                          <div key={idx}>• {i.name} (x{i.quantity})</div>
+                          <div key={idx}>• {i.name} (x{i.quantity})<LineBadge item={i} /></div>
                         ))}
                         {items.length > 2 && <div className="text-gray-400">+ ອີກ {items.length - 2} ລາຍການ</div>}
                       </div>
@@ -1176,7 +1200,10 @@ export default function AssetManagement() {
                       <div>
                         <div className="text-[11px] text-gray-400 mb-1">ລາຍການທີ່ຂໍ</div>
                         {items.map((i, idx) => (
-                          <div key={idx}>• {i.name} (x{i.quantity}){i.reason ? ` — ${i.reason}` : ''}</div>
+                          <div key={idx}>
+                            • {i.name} (x{i.quantity}){i.reason ? ` — ${i.reason}` : ''}<LineBadge item={i} />
+                            {i.lineNote ? <span className="text-gray-400"> · {i.lineNote}</span> : null}
+                          </div>
                         ))}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
@@ -1736,7 +1763,6 @@ export default function AssetManagement() {
     if (searchParams.get('create') === '1') navigate('/goods-receipt?new=1', { replace: true });
   }, [searchParams, navigate]);
 
-  // ເປີດຄຳຂໍເບີກໂດຍກົງຈາກລິ້ງ (?request=SR059) — ເຊັ່ນ ຈາກໜ້າໃບສະເໜີຊື້
   const deepRequestId = searchParams.get('request');
   useEffect(() => {
     if (!deepRequestId || loadingPending) return;
@@ -1745,13 +1771,10 @@ export default function AssetManagement() {
       setDetailReqId(deepRequestId);
       navigate('/assets', { replace: true });
     } else {
-      // ບໍ່ລໍອະນຸມັດແລ້ວ → ໄປເບິ່ງທີ່ໜ້າຄຳຂໍເບີກ
       navigate(`/supplies?open=${encodeURIComponent(deepRequestId)}`, { replace: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepRequestId, loadingPending, pendingRequests]);
 
-  // ເປີດຈາກກະດິ່ງແຈ້ງເຕືອນຂອງຫົວໜ້າພະແນກ (?managerReview=SR060)
   const managerReviewId = searchParams.get('managerReview');
   useEffect(() => {
     if (!managerReviewId || loadingManager) return;
@@ -1762,7 +1785,6 @@ export default function AssetManagement() {
       setActiveTab('manager');
     }
     navigate('/assets', { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [managerReviewId, loadingManager, managerRequests]);
 
   return (

@@ -5,9 +5,8 @@ import { hasPermission, getCurrentUser } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CameraScanner from '../components/CameraScanner';
 import RequestProgress, { shouldHideProgress } from '../components/RequestProgress';
-import PurchaseRequestModal from '../components/PurchaseRequestModal';
 import axios from '../services/api';
-import { CatalogThumb, imageSrc } from '../components/CatalogImage';
+import { CatalogThumb } from '../components/CatalogImage';
 import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 
 const refId = (value) => (value && typeof value === 'object' ? value._id : value);
@@ -18,10 +17,17 @@ const refName = (value) => {
 };
 const isDeptRequest = (req) => !!(req && refId(req.departmentId));
 const OPEN_STATUSES = ['APPROVED', 'ORDERED', 'PARTIALLY_RECEIVED'];
+
+// ມີຢ່າງໜ້ອຍ 1 ລາຍການທີ່ຝ່າຍສາງຈອງໄວ້ແລ້ວ (READY) — ມາຮັບໄດ້ເລີຍ (ໃບທີ່ກວດເປັນລາຍການ)
+const hasReadyLine = (req) => Array.isArray(req?.items) && req.items.some((i) => i.lineStatus === 'READY');
+// ປຸ່ມ "ສະແກນເຄື່ອງ": ໃບເກົ່າ = APPROVED; ໃບແບບລາຍການ = ມີລາຍການ READY (ຮວມກໍລະນີຮັບໄປແລ້ວບາງສ່ວນ)
+const canScanNow = (req) =>
+  req?.status === 'APPROVED' || (req?.status === 'PARTIALLY_RECEIVED' && hasReadyLine(req));
 const STATUS_FILTERS = [
   { value: 'ALL', label: 'ທຸກສະຖານະ' },
   { value: 'OPEN', label: 'ລໍຖ້າຮັບເຄື່ອງ' },
   { value: 'PENDING_MANAGER', label: 'ລໍຖ້າຫົວໜ້າພະແນກ' },
+  { value: 'NEEDS_REVISION', label: 'ຕ້ອງແກ້ໄຂ' },
   { value: 'REQUESTED', label: 'ລໍຖ້າອະນຸມັດ (ຝ່າຍສາງ)' },
   { value: 'CLOSED', label: 'ຮັບເຄື່ອງແລ້ວ' },
   { value: 'REJECTED', label: 'ຖືກປະຕິເສດ' },
@@ -31,6 +37,13 @@ const matchesStatusFilter = (status, filter) => {
   if (filter === 'OPEN') return OPEN_STATUSES.includes(status);
   if (filter === 'CLOSED') return status === 'CLOSED' || status === 'FULFILLED';
   return status === filter;
+};
+const LINE_STATUS = {
+  WAITING: { text: 'ລໍຖ້າກວດ', cls: 'bg-gray-100 text-gray-600' },
+  READY: { text: 'ມາຮັບໄດ້', cls: 'bg-teal-100 text-teal-700' },
+  ON_ORDER: { text: 'ກຳລັງສັ່ງຊື້', cls: 'bg-violet-100 text-violet-700' },
+  REJECTED: { text: 'ຖືກປະຕິເສດ', cls: 'bg-rose-100 text-rose-600' },
+  COLLECTED: { text: 'ຮັບແລ້ວ', cls: 'bg-emerald-100 text-emerald-700' },
 };
 const formatDateTime = (value) => (value ? new Date(value).toLocaleString() : '—');
 
@@ -59,11 +72,10 @@ export default function InventorySupplies() {
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [restockPrefill, setRestockPrefill] = useState(null);
-  const [restockNotice, setRestockNotice] = useState('');
   
-  const [items, setItems] = useState([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
+  const [items, setItems] = useState([{ name: '', quantity: 1, reason: '' }]);
   const [submitError, setSubmitError] = useState('');
+  const [resubmitId, setResubmitId] = useState(null); // ແກ້ໄຂຄຳຂໍທີ່ຫົວໜ້າສົ່ງຄືນ
   const [requestFor, setRequestFor] = useState('PERSON');
   const [custodian, setCustodian] = useState(null);
   const custodianCode = custodian?.employeeCode || '';
@@ -81,10 +93,6 @@ export default function InventorySupplies() {
   const myDepartmentId = selectedDepartmentId;
   const myDepartmentName = selectedDepartment?.name || myDepartmentId;
 
-  const [reqStep, setReqStep] = useState(1);
-  const [shopSearch, setShopSearch] = useState('');
-  const [shopCategory, setShopCategory] = useState('');
-  const [customName, setCustomName] = useState('');
 
   const [receiveRequest, setReceiveRequest] = useState(null);
   const [scanTags, setScanTags] = useState('');
@@ -187,47 +195,17 @@ useEffect(() => {
     }
   }, [searchParams.get('create')]);
 
-  const clearPurchaseLink = (row) => {
-    delete row.purchaseRequestId;
-    delete row.purchaseRequestNo;
-    delete row.purchaseQty;
-  };
-
-  const purchaseLinkIssue = (row) => {
-    if (!row.purchaseRequestId) return '';
-    const qty = parseInt(row.quantity, 10) || 0;
-    const stock = catalogById(row.catalogItemId)?.stockQty ?? 0;
-    if (row.purchaseQty > qty) return `ໃບສະເໜີ ${row.purchaseRequestNo} ຊື້ ${row.purchaseQty} ເກີນຈຳນວນທີ່ຂໍເບີກ`;
-    if (row.purchaseQty < qty - stock) return `ໃບສະເໜີ ${row.purchaseRequestNo} ຊື້ ${row.purchaseQty} ບໍ່ພໍກັບສ່ວນທີ່ສະຕັອກບໍ່ພໍ (ຂາດ ${qty - stock})`;
-    return '';
-  };
-
-  const handleItemChange = (index, field, value) => {
-    const newItems = [...items];
-    newItems[index][field] = value;
-    if (field === 'catalogItemId' && newItems[index].purchaseRequestId) clearPurchaseLink(newItems[index]);
-    
-    if (field === 'catalogItemId' && value) {
-      const selectedCat = catalog.find(c => c._id === value);
-      if (selectedCat) {
-        newItems[index].name = selectedCat.name;
-      }
-    }
-    
-    setItems(newItems);
-  };
+  const handleItemChange = (index, field, value) =>
+    setItems((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
 
   const catalogById = (id) => (Array.isArray(catalog) ? catalog.find((c) => c._id === id) : undefined);
 
-  const isBlankRow = (it) => !it.catalogItemId && !String(it.name || '').trim() && !String(it.reason || '').trim();
+  const isBlankRow = (it) => !String(it.name || '').trim() && !String(it.reason || '').trim();
 
   const resetRequestForm = () => {
-    setItems([{ catalogItemId: '', catalogSearch: '', name: '', quantity: 1, reason: '' }]);
+    setItems([{ name: '', quantity: 1, reason: '' }]);
     setSubmitError('');
-    setReqStep(1);
-    setShopSearch('');
-    setShopCategory('');
-    setCustomName('');
+    setResubmitId(null);
     setRequestFor('PERSON');
     setCustodian(null);
     setCustPickerOpen(false);
@@ -288,87 +266,64 @@ useEffect(() => {
     };
   }, [isModalOpen, requestFor, custPickerOpen, selectedDepartmentId, custQuery]);
 
-  const shopAdd = (c) =>
-    setItems((prev) => {
-      const base = prev.filter((it) => !isBlankRow(it));
-      const i = base.findIndex((it) => it.catalogItemId === c._id);
-      if (i >= 0) {
-        base[i] = { ...base[i], quantity: (parseInt(base[i].quantity, 10) || 0) + 1 };
-        return base;
-      }
-      return [...base, { catalogItemId: c._id, catalogSearch: c.name, name: c.name, quantity: 1, reason: '' }];
-    });
-
-  const shopSetQty = (catalogItemId, qty) =>
-    setItems((prev) =>
-      qty <= 0
-        ? prev.filter((it) => it.catalogItemId !== catalogItemId)
-        : prev.map((it) => (it.catalogItemId === catalogItemId ? { ...it, quantity: qty } : it)),
-    );
-
-  const addCustomItem = () => {
-    const name = customName.trim();
-    if (!name) return;
-    setItems((prev) => [
-      ...prev.filter((it) => !isBlankRow(it)),
-      { catalogItemId: '', catalogSearch: '', name, quantity: 1, reason: '' },
-    ]);
-    setCustomName('');
-  };
+  const addBlankRow = () =>
+    setItems((prev) => [...prev, { name: '', quantity: 1, reason: '' }]);
 
   const removeRow = (index) => setItems((prev) => prev.filter((_, i) => i !== index));
   const setRowQty = (index, qty) =>
     setItems((prev) => prev.map((row, i) => (i === index ? { ...row, quantity: Math.max(1, qty) } : row)));
 
-  const overStockCount = items.filter((it) => {
-    const cat = it.catalogItemId ? catalogById(it.catalogItemId) : null;
-    return cat && !it.purchaseRequestId && (parseInt(it.quantity, 10) || 0) > (cat.stockQty ?? 0);
-  }).length;
-  const linkedCount = items.filter((it) => it.purchaseRequestId).length;
+  // ເປີດ popup ເພື່ອແກ້ລາຍການ ແລ້ວສົ່ງໃໝ່ (ຫຼັງຫົວໜ້າພະແນກຂໍໃຫ້ແກ້ໄຂ)
+  const openResubmit = (d) => {
+    setItems(
+      (d.items || []).map((i) => ({
+        name: i.name || '',
+        quantity: i.quantity || 1,
+        reason: i.reason || '',
+      })),
+    );
+    setRequestFor('PERSON');
+    setSubmitError('');
+    setResubmitId(d._id);
+    setDetailId(null);
+    setIsModalOpen(true);
+  };
 
   const handleSubmitRequest = async (e) => {
     e.preventDefault();
     setSubmitError('');
     try {
-      const merged = [];
-      for (const it of items.filter((x) => !isBlankRow(x))) {
-        const issue = purchaseLinkIssue(it);
-        if (issue) {
-          setSubmitError(`${issue} — ປັບຈຳນວນ ຫຼືກົດ \"ຍົກເລີກການຜູກ\"`);
+      const filled = items.filter((x) => !isBlankRow(x));
+      if (filled.some((x) => !String(x.reason || '').trim())) {
+        setSubmitError('ກະລຸນາໃສ່ເຫດຜົນໃຫ້ທຸກລາຍການ');
+        return;
+      }
+      if (resubmitId) {
+        const lines = filled.map((x) => ({
+          name: String(x.name || '').trim(),
+          quantity: parseInt(x.quantity, 10) || 1,
+          reason: String(x.reason || '').trim(),
+        }));
+        if (lines.length === 0 || lines.some((l) => !l.name)) {
+          setSubmitError('ກະລຸນາໃສ່ຊື່ອຸປະກອນຢ່າງໜ້ອຍ 1 ລາຍການ');
           return;
         }
-        const qty = parseInt(it.quantity, 10) || 1;
-        const name = String(it.name || '').trim();
-        const prev =
-          it.catalogItemId && !it.purchaseRequestId
-            ? merged.find((m) => m.catalogItemId === it.catalogItemId && !m.purchaseRequestId)
-            : null;
-        if (prev) {
-          prev.quantity += qty;
-          if (it.reason && !String(prev.reason || '').includes(it.reason)) {
-            prev.reason = prev.reason ? `${prev.reason}; ${it.reason}` : it.reason;
-          }
-        } else {
-          merged.push({
-            catalogItemId: it.catalogItemId || '',
-            name,
-            quantity: qty,
-            reason: it.reason || '',
-            purchaseRequestId: it.purchaseRequestId || '',
-          });
-        }
+        await axios.patch(`/supply-requests/${resubmitId}/resubmit`, { items: lines });
+        setIsModalOpen(false);
+        resetRequestForm();
+        fetchData();
+        return;
       }
-      if (merged.length === 0 || merged.some((m) => !m.name)) {
+      // ພະນັກງານພິມຊື່ອຸປະກອນເອງ — ຝ່າຍສາງເປັນຄົນຜູກ Catalog ພາຍຫຼັງ
+      const payloadItems = filled.map((it) => ({
+        name: String(it.name || '').trim(),
+        quantity: parseInt(it.quantity, 10) || 1,
+        reason: String(it.reason || '').trim(),
+      }));
+      if (payloadItems.length === 0 || payloadItems.some((m) => !m.name)) {
         setSubmitError('ກະລຸນາໃສ່ຊື່ອຸປະກອນຢ່າງໜ້ອຍ 1 ລາຍການ');
         return;
       }
-      const payloadItems = merged.map(({ catalogItemId, name, quantity, reason, purchaseRequestId }) => ({
-        ...(catalogItemId ? { catalogItemId } : {}),
-        name,
-        quantity,
-        ...(reason ? { reason } : {}),
-        ...(purchaseRequestId ? { purchaseRequestId } : {}),
-      }));
       if (requestFor === 'DEPARTMENT') {
         if (!myDepartmentId || !requestableDepartments.some((department) => department._id === myDepartmentId)) {
           setSubmitError('ກະລຸນາເລືອກພະແນກທີ່ທ່ານມີສິດຂໍເຄື່ອງ');
@@ -506,7 +461,16 @@ useEffect(() => {
   };
 
   const receiveIsDept = isDeptRequest(receiveRequest);
-  const reqItems = receiveRequest && Array.isArray(receiveRequest.items) ? receiveRequest.items : [];
+  const allReqItems = receiveRequest && Array.isArray(receiveRequest.items) ? receiveRequest.items : [];
+  const receiveLineMode = !!receiveRequest?.lineMode;
+  // ສະເພາະລາຍການທີ່ຮັບໄດ້ໃນຄັ້ງນີ້ (READY). _idx = ຕຳແໜ່ງເດີມໃນໃບຂໍ ໃຊ້ສົ່ງເປັນ lineIndexes
+  const reqItems = allReqItems
+    .map((it, i) => ({ ...it, _idx: i }))
+    .filter((it) => it.collectable !== false);
+  // ລາຍການທີ່ຍັງບໍ່ພ້ອມ (ສັ່ງຊື້ຢູ່) — ສະແດງເປັນ "ຍັງບໍ່ພ້ອມ" ບໍ່ໃຫ້ສະແກນ
+  const notYetItems = receiveLineMode
+    ? allReqItems.filter((it) => it.lineStatus === 'ON_ORDER' || it.lineStatus === 'WAITING')
+    : [];
   const hasCanonicalTracking = reqItems.some((item) => typeof item.requiresAssetTag === 'boolean');
   const isAssetTrackedItem = (item) => !hasCanonicalTracking || item.requiresAssetTag === true;
   const assetRequestItems = reqItems.filter(isAssetTrackedItem);
@@ -638,6 +602,7 @@ useEffect(() => {
     try {
       await axios.patch(`/supply-requests/${receiveRequest._id}/receive`, {
         assetTags,
+        ...(receiveLineMode ? { lineIndexes: reqItems.map((it) => it._idx) } : {}),
         ...(confirmConsumables ? { confirmConsumables: true } : {}),
         ...(assigneeCode.trim() ? { assigneeCode: assigneeCode.trim() } : {}),
       });
@@ -656,6 +621,14 @@ useEffect(() => {
   };
 
   const renderStatus = (status, req) => {
+    if (OPEN_STATUSES.includes(status) && hasReadyLine(req)) {
+      const readyCount = req.items.filter((i) => i.lineStatus === 'READY').length;
+      return (
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200">
+          <Package size={12} /> ພ້ອມມາຮັບ {readyCount} ລາຍການ
+        </span>
+      );
+    }
     switch (status) {
       case 'ORDERED':
         return (
@@ -693,6 +666,18 @@ useEffect(() => {
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-600 border border-emerald-200">
             <Package size={12} /> ຮັບເຄື່ອງແລ້ວ
+          </span>
+        );
+      case 'NEEDS_REVISION':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200">
+            <Clock size={12} /> ຕ້ອງແກ້ໄຂ
+          </span>
+        );
+      case 'PARTIALLY_RECEIVED':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200">
+            <Package size={12} /> ຮັບແລ້ວບາງສ່ວນ
           </span>
         );
       case 'REJECTED':
@@ -932,7 +917,7 @@ useEffect(() => {
                     </td>
                     <td className="p-4">
                       {renderStatus(req.status, req)}
-                      {req.status === 'APPROVED' && hasPermission('supplies', 'fulfill') && (
+                      {canScanNow(req) && hasPermission('supplies', 'fulfill') && (
                         <button
                           onClick={(e) => { e.stopPropagation(); openReceive(req); }}
                           title="ສະແກນເຄື່ອງ — ຮັບເຄື່ອງທີ່ຄັງ ແລະ ຜູກເຂົ້າທະບຽນຊັບສິນ"
@@ -1013,7 +998,7 @@ useEffect(() => {
                     <h2 className="text-lg font-bold text-gray-800">ໃບຂໍ {d._id}</h2>
                     <div className="flex flex-wrap items-center gap-2">
                       {renderStatus(d.status, d)}
-                      {d.status === 'APPROVED' && hasPermission('supplies', 'fulfill') && (
+                      {canScanNow(d) && hasPermission('supplies', 'fulfill') && (
                         <button
                           type="button"
                           onClick={() => { setDetailId(null); openReceive(d); }}
@@ -1068,6 +1053,42 @@ useEffect(() => {
                   {d.receivedBy && <Row label="ຜູ້ຮັບເຄື່ອງ">{person(d.receivedBy)}</Row>}
                 </div>
 
+                {d.status === 'NEEDS_REVISION' && (
+                  <div className="border border-orange-200 bg-orange-50 rounded-xl p-4 space-y-2">
+                    <div className="text-sm font-semibold text-orange-800">ຫົວໜ້າພະແນກຂໍໃຫ້ແກ້ໄຂລາຍການ</div>
+                    <div className="text-sm text-orange-900 whitespace-pre-wrap">{d.revisionNote || '—'}</div>
+                    {isMe(d.requestedBy) && (
+                      <button
+                        type="button"
+                        onClick={() => openResubmit(d)}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold bg-orange-500 text-white hover:bg-orange-600"
+                      >
+                        ແກ້ໄຂ ແລະ ສົ່ງໃໝ່
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {Array.isArray(d.items) && d.items.some((it) => it.lineStatus && it.lineStatus !== 'WAITING') && (
+                  <div className="border border-gray-100 rounded-xl p-4 space-y-2">
+                    <div className="text-sm font-semibold text-gray-700">ສະຖານະແຕ່ລະລາຍການ</div>
+                    {d.items.map((it, k) => {
+                      const ls = LINE_STATUS[it.lineStatus || 'WAITING'] || LINE_STATUS.WAITING;
+                      return (
+                        <div key={k} className="flex items-start justify-between gap-3 text-sm">
+                          <div className="min-w-0">
+                            <div className="font-medium text-gray-800">
+                              {it.name} <span className="text-gray-400 font-normal">× {it.quantity}</span>
+                            </div>
+                            {it.lineNote && <div className="text-xs text-gray-500">{it.lineNote}</div>}
+                          </div>
+                          <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${ls.cls}`}>{ls.text}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {Array.isArray(d.items) && d.items.some((it) => it.purchaseRequestId) && (
                   <div className="border border-violet-100 bg-violet-50/40 rounded-xl p-4 space-y-3">
                     <div className="text-sm font-semibold text-violet-800">ລາຍການທີ່ຕ້ອງຊື້ເພີ່ມ (ສະຕັອກບໍ່ພໍ)</div>
@@ -1104,7 +1125,7 @@ useEffect(() => {
                     {d.status === 'ORDERED' && (
                       <div className="text-xs text-violet-700">ລໍຂອງເຂົ້າຄັງ — ຈະແຈ້ງເມື່ອຂອງມາຄົບ ແລະພ້ອມມາຮັບ</div>
                     )}
-                    {d.status === 'APPROVED' && d.readyToCollectAt && (
+                    {d.status === 'APPROVED' && d.readyToCollectAt && !hasReadyLine(d) && (
                       <div className="text-xs text-teal-700">
                         ພ້ອມມາຮັບແລ້ວ ({formatDateTime(d.readyToCollectAt)}) — ເຄື່ອງຖືກຈອງໄວ້ໃຫ້ ມາສະແກນຮັບໄດ້ເລີຍ
                       </div>
@@ -1258,276 +1279,71 @@ useEffect(() => {
         })()}
 
         {isModalOpen && (() => {
-          const activeCatalog = (Array.isArray(catalog) ? catalog : []).filter((c) => c.isActive !== false);
-          const categoryChips = [...new Set(
-            activeCatalog.flatMap((c) => String(c.category || '').split(',').map((t) => t.trim()).filter(Boolean)),
-          )].sort();
-          const q = shopSearch.trim().toLowerCase();
-          const shown = activeCatalog.filter((c) => {
-            if (shopCategory && !String(c.category || '').split(',').map((t) => t.trim()).includes(shopCategory)) return false;
-            return !q || `${c.name} ${c.category || ''} ${c._id}`.toLowerCase().includes(q);
-          });
           const cartRows = items.map((it, index) => ({ it, index })).filter(({ it }) => !isBlankRow(it));
           const totalQty = cartRows.reduce((s, { it }) => s + (parseInt(it.quantity, 10) || 0), 0);
-          const closeModal = () => { setIsModalOpen(false); setSubmitError(''); };
+          const closeModal = () => { setIsModalOpen(false); setSubmitError(''); if (resubmitId) resetRequestForm(); };
 
           return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4">
-              <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-xl">
+              <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-xl">
                 <div className="px-6 pt-5 pb-4 border-b border-gray-100">
                   <div className="flex justify-between items-center">
-                    <h2 className="text-lg font-bold text-gray-800">ສ້າງຄຳຂໍເບີກອຸປະກອນ</h2>
+                    <h2 className="text-lg font-bold text-gray-800">{resubmitId ? `ແກ້ໄຂຄຳຂໍ ${resubmitId}` : 'ສ້າງຄຳຂໍເບີກອຸປະກອນ'}</h2>
                     <button type="button" onClick={closeModal} className="text-gray-400 hover:text-gray-600" aria-label="ປິດ">✕</button>
-                  </div>
-                  <div className="mt-3 flex items-center gap-2 text-xs">
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-medium ${reqStep === 1 ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700'}`}>
-                      <b>1</b> ເລືອກສິນຄ້າ
-                    </span>
-                    <span className="text-gray-300">—</span>
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-medium ${reqStep === 2 ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-500'}`}>
-                      <b>2</b> ລາຍລະອຽດ ແລະ ສົ່ງຄຳຂໍ
-                    </span>
                   </div>
                 </div>
 
-                {reqStep === 1 ? (
-                  <>
-                    <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 bg-gray-50/60">
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <div className="relative flex-1">
-                          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                          <input
-                            type="text"
-                            value={shopSearch}
-                            onChange={(e) => setShopSearch(e.target.value)}
-                            placeholder="ຄົ້ນຫາຊື່, ລະຫັດ ຫຼື ໝວດໝູ່..."
-                            className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:border-amber-500"
-                          />
-                        </div>
-                      </div>
-
-                      {categoryChips.length > 0 && (
-                        <div className="flex gap-2 overflow-x-auto pb-1">
-                          {['', ...categoryChips].map((c) => (
-                            <button
-                              key={c || '__all'}
-                              type="button"
-                              onClick={() => setShopCategory(c)}
-                              className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition ${
-                                shopCategory === c
-                                  ? 'bg-amber-500 text-white border-amber-500'
-                                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                              }`}
-                            >
-                              {c || 'ທັງໝົດ'}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {shown.length === 0 ? (
-                        <div className="py-12 text-center text-sm text-gray-400">
-                          {activeCatalog.length === 0 ? 'ຍັງບໍ່ມີລາຍການໃນ Catalog' : 'ບໍ່ພົບສິນຄ້າທີ່ຄົ້ນຫາ'}
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                          {shown.map((c) => {
-                            const stock = c.stockQty ?? 0;
-                            const low = stock > 0 && stock <= (c.lowStockThreshold ?? 0);
-                            const inCart = items.find((it) => it.catalogItemId === c._id);
-                            const qtyInCart = inCart ? parseInt(inCart.quantity, 10) || 0 : 0;
-                            return (
-                              <div
-                                key={c._id}
-                                className={`flex flex-col bg-white rounded-xl border overflow-hidden transition ${
-                                  qtyInCart > 0 ? 'border-amber-400 ring-1 ring-amber-300' : 'border-gray-200 hover:shadow-sm'
-                                }`}
-                              >
-                                <div className="relative aspect-square bg-gray-50">
-                                  {c.imageUrl ? (
-                                    <img src={imageSrc(c.imageUrl)} alt={c.name} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-                                  ) : (
-                                    <div className="absolute inset-0 flex items-center justify-center text-gray-200">
-                                      <Package size={44} />
-                                    </div>
-                                  )}
-                                  <span
-                                    className={`absolute top-2 left-2 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                      stock <= 0 ? 'bg-red-100 text-red-700' : low ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                                    }`}
-                                  >
-                                    {stock <= 0 ? 'ສະຕ໊ອກໝົດ' : `ເຫຼືອ ${stock} ${c.unit || ''}`}
-                                  </span>
-                                  {qtyInCart > 0 && (
-                                    <span className="absolute top-2 right-2 min-w-6 h-6 px-1.5 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center">
-                                      {qtyInCart}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="p-3 flex-1 flex flex-col gap-2">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-medium text-gray-800 line-clamp-2 leading-snug" title={c.name}>{c.name}</div>
-                                    <div className="text-[11px] text-gray-400 truncate">{c._id}{c.category ? ` · ${c.category}` : ''}</div>
-                                  </div>
-                                  <div className="mt-auto">
-                                    {qtyInCart > 0 ? (
-                                      <QtyStepper
-                                        value={qtyInCart}
-                                        onMinus={() => shopSetQty(c._id, qtyInCart - 1)}
-                                        onPlus={() => shopSetQty(c._id, qtyInCart + 1)}
-                                        onType={(n) => shopSetQty(c._id, n)}
-                                      />
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => shopAdd(c)}
-                                        className="w-full inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600"
-                                      >
-                                        <Plus size={14} /> ເພີ່ມ
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      <div className="rounded-xl border border-dashed border-gray-300 bg-white p-3">
-                        <div className="text-xs font-medium text-gray-600 mb-2">ບໍ່ພົບສິນຄ້າທີ່ຕ້ອງການ? ພິມຊື່ເອງ</div>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={customName}
-                            onChange={(e) => setCustomName(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomItem(); } }}
-                            placeholder="ຕົວຢ່າງ: ບີກສີຟ້າ, ເຈ້ຍ A4"
-                            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={addCustomItem}
-                            disabled={!customName.trim()}
-                            className="px-3 py-2 rounded-lg text-xs font-semibold border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-40"
-                          >
-                            + ເພີ່ມ
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="px-6 py-3 border-t border-gray-100 bg-white flex items-center justify-between gap-3">
-                      <div className="text-sm text-gray-600">
-                        {cartRows.length === 0 ? (
-                          <span className="text-gray-400">ຍັງບໍ່ໄດ້ເລືອກສິນຄ້າ</span>
-                        ) : (
-                          <>ເລືອກແລ້ວ <b className="text-gray-900">{cartRows.length}</b> ລາຍການ · ລວມ <b className="text-gray-900">{totalQty}</b> ຊິ້ນ</>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <button type="button" onClick={closeModal} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100">ຍົກເລີກ</button>
-                        <button
-                          type="button"
-                          disabled={cartRows.length === 0}
-                          onClick={() => { setSubmitError(''); setReqStep(2); }}
-                          className="px-5 py-2 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40"
-                        >
-                          ຕໍ່ໄປ →
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                ) : (
                   <form onSubmit={handleSubmitRequest} className="flex-1 min-h-0 flex flex-col">
                     <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ລາຍການທີ່ເລືອກ ({cartRows.length})</div>
-                          <button type="button" onClick={() => setReqStep(1)} className="text-xs text-amber-600 font-medium hover:underline">+ ເລືອກສິນຄ້າເພີ່ມ</button>
-                        </div>
-                        {cartRows.map(({ it: item, index }) => {
-                          const cat = item.catalogItemId ? catalogById(item.catalogItemId) : null;
-                          const stock = cat?.stockQty ?? 0;
+                      <div className="space-y-3">
+                        <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ລາຍການທີ່ຕ້ອງການ ({items.length})</div>
+                        {items.map((item, index) => {
                           const qtyNum = parseInt(item.quantity, 10) || 0;
-                          const over = cat && qtyNum > stock;
                           return (
-                            <div key={index} className="flex gap-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
-                              <CatalogThumb url={cat?.imageUrl} name={item.name} size={64} />
-                              <div className="flex-1 min-w-0 space-y-2">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-medium text-gray-800">{item.name}</div>
-                                    <div className="text-[11px] text-gray-400">
-                                      {cat ? `${cat._id} · ${cat.category || '—'}` : 'ລາຍການພິມເອງ (ບໍ່ຢູ່ໃນ Catalog)'}
-                                    </div>
-                                  </div>
-                                  <button type="button" onClick={() => removeRow(index)} className="text-rose-500 text-xs font-medium hover:underline shrink-0">ລຶບ</button>
-                                </div>
-                                <div className="flex flex-wrap items-center gap-3">
-                                  <QtyStepper
-                                    value={item.quantity}
-                                    onMinus={() => setRowQty(index, qtyNum - 1)}
-                                    onPlus={() => setRowQty(index, qtyNum + 1)}
-                                    onType={(n) => setRowQty(index, n)}
-                                  />
-                                  {cat && (
-                                    <span className={`text-[11px] ${over ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
-                                      {over ? `⚠ ເກີນສະຕ໊ອກ (ມີ ${stock} ${cat.unit || ''})` : `ຄົງເຫຼືອ ${stock} ${cat.unit || ''}`}
-                                    </span>
-                                  )}
-                                </div>
-                                {cat && item.purchaseRequestId ? (
-                                  <div className="text-[11px] space-y-0.5">
-                                    <p className={purchaseLinkIssue(item) ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-                                      ✓ ຜູກກັບ {item.purchaseRequestNo} — ຊື້ເພີ່ມ {item.purchaseQty}, ໃຊ້ສະຕັອກ {Math.max(qtyNum - item.purchaseQty, 0)}
-                                    </p>
-                                    {purchaseLinkIssue(item) && <p className="text-red-600">{purchaseLinkIssue(item)}</p>}
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const next = [...items];
-                                        clearPurchaseLink(next[index]);
-                                        setItems(next);
-                                      }}
-                                      className="text-gray-500 hover:underline"
-                                    >
-                                      ຍົກເລີກການຜູກ
-                                    </button>
-                                  </div>
-                                ) : (
-                                  cat && over && canRequest && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setRestockPrefill({
-                                          itemIndex: index,
-                                          catalogItemId: item.catalogItemId,
-                                          quantity: Math.max(qtyNum - stock, 1),
-                                          reason: `ສະຕັອກບໍ່ພຽງພໍສຳລັບຄຳຂໍເບີກ (ຕ້ອງການ ${qtyNum}, ມີ ${stock})`,
-                                        })
-                                      }
-                                      className="text-[11px] font-medium text-blue-600 hover:underline"
-                                    >
-                                      + ຂໍຊື້ເພີ່ມ
-                                    </button>
-                                  )
+                            <div key={index} className="p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold text-gray-500">ລາຍການທີ {index + 1}</span>
+                                {items.length > 1 && (
+                                  <button type="button" onClick={() => removeRow(index)} className="text-rose-500 text-xs font-medium hover:underline">ລຶບ</button>
                                 )}
-                                <input
-                                  type="text"
-                                  value={item.reason}
-                                  onChange={(e) => handleItemChange(index, 'reason', e.target.value)}
-                                  placeholder="ເຫດຜົນການຂໍເບີກ (ຕົວຢ່າງ: ເຄື່ອງເກົ່າໝົດ, ໃຊ້ງານໂຄງການໃໝ່)"
-                                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-amber-500"
+                              </div>
+                              <input
+                                type="text"
+                                value={item.name}
+                                onChange={(e) => handleItemChange(index, 'name', e.target.value)}
+                                placeholder="ຊື່ອຸປະກອນທີ່ຕ້ອງການ (ຕົວຢ່າງ: ຄອມພິວເຕີສະເປັກສູງສຳລັບ 3D rendering)"
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-amber-500"
+                              />
+                              <input
+                                type="text"
+                                value={item.reason}
+                                onChange={(e) => handleItemChange(index, 'reason', e.target.value)}
+                                placeholder="ເຫດຜົນ (ຕົວຢ່າງ: ພະນັກງານໃໝ່ຍັງບໍ່ມີ)"
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-amber-500"
+                              />
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-500">ຈຳນວນ</span>
+                                <QtyStepper
+                                  value={item.quantity}
+                                  onMinus={() => setRowQty(index, qtyNum - 1)}
+                                  onPlus={() => setRowQty(index, qtyNum + 1)}
+                                  onType={(n) => setRowQty(index, n)}
                                 />
                               </div>
                             </div>
                           );
                         })}
+                        <button
+                          type="button"
+                          onClick={addBlankRow}
+                          className="text-sm text-amber-600 font-medium hover:underline"
+                        >
+                          + ເພີ່ມລາຍການອື່ນ
+                        </button>
                       </div>
 
                       {/* ສະເພາະຫົວໜ້າພະແນກ (managerIds) ເທົ່ານັ້ນທີ່ຂໍໃນນາມແຜນກໄດ້ — ພະນັກງານທົ່ວໄປບໍ່ເຫັນສ່ວນນີ້ */}
-                      <div className={`rounded-xl border border-gray-200 p-3 space-y-3 ${requestableDepartments.length === 0 ? 'hidden' : ''}`}>
+                      <div className={`rounded-xl border border-gray-200 p-3 space-y-3 ${requestableDepartments.length === 0 || resubmitId ? 'hidden' : ''}`}>
                         <div className="text-xs font-semibold text-gray-600 uppercase tracking-wider">ຂໍໃນນາມ</div>
                         <div className="flex gap-2">
                           <button
@@ -1664,21 +1480,8 @@ useEffect(() => {
                         )}
                       </div>
 
-                      {overStockCount > 0 && (
-                        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                          ມີ {overStockCount} ລາຍການທີ່ຂໍເກີນສະຕ໊ອກປັດຈຸບັນ — ສົ່ງໄດ້ ແຕ່ເຈົ້າໜ້າທີ່ສາງອາດຈ່າຍບໍ່ຄົບຈົນກວ່າຂອງຈະເຂົ້າສາງ. ກົດ "+ ຂໍຊື້ເພີ່ມ" ເພື່ອຜູກກັບໃບສະເໜີຊື້ ລະບົບຈະແຈ້ງເມື່ອຂອງມາຮອດ
-                        </div>
-                      )}
-                      {linkedCount > 0 && (
-                        <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                          {linkedCount} ລາຍການຜູກກັບໃບສະເໜີຊື້ — ເມື່ອຜູ້ອະນຸມັດອະນຸມັດໃບສະເໜີຊື້ ຄຳຂໍນີ້ຈະຖືກອະນຸມັດພ້ອມກັນ ແລະທ່ານຈະໄດ້ຮັບແຈ້ງເມື່ອຂອງພ້ອມມາຮັບ (ຍັງຕ້ອງສະແກນຮັບຕາມປົກກະຕິ)
-                        </div>
-                      )}
                       {submitError && (
                         <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{submitError}</div>
-                      )}
-                      {restockNotice && (
-                        <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{restockNotice}</div>
                       )}
                     </div>
 
@@ -1687,49 +1490,21 @@ useEffect(() => {
                         <b className="text-gray-900">{cartRows.length}</b> ລາຍການ · ລວມ <b className="text-gray-900">{totalQty}</b> ຊິ້ນ
                       </div>
                       <div className="flex gap-2">
-                        <button type="button" onClick={() => setReqStep(1)} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100">← ກັບຄືນ</button>
+                        <button type="button" onClick={closeModal} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100">ຍົກເລີກ</button>
                         <button
                           type="submit"
                           disabled={cartRows.length === 0}
                           className="px-5 py-2 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 shadow-sm disabled:opacity-40"
                         >
-                          ສົ່ງຄຳຂໍ
+                          {resubmitId ? 'ສົ່ງໃໝ່' : 'ສົ່ງຄຳຂໍ'}
                         </button>
                       </div>
                     </div>
                   </form>
-                )}
               </div>
             </div>
           );
         })()}
-
-        {restockPrefill && (
-          <PurchaseRequestModal
-            catalog={catalog}
-            initialCatalogItemId={restockPrefill.catalogItemId}
-            initialQuantity={restockPrefill.quantity}
-            initialReason={restockPrefill.reason}
-            onClose={() => setRestockPrefill(null)}
-            onSaved={(pr) => {
-              const rowIndex = restockPrefill.itemIndex;
-              setRestockPrefill(null);
-              if (pr?._id && Number.isInteger(rowIndex)) {
-                setItems((prev) =>
-                  prev.map((row, i) =>
-                    i === rowIndex
-                      ? { ...row, purchaseRequestId: pr._id, purchaseRequestNo: pr.prNo, purchaseQty: pr.quantity }
-                      : row,
-                  ),
-                );
-                setRestockNotice(`ສົ່ງໃບສະເໜີຊື້ ${pr.prNo} ສຳເລັດ ແລະຜູກກັບແຖວນີ້ແລ້ວ — ກົດ \"ສົ່ງຄຳຂໍ\" ເພື່ອຢືນຢັນ`);
-              } else {
-                setRestockNotice('ສົ່ງໃບສະເໜີຊື້ສຳເລັດ — ລໍອະນຸມັດ');
-              }
-              setTimeout(() => setRestockNotice(''), 6000);
-            }}
-          />
-        )}
 
         {receiveRequest && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1759,7 +1534,7 @@ useEffect(() => {
                   <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="font-semibold text-gray-700">
-                        ລາຍການທີ່ຂໍ {assetsKnown && <span className={plannedDone === itemPlan.length ? 'text-emerald-600' : 'text-amber-600'}>({plannedDone}/{itemPlan.length} ຄົບ)</span>}
+                        {receiveLineMode ? 'ລາຍການທີ່ພ້ອມມາຮັບ' : 'ລາຍການທີ່ຂໍ'} {assetsKnown && <span className={plannedDone === itemPlan.length ? 'text-emerald-600' : 'text-amber-600'}>({plannedDone}/{itemPlan.length} ຄົບ)</span>}
                       </div>
                       {hasPermission('assets', 'read') && (
                         <button type="button" onClick={loadAssets} className="text-xs text-blue-600 hover:underline">↻ ໂຫຼດທະບຽນໃໝ່</button>
@@ -1794,6 +1569,14 @@ useEffect(() => {
                             ໄດ້ຮັບແລ້ວ — ຂອງສິ້ນເປືອງ (ບໍ່ມີ Asset Tag, ລະບົບຕັດສະຕ໊ອກໃຫ້)
                           </label>
                         )}
+                      </div>
+                    ))}
+                    {notYetItems.map((it) => (
+                      <div key={`notyet-${it._id ?? it.name}`} className="text-xs bg-violet-50 border border-violet-100 rounded-lg px-3 py-2 flex justify-between gap-2">
+                        <span className="font-medium text-gray-700">{it.name} <span className="text-gray-400">x{it.quantity}</span></span>
+                        <span className="text-violet-700">
+                          {it.lineStatus === 'ON_ORDER' ? 'ກຳລັງສັ່ງຊື້ — ຍັງບໍ່ພ້ອມ' : 'ລໍຖ້າຝ່າຍສາງກວດ — ຍັງບໍ່ພ້ອມ'}
+                        </span>
                       </div>
                     ))}
                     {!assetsKnown && (
