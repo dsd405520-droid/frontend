@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, CheckCircle2, PackagePlus, XCircle, AlertTriangle } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import api from '../services/api';
 import { getCurrentUser, hasPermission } from '../utils/permissions';
 import PurchaseRequestModal from '../components/PurchaseRequestModal';
 import PurchaseRequestDetailModal from '../components/PurchaseRequestDetailModal';
+import { ReceiveModal } from './GoodsReceipt';
 import useRealtimeRefresh from '../hooks/useRealtimeRefresh';
 
 const unwrap = (body) => (body && body.data !== undefined ? body.data : body);
@@ -28,7 +29,6 @@ const personName = (u) =>
   u && typeof u === 'object' ? [u.firstName, u.lastName].filter(Boolean).join(' ') || u.employeeCode || '—' : '—';
 
 export default function PurchaseRequests() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const openId = searchParams.get('open') || ''; // ເປີດໃບສະເໜີຊື້ໂດຍກົງຈາກລິ້ງ (ເຊັ່ນ ຈາກໜ້າອະນຸມັດຄຳຂໍເບີກ)
   const [deepDetail, setDeepDetail] = useState(null);
@@ -37,7 +37,7 @@ export default function PurchaseRequests() {
   const canApprove = hasPermission('supplies', 'approve');
   const canReceive = hasPermission('supplies', 'manage');
 
-  const [tab, setTab] = useState(canApprove ? 'APPROVING' : 'ALL');
+  const [tab, setTab] = useState(canApprove ? 'APPROVING' : 'RECEIVED');
   const [pendingCount, setPendingCount] = useState(0);
   const [rows, setRows] = useState([]);
   const [catalog, setCatalog] = useState([]);
@@ -50,6 +50,7 @@ export default function PurchaseRequests() {
   const [success, setSuccess] = useState('');
   const [actionError, setActionError] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [receivePr, setReceivePr] = useState(null); // ໃບສະເໜີທີ່ກຳລັງຮັບເຄື່ອງ (ເປີດ popup ຢູ່ໜ້ານີ້)
   const [dialog, setDialog] = useState(null); // { type: 'approve' | 'reject' | 'cancel', r }
   const [rejectReason, setRejectReason] = useState('');
 
@@ -92,12 +93,16 @@ export default function PurchaseRequests() {
         setLoadError('');
       }
       const params = {};
-      if (approving) params.status = 'PENDING';
-      else if (status) params.status = status;
+      if (tab === 'APPROVING') params.status = 'PENDING';
+      else if (tab === 'RECEIVED') params.status = 'RECEIVED';
+      else if (tab === 'ALL' && status) params.status = status;
       if (search.trim()) params.q = search.trim();
       const res = await api.get('/purchase-requests', { params });
       const list = unwrap(res.data);
-      setRows(Array.isArray(list) ? list : []);
+      let next = Array.isArray(list) ? list : [];
+      // ແທັບ "ຮັບເຄື່ອງ" = ອະນຸມັດແລ້ວ ແລະຍັງຮັບບໍ່ຄົບ (ອະນຸມັດແລ້ວ + ຮັບບາງສ່ວນ)
+      if (tab === 'RECEIVING') next = next.filter((r) => r.status === 'APPROVED' || r.status === 'PARTIALLY_RECEIVED');
+      setRows(next);
       setLoadError('');
     } catch (err) {
       if (!silent) {
@@ -230,7 +235,12 @@ export default function PurchaseRequests() {
         )}
         {(r.status === 'APPROVED' || r.status === 'PARTIALLY_RECEIVED') && canReceive && (
           <button
-            onClick={() => navigate(`/goods-receipt?pr=${r._id}`)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDetailId('');
+              setDeepDetail(null);
+              setReceivePr(r);
+            }}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs flex items-center gap-1"
           >
             <PackagePlus size={14} /> ຮັບເຄື່ອງ
@@ -275,6 +285,8 @@ export default function PurchaseRequests() {
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="flex gap-1 px-4 pt-3 border-b border-gray-100">
             {[
+              ['RECEIVED', 'ຮັບຄົບແລ້ວ'],
+              ['RECEIVING', 'ຮັບເຄື່ອງ'],
               ['APPROVING', 'ລໍອະນຸມັດ'],
               ['ALL', 'ຂໍ້ມູນທັງໝົດ'],
             ].map(([k, label]) => (
@@ -308,7 +320,7 @@ export default function PurchaseRequests() {
                   className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-amber-500 w-full sm:w-64"
                 />
               </div>
-              {!approving && (
+              {tab === 'ALL' && (
                 <select value={status} onChange={(e) => setStatus(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm">
                   <option value="">ທຸກສະຖານະ</option>
                   {Object.entries(STATUS).map(([k, v]) => (
@@ -347,7 +359,7 @@ export default function PurchaseRequests() {
                 ) : loadError ? (
                   <tr><td colSpan={approving ? 8 : 7} className="py-12 text-center text-red-500 px-4">⚠️ {loadError}</td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={approving ? 8 : 7} className="py-12 text-center text-gray-400">{approving ? 'ບໍ່ມີໃບທີ່ລໍອະນຸມັດ' : 'ຍັງບໍ່ມີໃບສະເໜີ'}</td></tr>
+                  <tr><td colSpan={approving ? 8 : 7} className="py-12 text-center text-gray-400">{{ APPROVING: 'ບໍ່ມີໃບທີ່ລໍອະນຸມັດ', RECEIVED: 'ຍັງບໍ່ມີໃບທີ່ຮັບຄົບແລ້ວ', RECEIVING: 'ບໍ່ມີໃບທີ່ລໍຮັບເຄື່ອງ' }[tab] || 'ຍັງບໍ່ມີໃບສະເໜີ'}</td></tr>
                 ) : (
                   rows.map((r) => {
                     const st = STATUS[r.status] || STATUS.PENDING;
@@ -406,6 +418,25 @@ export default function PurchaseRequests() {
           statusInfo={STATUS[detail.status] || STATUS.PENDING}
           actions={renderActions(detail)}
           onClose={closeDetail}
+        />
+      )}
+
+      {receivePr && (
+        <ReceiveModal
+          mode={receivePr.catalogItemId ? 'RESTOCK' : 'NEW_ITEM'}
+          catalog={catalog}
+          rooms={[]}
+          initialCatalogItemId={receivePr.catalogItemId || undefined}
+          pr={receivePr}
+          onClose={() => setReceivePr(null)}
+          onSaved={() => {
+            flash('ບັນທຶກການຮັບເຄື່ອງສຳເລັດ');
+            fetchRows();
+            api
+              .get('/supply-catalog')
+              .then((res) => setCatalog(Array.isArray(unwrap(res.data)) ? unwrap(res.data) : []))
+              .catch(() => {});
+          }}
         />
       )}
 
