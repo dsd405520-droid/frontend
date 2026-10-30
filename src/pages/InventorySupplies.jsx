@@ -158,6 +158,11 @@ export default function InventorySupplies() {
         : (departmentBody?.data || departmentBody?.departments || departmentBody?.items || []);
       const departmentList = Array.isArray(departmentListValue) ? departmentListValue : [];
       setRequestableDepartments(departmentList);
+      if (departmentList.length === 0) {
+        setRequestFor('PERSON');
+        setCustodian(null);
+        setCustPickerOpen(false);
+      }
       const profileDepartmentId = refId(profile?.departmentId);
       setSelectedDepartmentId((current) => {
         if (current && departmentList.some((department) => department._id === current)) return current;
@@ -1538,17 +1543,17 @@ useEffect(() => {
                           >
                             ຂໍສ່ວນຕົວ
                           </button>
-                          <button
-                            type="button"
-                            disabled={requestableDepartments.length === 0}
-                            onClick={chooseDepartmentRequest}
-                            title={requestableDepartments.length === 0 ? 'ທ່ານບໍ່ມີພະແນກທີ່ສາມາດຂໍໃນນາມໄດ້' : undefined}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition disabled:opacity-40 ${
-                              requestFor === 'DEPARTMENT' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                            }`}
-                          >
-                            ຂໍໃນນາມແຜນກ
-                          </button>
+                          {requestableDepartments.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={chooseDepartmentRequest}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                                requestFor === 'DEPARTMENT' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                              }`}
+                            >
+                              ຂໍໃນນາມແຜນກ
+                            </button>
+                          )}
                         </div>
                         {requestFor === 'DEPARTMENT' && (
                           <>
