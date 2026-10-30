@@ -1,20 +1,29 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Building2, Layers, Plus, X, Loader2, AlertCircle, Search, Filter } from 'lucide-react';
+import { Building2, Layers, Plus, X, Loader2, AlertCircle, AlertTriangle, UserCog, Search, Filter } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import MainLayout from '../layouts/MainLayout';
 import CsvImportButton from '../components/CsvImportButton';
 import CsvExportButton from '../components/CsvExportButton';
+import ManagerPicker from '../components/ManagerPicker';
 import { API_BASE_URL } from '../config';
 
 export default function BranchesManagement() {
   const [searchParams] = useSearchParams();
   const canCreateBranch = hasPermission('branches', 'create');
   const canCreateDept = hasPermission('departments', 'create');
+  const canUpdateDept = hasPermission('departments', 'update');
 
   const [branches, setBranches] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
+  // ລາຍຊື່ຜູ້ໃຊ້ ສຳລັບເລືອກຫົວໜ້າ + ກວດວ່າພະແນກມີຫົວໜ້າທີ່ເປີດໃຊ້ງານບໍ (ຕ້ອງມີສິດ users.read)
+  const [users, setUsers] = useState([]);
+  const [usersAvailable, setUsersAvailable] = useState(false);
+  // Modal ແກ້ໄຂຫົວໜ້າຂອງພະແນກທີ່ມີຢູ່ແລ້ວ
+  const [managerEdit, setManagerEdit] = useState(null); // { dept, ids }
+  const [managerSaving, setManagerSaving] = useState(false);
+  const [managerEditError, setManagerEditError] = useState('');
 
   // Search & Filter (ຄືກັບໜ້າ Users / Tickets)
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,7 +69,7 @@ export default function BranchesManagement() {
   const [deptForm, setDeptForm] = useState({
     branchId: '',
     name: '',
-    managerIds: '',
+    managerIds: [],
     isActive: true,
   });
 
@@ -70,10 +79,21 @@ export default function BranchesManagement() {
     const headers = { 'Authorization': `Bearer ${token}` };
 
     try {
-      const [branchRes, deptRes] = await Promise.all([
+      const [branchRes, deptRes, userRes] = await Promise.all([
         fetch(`${API_BASE_URL}/branches`, { headers }),
-        fetch(`${API_BASE_URL}/departments`, { headers })
+        fetch(`${API_BASE_URL}/departments`, { headers }),
+        fetch(`${API_BASE_URL}/users`, { headers }).catch(() => null),
       ]);
+
+      if (userRes && userRes.ok) {
+        const userData = await userRes.json();
+        const list = Array.isArray(userData) ? userData : Array.isArray(userData?.data) ? userData.data : [];
+        setUsers(list);
+        setUsersAvailable(true);
+      } else {
+        setUsers([]);
+        setUsersAvailable(false);
+      }
 
       const branchData = await branchRes.json();
       const deptData = await deptRes.json();
@@ -160,9 +180,7 @@ export default function BranchesManagement() {
     setSubmittingDept(true);
 
     const token = localStorage.getItem('token');
-    const formattedManagerIds = deptForm.managerIds
-      ? deptForm.managerIds.split(',').map(id => id.trim()).filter(Boolean)
-      : [];
+    const formattedManagerIds = deptForm.managerIds;
 
     const payload = {
       branchId: deptForm.branchId,
@@ -191,7 +209,7 @@ export default function BranchesManagement() {
       setDeptForm({
         branchId: '',
         name: '',
-        managerIds: '',
+        managerIds: [],
         isActive: true,
       });
       fetchData();
@@ -199,6 +217,47 @@ export default function BranchesManagement() {
       setDeptError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
     } finally {
       setSubmittingDept(false);
+    }
+  };
+
+  // ຫົວໜ້າທີ່ "ໃຊ້ໄດ້ຈິງ": ຢູ່ໃນລະບົບ ແລະ ບັນຊີເປີດໃຊ້ງານ (ກົດດຽວກັບ backend resolveManagerStage)
+  const activeManagerCount = (dept) => {
+    const ids = (dept.managerIds || []).map(String);
+    if (!usersAvailable) return ids.length; // ບໍ່ມີສິດເບິ່ງຜູ້ໃຊ້ → ກວດໄດ້ແຕ່ວ່າມີ ID ຫຼືບໍ່
+    return ids.filter((id) => users.some((u) => String(u._id) === id && u.isActive !== false)).length;
+  };
+  const managerLabel = (id) => {
+    const u = users.find((x) => String(x._id) === String(id));
+    if (!u) return { text: id, unknown: usersAvailable, inactive: false };
+    return {
+      text: `${[u.firstName, u.lastName].filter(Boolean).join(' ')} (${u.employeeCode})`,
+      unknown: false,
+      inactive: u.isActive === false,
+    };
+  };
+  const deptsWithoutManager = departments.filter((d) => d.isActive !== false && activeManagerCount(d) === 0);
+
+  const handleManagerEditSave = async () => {
+    if (!managerEdit) return;
+    setManagerSaving(true);
+    setManagerEditError('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/departments/${encodeURIComponent(managerEdit.dept._id)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        },
+        body: JSON.stringify({ managerIds: managerEdit.ids }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || 'ບໍ່ສາມາດບັນທຶກຫົວໜ້າພະແນກໄດ້');
+      setManagerEdit(null);
+      fetchData();
+    } catch (err) {
+      setManagerEditError(err.message || 'ເກີດຂໍ້ຜິດພາດໃນການເຊື່ອມຕໍ່ Server');
+    } finally {
+      setManagerSaving(false);
     }
   };
 
@@ -448,6 +507,15 @@ export default function BranchesManagement() {
               )}
             </div>
           </div>
+          {!loading && deptsWithoutManager.length > 0 && (
+            <div className="mb-3 flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-4 py-3 text-sm">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+              <span>
+                {deptsWithoutManager.length} ພະແນກຍັງບໍ່ມີຫົວໜ້າທີ່ໃຊ້ງານໄດ້ ({deptsWithoutManager.map((d) => d.name).join(', ')}) —
+                ຄຳຂໍເບີກອຸປະກອນຂອງພະນັກງານໃນພະແນກເຫຼົ່ານີ້ຈະຂ້າມການອະນຸມັດຂັ້ນຫົວໜ້າ ແລະ ໄປຫາຝ່າຍສາງໂດຍກົງ
+              </span>
+            </div>
+          )}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
@@ -455,7 +523,7 @@ export default function BranchesManagement() {
                 <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-400 text-xs">
                   <th className="p-4 font-medium">ຊື່ພະແນກ (ID)</th>
                   <th className="p-4 font-medium">ສາຂາທີ່สังกัด</th>
-                  <th className="p-4 font-medium">Manager IDs</th>
+                  <th className="p-4 font-medium">ຫົວໜ້າພະແນກ</th>
                   <th className="p-4 font-medium">ສະຖານະ</th>
                 </tr>
               </thead>
@@ -475,7 +543,42 @@ export default function BranchesManagement() {
                         {getBranchName(item.branchId)}
                       </td>
                       <td className="p-4 text-xs text-gray-500">
-                        {item.managerIds && item.managerIds.length > 0 ? item.managerIds.join(', ') : 'ຍັງບໍ່ມີຜູ້ຈັດການ'}
+                        {item.managerIds && item.managerIds.length > 0 ? (
+                          <div className="flex flex-col gap-1">
+                            {item.managerIds.map((id) => {
+                              const m = managerLabel(id);
+                              return (
+                                <span
+                                  key={id}
+                                  className={m.unknown || m.inactive ? 'text-amber-700' : 'text-gray-700'}
+                                  title={m.unknown ? 'ບໍ່ພົບຜູ້ໃຊ້ທີ່ມີ ID ນີ້' : m.inactive ? 'ບັນຊີຖືກປິດໃຊ້ງານ' : id}
+                                >
+                                  {m.text}
+                                  {m.unknown && ' · ບໍ່ພົບຜູ້ໃຊ້'}
+                                  {m.inactive && ' · ປິດໃຊ້ງານ'}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                        {item.isActive !== false && activeManagerCount(item) === 0 && (
+                          <div className="mt-1 inline-flex items-start gap-1 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                            <span>ຍັງບໍ່ມີຫົວໜ້າທີ່ໃຊ້ງານໄດ້ — ຄຳຂໍເບີກຈາກພະແນກນີ້ຈະຂ້າມການອະນຸມັດຂັ້ນຫົວໜ້າ</span>
+                          </div>
+                        )}
+                        {canUpdateDept && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManagerEditError('');
+                              setManagerEdit({ dept: item, ids: (item.managerIds || []).map(String) });
+                            }}
+                            className="mt-1.5 flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium"
+                          >
+                            <UserCog size={13} /> ຈັດການຫົວໜ້າ
+                          </button>
+                        )}
                       </td>
                       <td className="p-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -660,13 +763,13 @@ export default function BranchesManagement() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Manager IDs (ຂັ້ນດ້ວຍເຄື່ອງໝາຍຈຸດ ,)</label>
-                <input
-                  type="text"
+                <label className="block text-xs font-medium text-gray-700 mb-1">ຫົວໜ້າພະແນກ (ເລືອກໄດ້ຫຼາຍຄົນ)</label>
+                <ManagerPicker
                   value={deptForm.managerIds}
-                  onChange={(e) => setDeptForm({ ...deptForm, managerIds: e.target.value })}
-                  placeholder="ຕົວຢ່າງ: U010, U011"
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
+                  onChange={(ids) => setDeptForm({ ...deptForm, managerIds: ids })}
+                  users={users}
+                  usersAvailable={usersAvailable}
+                  departments={departments}
                 />
               </div>
 
@@ -691,6 +794,53 @@ export default function BranchesManagement() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal ຈັດການຫົວໜ້າຂອງພະແນກທີ່ມີຢູ່ແລ້ວ */}
+      {managerEdit && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl border border-gray-100">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50 rounded-t-2xl">
+              <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
+                <UserCog className="text-indigo-500" size={20} />
+                ຫົວໜ້າພະແນກ: {managerEdit.dept.name}
+              </h3>
+              <button onClick={() => setManagerEdit(null)} className="text-gray-400 hover:text-gray-600 transition p-1 rounded-lg">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {managerEditError && (
+                <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-xl text-sm flex items-center gap-2">
+                  <AlertCircle size={18} className="shrink-0" />
+                  <span>{managerEditError}</span>
+                </div>
+              )}
+              <ManagerPicker
+                value={managerEdit.ids}
+                onChange={(ids) => setManagerEdit({ ...managerEdit, ids })}
+                users={users}
+                usersAvailable={usersAvailable}
+                departments={departments}
+                preferDepartmentId={managerEdit.dept._id}
+              />
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
+                <button type="button" onClick={() => setManagerEdit(null)} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition">
+                  ຍົກເລີກ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleManagerEditSave}
+                  disabled={managerSaving}
+                  className="bg-amber-500 hover:bg-amber-600 text-white px-5 py-2 rounded-xl text-sm font-medium transition flex items-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {managerSaving && <Loader2 className="animate-spin" size={16} />}
+                  <span>ບັນທຶກ</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

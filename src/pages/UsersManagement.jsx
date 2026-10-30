@@ -51,7 +51,15 @@ export default function UsersManagement() {
     role: '',
     branchId: '', // ປ່ຽນຈາກ branchID ເປັນ branchId ໃຫ້ົງກັບ Backend
     departmentId: '', // ຊື່ field ຕ້ອງເປັນ departmentId ໃຫ້ຕົງກັບ Backend (schema + DTO ໃຊ້ departmentId)
+    isDepartmentManager: false, // ຕິກ = ເພີ່ມຜູ້ໃຊ້ເຂົ້າ managerIds ຂອງພະແນກທີ່ເລືອກ
   });
+  // ສະຖານະຫົວໜ້າຕອນເປີດແກ້ໄຂ — ສົ່ງ isDepartmentManager ໄປ backend ສະເພາະຕອນມີການປ່ຽນ
+  const [initialManager, setInitialManager] = useState({ departmentId: '', isManager: false });
+
+  const isManagerOf = (deptId, userId) => {
+    const dept = departments.find((d) => (d._id || d.id) === deptId);
+    return !!dept && (dept.managerIds || []).map(String).includes(String(userId));
+  };
 
   const toggleRoleFilter = (id) => {
     setRoleFilter(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
@@ -143,7 +151,9 @@ export default function UsersManagement() {
       role: '',
       branchId: '',
       departmentId: '',
+      isDepartmentManager: false,
     });
+    setInitialManager({ departmentId: '', isManager: false });
     setError('');
     setIsModalOpen(true);
   };
@@ -185,6 +195,17 @@ export default function UsersManagement() {
       role: user.role?._id || user.role?.id || user.role || '',
       branchId: user.branchId?._id || user.branchId?.id || user.branchId || user.branchID?._id || user.branchID?.id || user.branchID || user.branch?._id || user.branch?.id || user.branch || '',
       departmentId: user.departmentId?._id || user.departmentId?.id || user.departmentId || '',
+      isDepartmentManager: isManagerOf(
+        user.departmentId?._id || user.departmentId?.id || user.departmentId || '',
+        user._id || user.id,
+      ),
+    });
+    setInitialManager({
+      departmentId: user.departmentId?._id || user.departmentId?.id || user.departmentId || '',
+      isManager: isManagerOf(
+        user.departmentId?._id || user.departmentId?.id || user.departmentId || '',
+        user._id || user.id,
+      ),
     });
     setError('');
     setIsModalOpen(true);
@@ -202,11 +223,23 @@ export default function UsersManagement() {
       if (editingUser) {
         const payload = { ...formData };
         if (!payload.password) delete payload.password;
+        // ສົ່ງສະຖານະຫົວໜ້າສະເພາະຕອນປ່ຽນ (ຫຼື ຍ້າຍພະແນກ) — ກັນລົບຫົວໜ້າໂດຍບໍ່ຕັ້ງໃຈຖ້າຂໍ້ມູນພະແນກໂຫຼດບໍ່ທັນ
+        if (
+          !formData.departmentId ||
+          (formData.isDepartmentManager === initialManager.isManager &&
+            formData.departmentId === initialManager.departmentId)
+        ) {
+          delete payload.isDepartmentManager;
+        }
 
         await axios.patch(`${API_BASE_URL}/users/${editingUser._id || editingUser.id}`, payload, { headers });
         alert('ແກ້ໄຂຂໍ້ມູນຜູ້ໃຊ້ສຳເລັດ!');
       } else {
-        await axios.post(`${API_BASE_URL}/users`, formData, { headers });
+        const createPayload = {
+          ...formData,
+          isDepartmentManager: !!formData.departmentId && formData.isDepartmentManager,
+        };
+        await axios.post(`${API_BASE_URL}/users`, createPayload, { headers });
         alert('ເພີ່ມຜູ້ໃຊ້ສຳເລັດ!');
       }
 
@@ -618,7 +651,19 @@ export default function UsersManagement() {
                   <label className="block text-xs font-medium text-gray-700 mb-1">ພະແນກ (Department)</label>
                   <select
                     value={formData.departmentId}
-                    onChange={(e) => setFormData({ ...formData, departmentId: e.target.value })}
+                    onChange={(e) => {
+                      const deptId = e.target.value;
+                      setFormData({
+                        ...formData,
+                        departmentId: deptId,
+                        // ແກ້ໄຂ: ສະຖານະຫົວໜ້າຕາມພະແນກໃໝ່ທີ່ເລືອກ · ສ້າງໃໝ່: ຮັກສາຕາມທີ່ຕິກໄວ້
+                        isDepartmentManager: !deptId
+                          ? false
+                          : editingUser
+                            ? isManagerOf(deptId, editingUser._id || editingUser.id)
+                            : formData.isDepartmentManager,
+                      });
+                    }}
                     className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 bg-white"
                   >
                     <option value="">-- ເລືອກພະແນກ --</option>
@@ -628,6 +673,30 @@ export default function UsersManagement() {
                   </select>
                 </div>
               </div>
+
+              <label
+                className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
+                  formData.departmentId
+                    ? 'border-indigo-200 bg-indigo-50/50 cursor-pointer'
+                    : 'border-gray-200 bg-gray-50 opacity-60'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  disabled={!formData.departmentId}
+                  checked={!!formData.departmentId && formData.isDepartmentManager}
+                  onChange={(e) => setFormData({ ...formData, isDepartmentManager: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600"
+                />
+                <span>
+                  <span className="font-medium text-gray-800">ເປັນຫົວໜ້າຂອງພະແນກນີ້</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    {formData.departmentId
+                      ? 'ຈະໄດ້ຮັບແຈ້ງເຕືອນ ແລະ ອະນຸມັດຄຳຂໍເບີກອຸປະກອນຂັ້ນທີ 1 ຂອງພະນັກງານໃນພະແນກນີ້'
+                      : 'ເລືອກພະແນກກ່ອນ ຈຶ່ງຈະກຳນົດເປັນຫົວໜ້າໄດ້'}
+                  </span>
+                </span>
+              </label>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 transition">

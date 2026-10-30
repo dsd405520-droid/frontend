@@ -30,6 +30,16 @@ const requesterNameOf = (req) =>
   req?.requestedBy?.name || req?.requestedBy?.email ||
   req?.userId?.name || req?.userId?.email ||
   req?.createdBy?.name || 'ບໍ່ລະບຸຜູ້ຂໍ';
+// ປ້າຍສະຖານະໃນກ່ອງປະຫວັດຄຳຂໍ
+const HISTORY_STATUS = {
+  REQUESTED: { text: 'ລໍຖ້າອະນຸມັດ', cls: 'bg-amber-100 text-amber-700' },
+  APPROVED: { text: 'ອະນຸມັດແລ້ວ', cls: 'bg-blue-100 text-blue-700' },
+  ORDERED: { text: 'ສັ່ງຊື້ແລ້ວ', cls: 'bg-indigo-100 text-indigo-700' },
+  PARTIALLY_RECEIVED: { text: 'ຮັບບາງສ່ວນ', cls: 'bg-violet-100 text-violet-700' },
+  CLOSED: { text: 'ຮັບຄົບ · ປິດແລ້ວ', cls: 'bg-emerald-100 text-emerald-700' },
+  FULFILLED: { text: 'ຮັບຄົບ · ປິດແລ້ວ', cls: 'bg-emerald-100 text-emerald-700' },
+  REJECTED: { text: 'ປະຕິເສດ', cls: 'bg-red-100 text-red-700' },
+};
 const isDeptSource = (req) => {
   if (req?.source) return req.source === 'DEPARTMENT';
   const d = req?.departmentId;
@@ -485,6 +495,13 @@ export default function AssetManagement() {
   const [managerError, setManagerError] = useState('');
   const [managerAvailable, setManagerAvailable] = useState(false);
 
+  // ປະຫວັດຄຳຂໍ (ກ່ອງລຸ່ມຂອງແຖບ): ຂັ້ນຫົວໜ້າ + ຂັ້ນຝ່າຍສາງ
+  const [managerHistory, setManagerHistory] = useState([]);
+  const [warehouseHistory, setWarehouseHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyShown, setHistoryShown] = useState({ manager: 10, pending: 10 });
+  const [expandedHistoryId, setExpandedHistoryId] = useState(null);
+
   // opts.silent = ດຶງໃໝ່ແບບງຽບໆ (real-time): ບໍ່ເປີດ spinner
   const fetchCatalog = async (opts) => {
     const silent = opts?.silent === true;
@@ -585,6 +602,21 @@ export default function AssetManagement() {
     }
   };
 
+  // ປະຫວັດຄຳຂໍ: ລົ້ມ/ບໍ່ມີສິດ (403) = ປະໄວ້ວ່າງ ບໍ່ກະທົບສ່ວນເທິງ
+  const fetchHistories = async () => {
+    const toList = (res) => {
+      const body = res.data;
+      return Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [];
+    };
+    const [m, w] = await Promise.allSettled([
+      api.get('/supply-requests/manager-history', { params: { limit: 50 } }),
+      api.get('/supply-requests/history', { params: { limit: 50 } }),
+    ]);
+    setManagerHistory(m.status === 'fulfilled' ? toList(m.value) : []);
+    setWarehouseHistory(w.status === 'fulfilled' ? toList(w.value) : []);
+    setLoadingHistory(false);
+  };
+
   // ໂຫຼດປະຫວັດການຮັບເຂົ້າ + ທະບຽນຊັບສິນຂອງລາຍການທີ່ເປີດ popup ຢູ່ ໃໝ່ແບບງຽບໆ (ບໍ່ລ້າງໜ້າຈໍ)
   const reloadOpenItemSilently = async (item) => {
     const itemId = item._id;
@@ -614,6 +646,7 @@ export default function AssetManagement() {
       fetchCatalog({ silent: true }),
       fetchPendingRequests({ silent: true }),
       fetchManagerRequests({ silent: true }),
+      fetchHistories(),
       historyItem ? reloadOpenItemSilently(historyItem) : null,
     ]),
   );
@@ -629,6 +662,8 @@ export default function AssetManagement() {
     fetchPendingRequests();
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchManagerRequests();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchHistories();
   }, []);
 
   const detailReq = detailReqId
@@ -689,7 +724,7 @@ export default function AssetManagement() {
       setConfirmType(null);
       setDetailReqId(null);
       setRejectReason('');
-      await Promise.all([fetchPendingRequests(), fetchManagerRequests()]);
+      await Promise.all([fetchPendingRequests(), fetchManagerRequests(), fetchHistories()]);
       if (wasApprove && !isManagerStage) fetchCatalog();
     } catch (error) {
       setReviewError(
@@ -1030,6 +1065,157 @@ export default function AssetManagement() {
         })}
       </div>
   );
+
+  // ກ່ອງປະຫວັດຄຳຂໍ (ລຸ່ມສຸດຂອງແຖບ) — kind: 'manager' = ຂັ້ນຫົວໜ້າ · 'pending' = ຂັ້ນຝ່າຍສາງ
+  const renderHistoryBox = (kind, list) => {
+    const shown = historyShown[kind] ?? 10;
+    const rows = list.slice(0, shown);
+
+    const decisionLines = (req) => {
+      const lines = [];
+      if (req.managerRejectedAt || req.managerRejectedBy) {
+        lines.push({
+          stage: 'manager',
+          ok: false,
+          text: `ຫົວໜ້າພະແນກ ${personOf(req.managerRejectedBy)} ປະຕິເສດ · ${fmtDateTime(req.managerRejectedAt)}`,
+          reason: req.rejectionReason,
+        });
+      } else if (req.managerApprovedAt) {
+        lines.push({
+          stage: 'manager',
+          ok: true,
+          text: `ຫົວໜ້າພະແນກ ${personOf(req.managerApprovedBy)} ອະນຸມັດ${req.managerApprovedAsSubstitute ? ' (ແທນ)' : ''} · ${fmtDateTime(req.managerApprovedAt)}`,
+        });
+      }
+      if (req.approvedAt) {
+        const rejected = req.status === 'REJECTED';
+        lines.push({
+          stage: 'warehouse',
+          ok: !rejected,
+          text: `ຝ່າຍສາງ ${personOf(req.approvedBy)} ${rejected ? 'ປະຕິເສດ' : 'ອະນຸມັດ'} · ${fmtDateTime(req.approvedAt)}`,
+          reason: rejected ? req.rejectionReason : undefined,
+        });
+      }
+      return lines;
+    };
+
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <History size={18} className="text-gray-400" />
+              <h2 className="font-bold text-gray-800">ປະຫວັດຄຳຂໍ</h2>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {kind === 'manager'
+                ? 'ຄຳຂໍທີ່ທ່ານ (ຫຼືຜູ້ແທນ) ອະນຸມັດ/ປະຕິເສດໄປແລ້ວ — ໃໝ່ສຸດຢູ່ເທິງ'
+                : 'ຄຳຂໍທີ່ຝ່າຍສາງດຳເນີນການແລ້ວ (ອະນຸມັດ, ປະຕິເສດ, ສັ່ງຊື້, ຮັບຂອງ, ປິດ) — ໃໝ່ສຸດຢູ່ເທິງ'}
+            </p>
+          </div>
+          {list.length > 0 && (
+            <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full font-medium shrink-0">
+              {list.length} ລາຍການ
+            </span>
+          )}
+        </div>
+
+        {loadingHistory ? (
+          <div className="py-8 text-center text-sm text-gray-400">ກຳລັງໂຫຼດຂໍ້ມູນ...</div>
+        ) : rows.length === 0 ? (
+          <div className="py-8 text-center text-sm text-gray-400">ຍັງບໍ່ມີປະຫວັດຄຳຂໍ</div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {rows.map((req) => {
+              const items = Array.isArray(req.items) ? req.items : [];
+              const totalQty = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
+              const badge = HISTORY_STATUS[req.status] || { text: req.status, cls: 'bg-gray-100 text-gray-600' };
+              const lines = decisionLines(req);
+              const expanded = expandedHistoryId === req._id;
+              const lastLine = lines[lines.length - 1];
+              const deptName = req.departmentId && typeof req.departmentId === 'object' ? req.departmentId.name : null;
+              return (
+                <div key={req._id} className="p-4">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedHistoryId(expanded ? null : req._id)}
+                    className="w-full flex items-start justify-between gap-4 text-left"
+                    aria-expanded={expanded}
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-gray-800">{req._id}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${badge.cls}`}>{badge.text}</span>
+                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">{totalQty} ຊິ້ນ</span>
+                        <SourceBadge req={req} />
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        {items.slice(0, 2).map((i, idx) => (
+                          <div key={idx}>• {i.name} (x{i.quantity})</div>
+                        ))}
+                        {items.length > 2 && <div className="text-gray-400">+ ອີກ {items.length - 2} ລາຍການ</div>}
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        ຜູ້ຂໍ: {requesterNameOf(req)}{deptName ? ` (ແຜນກ ${deptName})` : req.managerDepartmentId?.name ? ` (ພະແນກ ${req.managerDepartmentId.name})` : ''} · ຍື່ນ: {fmtDate(req.createdAt)}
+                      </p>
+                      {lastLine && (
+                        <p className={`text-xs ${lastLine.ok ? 'text-emerald-700' : 'text-red-600'}`}>
+                          {lastLine.text}
+                          {lastLine.reason ? ` — ${lastLine.reason}` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronDown
+                      size={18}
+                      className={`shrink-0 text-gray-300 mt-1 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+
+                  {expanded && (
+                    <div className="mt-3 ml-1 pl-4 border-l-2 border-gray-100 space-y-3 text-xs text-gray-600">
+                      <div>
+                        <div className="text-[11px] text-gray-400 mb-1">ລາຍການທີ່ຂໍ</div>
+                        {items.map((i, idx) => (
+                          <div key={idx}>• {i.name} (x{i.quantity}){i.reason ? ` — ${i.reason}` : ''}</div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+                        <div>ວັນທີ-ເວລາຍື່ນ: {fmtDateTime(req.createdAt)}</div>
+                        <div>ອັບເດດຫຼ້າສຸດ: {fmtDateTime(req.updatedAt)}</div>
+                        {req.custodianId && <div>ຜູ້ຮັບຜິດຊອບ: {personOf(req.custodianId)}</div>}
+                        {req.delegateId && <div>ຜູ້ຮັບແທນ: {personOf(req.delegateId)}</div>}
+                      </div>
+                      {lines.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="text-[11px] text-gray-400">ຂັ້ນຕອນການອະນຸມັດ</div>
+                          {lines.map((l, idx) => (
+                            <div key={idx} className={l.ok ? 'text-emerald-700' : 'text-red-600'}>
+                              {l.ok ? '✓' : '✗'} {l.text}
+                              {l.reason ? ` — ເຫດຜົນ: ${l.reason}` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {list.length > shown && (
+          <button
+            type="button"
+            onClick={() => setHistoryShown((prev) => ({ ...prev, [kind]: shown + 10 }))}
+            className="w-full py-3 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 border-t border-gray-100 transition"
+          >
+            ສະແດງເພີ່ມ ({list.length - shown} ລາຍການ)
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1749,6 +1935,8 @@ export default function AssetManagement() {
         </div>
         )}
 
+        {activeTab === 'manager' && <div className="mt-6">{renderHistoryBox('manager', managerHistory)}</div>}
+
         {activeTab === 'pending' && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-gray-100 flex items-center justify-between">
@@ -1774,6 +1962,8 @@ export default function AssetManagement() {
           )}
         </div>
         )}
+
+        {activeTab === 'pending' && <div className="mt-6">{renderHistoryBox('pending', warehouseHistory)}</div>}
 
         {activeTab === 'catalog' && (
         <div className="space-y-4">
